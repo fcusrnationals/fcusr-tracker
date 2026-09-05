@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- This page is allowed to reach the two backends being compared. The main app
+     (index.html) stays locked down to 'self'. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self';
+  style-src 'self' 'unsafe-inline';
+  img-src 'self' data:;
+  font-src 'self';
+  connect-src 'self' https://*.supabase.co https://script.google.com https://script.googleusercontent.com;
+  base-uri 'none';
+  form-action 'none'">
+<title>Backend comparison · FCUSR</title>
+<link rel="stylesheet" href="assets/css/app.css?v=3">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23C9A227'/%3E%3Cpath d='M16 7l8 15H8z' fill='%23FFF'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar-inner">
+    <span class="emblem" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M12 3.5 21 20H3z" fill="#C9A227"/></svg>
+    </span>
+    <span class="brand-name">Backend comparison</span>
+  </div>
+</header>
+
+<main id="view">
+  <div class="page-head">
+    <div>
+      <h1>Try both, then choose</h1>
+      <div class="sub">Same actions, same order, timed. Run it on your phone as well as a laptop.</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="field-label">Backend</div>
+    <div class="segmented" style="width:100%;margin-bottom:12px">
+      <button type="button" data-driver="supabase">Supabase</button>
+      <button type="button" data-driver="appsscript">Apps Script</button>
+      <button type="button" data-driver="local">This browser</button>
+    </div>
+    <p class="small muted" id="driver-note" style="margin:0"></p>
+  </div>
+
+  <div class="card" style="margin-bottom:14px">
+    <div class="field-label">Sign in</div>
+    <div id="cred-fields">
+      <div class="field">
+        <label for="email">Email</label>
+        <input type="text" id="email" autocomplete="username" placeholder="you@example.com">
+      </div>
+      <div class="field" id="pw-field">
+        <label for="password">Password</label>
+        <input type="text" id="password" autocomplete="off" placeholder="your password">
+        <div class="hint">Plain text on purpose — this is a throwaway test account, not your real one.</div>
+      </div>
+    </div>
+    <div class="row">
+      <button type="button" class="btn btn-primary" id="run">Run the checks</button>
+      <button type="button" class="btn" id="clear">Clear</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head"><h2>Results</h2><span class="section-note" id="total"></span></div>
+    <div class="list" id="results">
+      <div class="task"><span class="task-main"><span class="task-meta">Nothing run yet.</span></span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="strong" style="margin-bottom:6px">What to compare</div>
+    <ul class="small muted" style="padding-left:18px;line-height:1.8;margin:0">
+      <li><strong>Speed</strong> — look at the milliseconds, especially on mobile data.</li>
+      <li><strong>Sign-in</strong> — Supabase asks for a password it manages. Apps Script uses the Google account you are already signed in with, so there is no password for the app to store.</li>
+      <li><strong>Enrolment rules</strong> — both refuse the same things. Try enrolling an officer while signed in as a province head; both should stop you with the same message.</li>
+    </ul>
+  </div>
+</main>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script src="assets/js/util.js?v=3"></script>
+<script src="assets/js/backend/config.js?v=3"></script>
+<script src="assets/js/backend/backend.js?v=3"></script>
+<script src="assets/js/spike.js?v=3"></script>
+</body>
+</html>

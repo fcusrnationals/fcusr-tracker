@@ -1,0 +1,98 @@
+/* Screenshots every screen at a given width and reports layout faults:
+   horizontal overflow and touch targets under 44px.
+
+       npm install puppeteer-core          (once)
+       python3 -m http.server 4399         (in the project folder)
+       node tests/screens.js 390 844 m     (phone)
+       node tests/screens.js 1280 900 d    (desktop)
+
+   Images land in tests/out/.
+*/
+const fs = require('fs');
+const path = require('path');
+const puppeteer = require('puppeteer-core');
+
+const CHROME = process.env.CHROME_PATH ||
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const BASE = process.env.BASE_URL || 'http://localhost:4399/';
+const OUT = path.join(__dirname, 'out');
+
+const SCREENS = [
+  ['dashboard', '#/dashboard'],
+  ['mytasks', '#/my-tasks'],
+  ['events', '#/events'],
+  ['letters', '#/letters'],
+  ['detail', null],
+  ['settings', '#/settings']
+];
+
+(async () => {
+  fs.mkdirSync(OUT, { recursive: true });
+  const width = Number(process.argv[2] || 390);
+  const height = Number(process.argv[3] || 844);
+  const tag = process.argv[4] || 'm';
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME, headless: 'new', args: ['--hide-scrollbars']
+  });
+  const page = await browser.newPage();
+  await page.setViewport({ width, height, deviceScaleFactor: 2 });
+
+  await page.goto(BASE, { waitUntil: 'networkidle0' });
+  const eventId = await page.evaluate(() => {
+    Store.setLastPerson(Store.people()[0].id);
+    return Store.events().find((e) => e.title.startsWith('Foundation')).id;
+  });
+
+  let faults = 0;
+  for (const [name, hash] of SCREENS) {
+    await page.goto(BASE + (hash || '#/events/' + eventId), { waitUntil: 'networkidle0' });
+    await new Promise((r) => setTimeout(r, 250));
+
+    const report = await page.evaluate(() => {
+      const doc = document.documentElement;
+      const vw = doc.clientWidth;
+      const wide = [];
+      document.querySelectorAll('body *').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (!r.width || getComputedStyle(el).position === 'fixed') return;
+        if (r.right > vw + 1) {
+          wide.push(el.tagName.toLowerCase() + '.' +
+            String(el.className || '').trim().split(/\s+/).slice(0, 2).join('.') +
+            ' right=' + Math.round(r.right));
+        }
+      });
+      // Effective hit area, so an invisible ::before that enlarges a target counts.
+      const small = [];
+      document.querySelectorAll('button, a, select, input').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height || r.height >= 43.5) return;
+        const cx = Math.round(r.left + r.width / 2), cy = r.top + r.height / 2;
+        const hits = (y) => {
+          if (y < 0 || y > innerHeight) return true;
+          const h = document.elementFromPoint(cx, y);
+          return !!h && (h === el || el.contains(h) || h.contains(el));
+        };
+        if (!hits(cy - 21) || !hits(cy + 21)) {
+          small.push(el.tagName.toLowerCase() + '.' +
+            String(el.className || '').trim().split(/\s+/).slice(0, 2).join('.') +
+            ' h=' + Math.round(r.height) + ' "' + (el.textContent || '').trim().slice(0, 20) + '"');
+        }
+      });
+      return { vw, sw: doc.scrollWidth, wide: wide.slice(0, 6), small: small.slice(0, 6) };
+    });
+
+    const bad = report.sw > report.vw || report.wide.length || report.small.length;
+    if (bad) faults++;
+    console.log((bad ? 'FAULT ' : '  ok  ') + name + '  (viewport ' + report.vw +
+      ', scrollWidth ' + report.sw + ')');
+    report.wide.forEach((w) => console.log('        overflows: ' + w));
+    report.small.forEach((s) => console.log('        small target: ' + s));
+
+    await page.screenshot({ path: path.join(OUT, tag + '-' + name + '.png'), fullPage: true });
+  }
+
+  await browser.close();
+  console.log(faults ? '\n' + faults + ' screen(s) with faults' : '\nAll screens clean.');
+  process.exit(faults ? 1 : 0);
+})();

@@ -1,0 +1,1131 @@
+/* FCUSR Task Tracker — screen styles.
+   Gold on white, Montserrat, whitespace instead of borders.
+
+   Two rules keep this simple:
+   1. A task is always the same row component, everywhere. No tables.
+      (Tables needed horizontal scroll, which broke sticky headers and phones.)
+   2. Only the tab strip is sticky — 48px, not 104px. */
+
+@font-face {
+  font-family: 'Montserrat'; font-style: normal; font-weight: 400; font-display: swap;
+  src: url('../fonts/montserrat-latin-400-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat'; font-style: normal; font-weight: 500; font-display: swap;
+  src: url('../fonts/montserrat-latin-500-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat'; font-style: normal; font-weight: 600; font-display: swap;
+  src: url('../fonts/montserrat-latin-600-normal.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Montserrat'; font-style: normal; font-weight: 700; font-display: swap;
+  src: url('../fonts/montserrat-latin-700-normal.woff2') format('woff2');
+}
+
+:root {
+  --gold-700: #7E6210;
+  --gold-600: #A6821A;
+  --gold-500: #C9A227;
+  --gold-400: #DFC163;
+  --gold-300: #EBD9A0;
+  --gold-100: #FAF3DF;
+  --gold-50:  #FDFAF1;
+
+  --ink:   #1A1A17;
+  --ink-2: #55534C;
+  --muted: #7A776E;
+  --faint: #A09C92;
+
+  /* The ground is the Hub's cream rather than a neutral grey, so the two sites
+     read as one institution. Every token keeps its name; only the values moved. */
+  --bg:      #FDFAF4;
+  --surface: #FFFFFF;
+  --line:    #EAE5DA;
+  --line-2:  #F4F0E6;
+
+  /* Status — the same values are used in the printed report. */
+  --st-notstarted-fg: #4B5563; --st-notstarted-bg: #F2F2F0; --st-notstarted-bd: #D6D6D1;
+  --st-inprogress-fg: #1D4ED8; --st-inprogress-bg: #E9EFFD; --st-inprogress-bd: #C2D4F7;
+  --st-forreview-fg:  #9A5309; --st-forreview-bg:  #FCF2E3; --st-forreview-bd:  #F0D7B0;
+  --st-done-fg:       #156D3B; --st-done-bg:       #E6F4EA; --st-done-bd:       #BDE0C7;
+  --st-on-hold-fg:    #B93E12; --st-on-hold-bg:    #FDECE3; --st-on-hold-bd:    #F5CDB6;
+  --st-overdue-fg:    #C42121; --st-overdue-bg:    #FDEAEA; --st-overdue-bd:    #F4C3C3;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --nav-h: 48px;
+  --font: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+
+  /* Depth is carried by two soft shadows rather than heavy borders. */
+  --sh-1: 0 1px 2px rgba(28, 25, 15, .04);
+  --sh-2: 0 1px 2px rgba(28, 25, 15, .04), 0 6px 16px rgba(28, 25, 15, .06);
+  --sh-3: 0 2px 4px rgba(28, 25, 15, .05), 0 12px 28px rgba(28, 25, 15, .10);
+
+  /* Officer colours. Assigned by name so a person keeps the same colour
+     everywhere — it turns a wall of text into something you can scan. */
+  --who-0: #B08424; --who-1: #3F7CB1; --who-2: #3F8F6E; --who-3: #8A6BAF;
+  --who-4: #B4585C; --who-5: #A9662F; --who-6: #55796B; --who-7: #97567F;
+}
+
+* { box-sizing: border-box; }
+
+/* The browser's own [hidden] rule is display:none, which any class that sets
+   display (.row, .list, .segmented …) silently beats. Without this, hiding an
+   element with the attribute does nothing wherever a layout class is present. */
+[hidden] { display: none !important; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Anchor jumps must clear the sticky tab strip. */
+  scroll-padding-top: calc(var(--nav-h) + 14px);
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Locking scroll behind a dialog needs both elements to hold on iOS Safari. */
+html.is-locked, html.is-locked body { overflow: hidden; }
+
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.015em; line-height: 1.25; }
+h1 { font-size: 24px; }
+h2 { font-size: 17px; }
+h3 { font-size: 15px; }
+p { margin: 0 0 10px; }
+a { color: var(--gold-700); }
+
+:focus-visible { outline: 2px solid var(--gold-600); outline-offset: 2px; border-radius: 5px; }
+
+/* The router moves focus here on navigation so screen readers land in the new
+   screen. That is not a visible target, so it must not paint a ring round the page. */
+#view:focus, #view:focus-visible { outline: none; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.skip-link {
+  position: absolute; left: 12px; top: -60px; z-index: 200;
+  background: var(--surface); padding: 10px 14px; color: var(--ink);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+}
+.skip-link:focus { top: 10px; }
+
+/* ---------- shell ---------- */
+
+/* The brand row scrolls away; only the tabs stay. */
+.appbar { background: var(--surface); border-bottom: 1px solid var(--line-2); }
+.appbar-inner {
+  max-width: 940px; margin: 0 auto; padding: 0 16px;
+  height: 56px; display: flex; align-items: center; gap: 11px;
+}
+
+/* The seal carries its own gold triangle, so the slot behind it stays out of
+   the way. The framed version is still used for the upload preview in Settings. */
+.brand .emblem { background: transparent; border: 0; }
+.emblem {
+  width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center;
+  border-radius: 8px; overflow: hidden; background: var(--gold-100); border: 1px solid var(--gold-300);
+}
+.emblem img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.emblem svg { width: 19px; height: 19px; display: block; }
+
+.brand {
+  display: flex; align-items: center; gap: 10px; min-height: 44px;
+  text-decoration: none; color: inherit; min-width: 0;
+}
+.brand-name {
+  font-weight: 700; font-size: 15px; letter-spacing: -0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.appbar-spacer { flex: 1; }
+
+.icon-btn {
+  width: 44px; height: 44px; display: grid; place-items: center;
+  border: 0; background: transparent; border-radius: 10px; color: var(--ink-2); cursor: pointer;
+}
+.icon-btn:hover { background: var(--gold-50); color: var(--gold-700); }
+.icon-btn svg { width: 19px; height: 19px; }
+.icon-btn.is-active { background: var(--gold-100); color: var(--gold-700); }
+
+.tabs {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(255,255,255,.94);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.tabs-inner { max-width: 940px; margin: 0 auto; padding: 0 16px; display: flex; gap: 2px; }
+
+.tab {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: var(--nav-h); padding: 0 10px;
+  font-size: 14px; font-weight: 500; color: var(--muted);
+  text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent;
+}
+.tab:hover { color: var(--ink); }
+.tab.is-active { color: var(--gold-700); font-weight: 600; border-bottom-color: var(--gold-500); }
+.tab svg { width: 17px; height: 17px; flex: 0 0 17px; }
+.tab .count {
+  font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  background: var(--st-overdue-bg); color: var(--st-overdue-fg);
+}
+
+main { max-width: 940px; margin: 0 auto; padding: 20px 16px 80px; }
+
+.page-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.page-head > div { min-width: 0; }
+.page-head > .row { margin-left: auto; }
+.page-head .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+/* Nothing may push the page wider than the screen. */
+.sep { opacity: .5; margin: 0 5px; }
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  min-height: 44px; padding: 10px 16px;
+  font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.2;
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+}
+.btn:hover { background: var(--gold-50); border-color: var(--gold-300); }
+.btn svg { width: 17px; height: 17px; flex: 0 0 17px; }
+.btn {
+  transition: background .13s ease, border-color .13s ease, box-shadow .13s ease, transform .08s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+  background: linear-gradient(170deg, var(--gold-400), var(--gold-500));
+  border-color: var(--gold-500); color: #241C02; box-shadow: var(--sh-1);
+}
+.btn-primary:hover {
+  background: linear-gradient(170deg, #E6CC7C, var(--gold-400));
+  border-color: var(--gold-400); box-shadow: var(--sh-2);
+}
+.btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--gold-50); }
+.btn-danger { color: var(--st-overdue-fg); border-color: var(--st-overdue-bd); }
+.btn-danger:hover { background: var(--st-overdue-bg); border-color: var(--st-overdue-fg); }
+.btn-sm { min-height: 36px; padding: 7px 12px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-block { width: 100%; }
+
+/* ---------- sections ---------- */
+
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 16px; box-shadow: var(--sh-1);
+}
+.section { margin-bottom: 24px; }
+.section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.section-head h2 { display: flex; align-items: center; gap: 8px; }
+.section-note { font-size: 12.5px; color: var(--muted); }
+/* When the note is a link it is a tap target, so it gets the full height. */
+a.section-note { display: inline-flex; align-items: center; min-height: 44px; padding: 0 2px; }
+
+/* ---------- greeting ---------- */
+
+.hero {
+  position: relative; overflow: hidden;
+  background: linear-gradient(135deg, #FFFDF6 0%, var(--gold-50) 55%, #FBF6E6 100%);
+  border: 1px solid var(--gold-300); border-radius: var(--radius);
+  padding: 18px 20px; margin-bottom: 14px; box-shadow: var(--sh-1);
+}
+.hero::after {                       /* faint emblem watermark */
+  content: ''; position: absolute; right: -18px; bottom: -34px; width: 130px; height: 130px;
+  background: no-repeat center/contain
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 3.5 21 20H3z' fill='%23C9A227'/%3E%3C/svg%3E");
+  opacity: .07; pointer-events: none;
+}
+.hero-date { font-size: 12.5px; font-weight: 600; color: var(--gold-700); letter-spacing: .03em; text-transform: uppercase; }
+.hero-line { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin-top: 5px; max-width: 30ch; }
+.hero-line .hl { color: var(--st-overdue-fg); }
+.hero-line .ok { color: var(--st-done-fg); }
+.hero-actions { margin-top: 14px; position: relative; z-index: 1; }
+
+/* ---------- filter pills (they double as the summary numbers) ---------- */
+
+.pills { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.pill {
+  flex: 1 1 0; min-width: 96px; min-height: 66px;
+  display: flex; flex-direction: column; justify-content: center; gap: 1px;
+  padding: 11px 13px; text-align: left;
+  font: inherit; color: inherit; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--sh-1);
+  transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease, background .14s ease;
+}
+.pill:hover { border-color: var(--gold-300); background: var(--gold-50); transform: translateY(-1px); box-shadow: var(--sh-2); }
+.pill:active { transform: translateY(0); }
+.pill .n { font-size: 25px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; }
+.pill .l { font-size: 12px; color: var(--muted); }
+.pill.is-active {
+  border-color: var(--gold-500); box-shadow: inset 0 0 0 1px var(--gold-500), var(--sh-2);
+  background: linear-gradient(160deg, #FFFDF4, var(--gold-100));
+}
+.pill.is-active .l { color: var(--gold-700); font-weight: 600; }
+.pill.alert .n { color: var(--st-overdue-fg); }
+.pill.alert.is-active {
+  border-color: var(--st-overdue-fg);
+  box-shadow: inset 0 0 0 1px var(--st-overdue-fg), var(--sh-2);
+  background: linear-gradient(160deg, #FFFBFB, var(--st-overdue-bg));
+}
+.pill.alert.is-active .l { color: var(--st-overdue-fg); }
+
+/* ---------- the task row: one component, used on every screen ---------- */
+
+.list {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden; box-shadow: var(--sh-1);
+}
+.list > * + * { border-top: 1px solid var(--line-2); }
+
+.task { display: flex; align-items: center; gap: 10px; padding: 4px 12px 4px 4px; transition: background .12s ease; }
+.task:hover { background: var(--gold-50); }
+
+/* A row flashes gold for a moment after its status changes, so the change is
+   visible even when the row is far from where you tapped. */
+@keyframes row-flash {
+  0%   { background: var(--gold-100); }
+  100% { background: transparent; }
+}
+.task.just-changed { animation: row-flash 1.1s ease-out; }
+
+/* Officer badge — same colour for the same person everywhere. */
+.who {
+  width: 26px; height: 26px; flex: 0 0 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 10px; font-weight: 700; color: #FFF; letter-spacing: .02em;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.28);
+}
+.who.w0 { background: var(--who-0); } .who.w1 { background: var(--who-1); }
+.who.w2 { background: var(--who-2); } .who.w3 { background: var(--who-3); }
+.who.w4 { background: var(--who-4); } .who.w5 { background: var(--who-5); }
+.who.w6 { background: var(--who-6); } .who.w7 { background: var(--who-7); }
+.who.none { background: #D6D6D1; color: var(--muted); box-shadow: none; }
+/* Overdue gets a red rail, not a red fill: on a list where every row is overdue,
+   a full tint just becomes a wall of red and stops meaning anything. */
+.task.is-overdue { box-shadow: inset 3px 0 0 var(--st-overdue-fg); }
+.task.is-overdue:hover { background: var(--st-overdue-bg); }
+.task.is-done .task-title { color: var(--muted); }
+
+.task-who { flex: 0 0 auto; padding-left: 8px; display: flex; align-items: center; }
+
+.task-main {
+  flex: 1; min-width: 0; display: block; text-align: left;
+  padding: 11px 8px; min-height: 44px;
+  font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.task-title {
+  display: block; font-size: 14.5px; font-weight: 600; color: var(--ink);
+  overflow-wrap: anywhere;
+}
+/* Two lines maximum, so rows stay a predictable height and the list stays
+   scannable. The full text is one tap away in the edit dialog. */
+.task-meta {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; font-size: 12.5px; color: var(--muted); margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+.task-meta .sep { opacity: .5; margin: 0 5px; }
+.task-meta .late { color: var(--st-overdue-fg); font-weight: 700; }
+
+.task-right { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+
+/* Priority reads as a dot before the title — a whole column was overkill. */
+.pri-dot {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  margin-right: 7px; vertical-align: 1px; flex: 0 0 7px;
+}
+.pri-dot.high { background: #B3261E; }
+.pri-dot.medium { background: var(--gold-500); }
+.pri-dot.low { background: #C8C8D0; }
+
+/* ---------- chips ---------- */
+
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; line-height: 1.5;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 6px; }
+
+.st-not-started { color: var(--st-notstarted-fg); background: var(--st-notstarted-bg); border-color: var(--st-notstarted-bd); }
+.st-in-progress { color: var(--st-inprogress-fg); background: var(--st-inprogress-bg); border-color: var(--st-inprogress-bd); }
+.st-for-review  { color: var(--st-forreview-fg);  background: var(--st-forreview-bg);  border-color: var(--st-forreview-bd); }
+.st-done        { color: var(--st-done-fg);       background: var(--st-done-bg);       border-color: var(--st-done-bd); }
+.st-on-hold     { color: var(--st-on-hold-fg);    background: var(--st-on-hold-bg);    border-color: var(--st-on-hold-bd); }
+.st-overdue     { color: var(--st-overdue-fg);    background: var(--st-overdue-bg);    border-color: var(--st-overdue-bd); }
+.chip-plain     { color: var(--ink-2); background: var(--bg); border-color: var(--line); }
+
+.chip-due { color: var(--ink-2); background: var(--bg); border-color: var(--line); }
+.chip-due.is-soon  { color: var(--st-forreview-fg); background: var(--st-forreview-bg); border-color: var(--st-forreview-bd); }
+.chip-due.is-today { color: var(--st-overdue-fg); background: var(--st-overdue-bg); border-color: var(--st-overdue-bd); }
+.chip-due.is-late  { color: var(--st-overdue-fg); background: var(--st-overdue-bg); border-color: var(--st-overdue-fg); }
+
+/* The most-used control in the app: tap the status chip, pick, done.
+   The chip stays chip-sized, but an invisible inset extends the tap area to the
+   44px floor — a 32px target is a miss on a phone. */
+.status-edit { position: relative; cursor: pointer; font-family: inherit; min-height: 32px; }
+.status-edit::before { content: ''; position: absolute; inset: -6px -4px; }
+.status-edit:hover { filter: brightness(.97); }
+.status-edit::after {
+  content: ''; width: 0; height: 0;
+  border-left: 3.5px solid transparent; border-right: 3.5px solid transparent;
+  border-top: 4px solid currentColor; opacity: .6;
+}
+
+/* ---------- progress ---------- */
+
+.progress { height: 6px; background: var(--line-2); border-radius: 999px; overflow: hidden; }
+.progress > span {
+  display: block; height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-400), var(--gold-500));
+  transition: width .45s cubic-bezier(.4, 0, .2, 1);
+}
+.progress.is-complete > span { background: linear-gradient(90deg, #2E9C5C, var(--st-done-fg)); }
+
+/* Progress ring — the event's health at a glance, in the space of an icon. */
+.ring { position: relative; width: 46px; height: 46px; flex: 0 0 46px; }
+.ring svg { width: 100%; height: 100%; transform: rotate(-90deg); display: block; }
+.ring .track { stroke: var(--line-2); }
+.ring .bar { stroke: var(--gold-500); stroke-linecap: round; transition: stroke-dashoffset .6s cubic-bezier(.4, 0, .2, 1); }
+.ring.is-complete .bar { stroke: var(--st-done-fg); }
+.ring.is-late .bar { stroke: var(--gold-500); }
+.ring .pctlabel {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; color: var(--ink-2); letter-spacing: -0.02em;
+}
+.ring.is-complete .pctlabel { color: var(--st-done-fg); }
+.progress-row { display: flex; align-items: center; gap: 10px; }
+.progress-row .progress { flex: 1; min-width: 60px; }
+.progress-label { font-size: 12.5px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+
+/* ---------- collapsible groups ---------- */
+
+.group { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.group + .group { margin-top: 10px; }
+.group-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 12px 14px; min-height: 52px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--line-2);
+  font: inherit; text-align: left; cursor: pointer; color: inherit;
+}
+.group-head:hover { background: var(--gold-50); }
+.group-head .caret { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); }
+.group[data-collapsed="true"] .caret { transform: rotate(-90deg); }
+.group[data-collapsed="true"] .group-body { display: none; }
+.group[data-collapsed="true"] .group-head { border-bottom: 0; }
+.group-title { font-weight: 600; font-size: 14.5px; min-width: 0; }
+.group-meta { margin-left: auto; font-size: 12.5px; color: var(--muted); font-weight: 500; text-align: right; }
+.group-meta .late { color: var(--st-overdue-fg); font-weight: 700; }
+.group-body .list { border: 0; border-radius: 0; }
+
+/* ---------- event rows ---------- */
+
+.event-row {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  padding: 13px 14px; min-height: 44px;
+  background: transparent; border: 0; font: inherit; text-align: left; cursor: pointer; color: inherit;
+  transition: background .12s ease;
+}
+.event-row:hover { background: var(--gold-50); }
+.event-row .er-main { flex: 1; min-width: 0; }
+/* These are spans inside a button, so they need to be told to be blocks —
+   left inline they never wrap and drag the whole page wider than the screen. */
+.event-row .er-title {
+  display: block; font-weight: 600; font-size: 15px; overflow-wrap: anywhere;
+}
+.event-row .er-meta {
+  display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere;
+}
+.event-row .er-prog { flex: 0 0 152px; }
+.event-row .er-chips { display: flex; gap: 6px; flex: 0 0 auto; }
+
+/* A unit's roll-up row is an event row with the ring reading the unit's whole
+   workload instead of one activity's. Slightly tighter, so a long list of
+   colleges stays scannable on a phone. */
+.unit-row { padding: 10px 14px; gap: 12px; }
+.unit-row .ring { width: 38px; height: 38px; flex: 0 0 38px; }
+.unit-row .ring .pctlabel { font-size: 9.5px; }
+
+/* The short code a unit is known by — CN, CCJE — set beside its name so the
+   eye finds the college before it reads the words. */
+.unit-code {
+  display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--gold-700); background: var(--gold-100); border: 1px solid var(--gold-300);
+  border-radius: 5px; padding: 1px 5px; margin-right: 7px; white-space: nowrap;
+}
+
+/* Shown on another unit's work: everything is readable, nothing is pressable. */
+.readonly-note {
+  display: flex; gap: 9px; align-items: flex-start; margin-top: 12px;
+  padding: 10px 12px; border-radius: var(--radius);
+  background: var(--gold-50); border: 1px solid var(--gold-300);
+  font-size: 13px; color: var(--ink-2); line-height: 1.55;
+}
+.readonly-note svg { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 2px; color: var(--gold-700); }
+
+.tb-actions { margin-top: 12px; }
+
+/* The promise that the archive outlives the officers who made it. */
+.drive-vouch {
+  align-items: flex-start; gap: 10px; margin: 4px 0 14px; padding: 12px;
+  border-radius: 12px; background: var(--gold-50); border: 1px solid var(--gold-300);
+}
+.drive-vouch input { margin-top: 1px; }
+
+/* ---------- the campus behind a gold wash ----------
+   Lifted from the FCUSR Hub so the two read as one institution: the College of
+   Arts and Sciences building under a heavy diagonal wash, weighted to the left
+   where the words sit, fading into the page below so the join is never a seam.
+
+   The photograph is decoration. Every word over it is real text, so it stays
+   selectable, searchable and readable to a screen reader — and if the picture
+   fails to load the block is still a dark gold panel with legible type on it. */
+.photo-hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  background: #3A2504;
+  border-radius: var(--radius); margin-bottom: 14px;
+  box-shadow: var(--sh-2);
+}
+.photo-hero-img {
+  position: absolute; inset: 0; z-index: 0;
+  width: 100%; height: 100%; object-fit: cover; object-position: center 62%;
+}
+/* The wash: heavy where the copy is, lighter towards the right. */
+.photo-hero::before {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  background:
+    linear-gradient(104deg,
+      rgb(40 25 2 / 0.95) 0%,
+      rgb(52 33 3 / 0.88) 34%,
+      rgb(74 48 6 / 0.70) 62%,
+      rgb(104 70 12 / 0.54) 100%),
+    linear-gradient(0deg, rgb(58 37 4 / 0.30), rgb(58 37 4 / 0.30));
+}
+.photo-hero-body { position: relative; z-index: 2; padding: 22px 20px; }
+
+.photo-hero .hero-date {
+  color: var(--gold-300); font-size: 12px; font-weight: 700;
+  letter-spacing: .07em; text-transform: uppercase;
+}
+.photo-hero .hero-line {
+  color: #FFF; font-size: 23px; font-weight: 700; letter-spacing: -0.02em;
+  margin-top: 7px; max-width: 24ch; text-shadow: 0 1px 12px rgb(26 16 1 / .45);
+}
+/* The two states that carry meaning have to survive being placed on a dark
+   ground, so they are lightened rather than left at their on-white values. */
+.photo-hero .hero-line .hl { color: #FFB4A8; }
+.photo-hero .hero-line .ok { color: #A7E8BF; }
+.photo-hero .hero-actions { margin-top: 16px; }
+
+/* A button that sits on a photograph without a card behind it. */
+.btn-glass {
+  background: rgb(255 255 255 / .14); border: 1px solid rgb(255 255 255 / .38);
+  color: #FFF; backdrop-filter: blur(6px);
+}
+.btn-glass:hover { background: rgb(255 255 255 / .22); border-color: rgb(255 255 255 / .55); }
+.btn-glass svg { color: #FFF; }
+
+/* ---------- the front door ----------
+   Shown in place of the whole app when nobody is signed in. The navigation and
+   the header controls go with it: there is nothing behind them to reach, and a
+   row of dead tabs above a login box only invites people to press them. */
+body.is-gated .tabs,
+body.is-gated #btn-search,
+body.is-gated #btn-settings { display: none !important; }
+body.is-gated main { padding-bottom: 32px; }
+
+.gate {
+  position: relative; isolation: isolate;
+  min-height: calc(100vh - 120px);
+  display: flex; align-items: center; justify-content: center; padding: 8px 0 32px;
+}
+/* The same campus photograph as the Overview, pushed right back so the card
+   reads cleanly over it — the front door should look like the same building. */
+.gate-photo {
+  position: fixed; inset: 0; z-index: -2;
+  width: 100%; height: 100%; object-fit: cover; object-position: center 62%;
+}
+.gate::before {
+  content: ""; position: fixed; inset: 0; z-index: -1;
+  background:
+    linear-gradient(180deg, rgb(253 250 244 / .74) 0%, rgb(253 250 244 / .90) 42%,
+      rgb(253 250 244 / .97) 78%, var(--bg) 100%);
+}
+.gate-card {
+  width: 100%; max-width: 400px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
+  padding: 28px 22px 22px; box-shadow: var(--sh-2);
+}
+.gate-brand { text-align: center; margin-bottom: 22px; }
+.gate-seal { width: 76px; height: 76px; display: block; margin: 0 auto 12px; }
+.gate-name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
+.gate-org {
+  font-size: 10.5px; color: var(--muted); margin-top: 5px;
+  text-transform: uppercase; letter-spacing: .05em; line-height: 1.5;
+  max-width: 30ch; margin-left: auto; margin-right: auto;
+}
+
+.gate-note {
+  display: flex; gap: 9px; align-items: flex-start; margin-bottom: 18px;
+  padding: 11px 12px; border-radius: 12px;
+  background: var(--gold-50); border: 1px solid var(--gold-300);
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.55;
+}
+.gate-note svg { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 2px; color: var(--gold-700); }
+
+.gate-modes { width: 100%; margin-bottom: 18px; }
+.gate-modes button { flex: 1; }
+
+.gate-card .field { margin-bottom: 16px; }
+.gate-card input { min-height: 48px; font-size: 16px; }   /* 16px stops iOS zooming in */
+.gate-go { min-height: 50px; font-size: 15px; margin-top: 4px; }
+
+.gate-foot {
+  font-size: 12.5px; color: var(--muted); line-height: 1.6;
+  margin: 16px 0 0; text-align: center;
+}
+
+@media (max-width: 700px) {
+  .gate { min-height: calc(100vh - 96px); align-items: flex-start; padding-top: 12px; }
+  .gate-card { border: 0; box-shadow: none; background: transparent; padding: 8px 0 0; }
+}
+
+/* ---------- sections within a screen ----------
+   Tasks, letters and volunteers used to stack down one long page, which on a
+   phone put the volunteers four screens below the tasks. As tabs they are all
+   one tap away, and each one gets the whole screen. */
+.sub-tabs {
+  display: flex; gap: 4px; margin: 0 0 16px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.sub-tabs::-webkit-scrollbar { display: none; }
+.sub-tab {
+  flex: 1 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; padding: 0 14px; border: 0; border-radius: 9px;
+  background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 500;
+  cursor: pointer; white-space: nowrap; transition: background .12s ease, color .12s ease;
+}
+.sub-tab:hover { color: var(--ink); }
+.sub-tab.is-active {
+  background: var(--surface); color: var(--gold-700); font-weight: 600;
+  box-shadow: var(--sh-1);
+}
+.sub-tab .st-n {
+  font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  background: var(--line-2); color: var(--ink-2);
+}
+.sub-tab.is-active .st-n { background: var(--gold-100); color: var(--gold-700); }
+
+/* ---------- letters ---------- */
+
+/* The one sentence that matters, said loudly enough that nobody has to read the
+   trail to find out where the letter actually is. */
+.where-now {
+  margin-top: 14px; padding: 12px 14px; border-radius: var(--radius);
+  background: var(--gold-50); border: 1px solid var(--gold-300);
+}
+.where-now.is-alert { background: var(--st-overdue-bg); border-color: var(--st-overdue-bd); }
+.wn-label {
+  display: block; font-size: 11px; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--gold-700);
+}
+.where-now.is-alert .wn-label { color: var(--st-overdue-fg); }
+.wn-line { display: block; font-size: 16px; font-weight: 600; margin-top: 3px; overflow-wrap: anywhere; }
+.wn-note { display: block; font-size: 12.5px; color: var(--muted); margin-top: 5px; }
+.where-now.is-alert .wn-note { color: var(--st-overdue-fg); }
+
+/* The trail: offices in order, joined by a line so it reads as one journey
+   rather than a stack of unrelated cards. */
+.trail { list-style: none; margin: 0; padding: 0; }
+.trail-stop { position: relative; display: flex; gap: 12px; padding: 0 0 18px 0; }
+.trail-stop::before {                     /* the line joining one office to the next */
+  content: ""; position: absolute; left: 13px; top: 28px; bottom: 0;
+  width: 2px; background: var(--line-2);
+}
+.trail-stop:last-child { padding-bottom: 0; }
+.trail-stop:last-child::before { display: none; }
+
+.ts-mark {
+  flex: 0 0 28px; width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 12px; font-weight: 700;
+  background: var(--surface); border: 2px solid var(--line-2); color: var(--muted);
+  position: relative; z-index: 1;
+}
+.ts-mark svg { width: 14px; height: 14px; }
+.trail-stop.is-released .ts-mark {
+  background: var(--st-done-bg); border-color: var(--st-done-fg); color: var(--st-done-fg);
+}
+.trail-stop.is-received .ts-mark,
+.trail-stop.is-current .ts-mark {
+  background: var(--gold-100); border-color: var(--gold-500); color: var(--gold-700);
+}
+.trail-stop.is-returned .ts-mark {
+  background: var(--st-overdue-bg); border-color: var(--st-overdue-fg); color: var(--st-overdue-fg);
+}
+/* Noted is not signed, so it does not get the tick. */
+.trail-stop.is-noted .ts-mark {
+  background: var(--st-forreview-bg); border-color: var(--st-forreview-fg); color: var(--st-forreview-fg);
+}
+/* The same desk a second time, after it sent the letter back. */
+.trail-stop.is-repeat .ts-office { color: var(--ink-2); }
+
+.ts-body { flex: 1; min-width: 0; padding-top: 3px; }
+.ts-office { font-weight: 600; font-size: 15px; overflow-wrap: anywhere; }
+.ts-lines { font-size: 13px; color: var(--ink-2); margin-top: 3px; line-height: 1.6; overflow-wrap: anywhere; }
+.ts-actions { margin-top: 8px; }
+.trail-stop.is-waiting .ts-office { color: var(--muted); font-weight: 500; }
+
+/* Choosing the route when a letter is created. */
+.route-pick { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; }
+.route-pick li {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+  border-bottom: 1px solid var(--line-2);
+}
+.route-pick li:last-child { border-bottom: 0; }
+.route-pick li.is-locked { background: var(--gold-50); }
+.rp-n {
+  flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--bg); border: 1px solid var(--line); font-size: 11px; font-weight: 700; color: var(--muted);
+}
+.rp-name { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.rp-bar { display: flex; gap: 2px; flex: 0 0 auto; }
+.rp-bar .btn { min-height: 34px; padding: 4px 8px; }
+
+/* ---------- segmented control ---------- */
+
+.segmented {
+  display: inline-flex; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 3px; gap: 2px;
+}
+.segmented button {
+  min-height: 36px; padding: 6px 14px; font: inherit; font-size: 13px; font-weight: 600;
+  background: transparent; border: 0; border-radius: 7px; color: var(--muted); cursor: pointer;
+}
+.segmented button.is-active { background: var(--surface); color: var(--gold-700); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+
+/* A grouping control is a preference, not an action, so it should never take a
+   whole row to itself the way it did when the section head wrapped on a phone —
+   two full-width bars stacked on each other read as one heavy block.
+
+   The width is spelled out because the small-screen rule further down stretches
+   every segmented control to fill its line. That is right for the ones inside a
+   dialog and wrong for this one, and being more specific is not enough on its
+   own when the property in question was never set here. */
+.section-head .segmented { flex: 0 0 auto; margin-left: auto; width: auto; }
+.section-head .segmented button { flex: 0 0 auto; padding: 0 14px; font-size: 13px; }
+
+/* ---------- person bar ---------- */
+
+.person-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--gold-50); border: 1px solid var(--gold-300);
+  border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
+}
+.avatar {
+  width: 42px; height: 42px; border-radius: 50%; flex: 0 0 42px;
+  display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  background: var(--gold-500); color: #241C02;
+}
+.person-name { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+.person-role { font-size: 12.5px; color: var(--muted); }
+
+/* ---------- forms ---------- */
+
+.field { margin-bottom: 14px; }
+.field > label, .field-label {
+  display: block; font-size: 13px; font-weight: 600; color: var(--ink-2); margin-bottom: 5px;
+}
+.field .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.field .req { color: var(--st-overdue-fg); }
+
+input[type="text"], input[type="date"], input[type="search"], select, textarea {
+  width: 100%; min-height: 44px; padding: 10px 12px;
+  font-family: inherit; font-size: 16px; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; appearance: none;
+}
+textarea { min-height: 72px; resize: vertical; }
+select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' stroke='%2371717F' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 11px;
+  padding-right: 34px;
+}
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--gold-600); outline-offset: 1px; border-color: var(--gold-500); }
+input::placeholder, textarea::placeholder { color: var(--faint); }
+.field.has-error input, .field.has-error select { border-color: var(--st-overdue-fg); }
+.field .error-text { font-size: 12px; color: var(--st-overdue-fg); margin-top: 4px; font-weight: 600; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.checkbox { display: flex; align-items: flex-start; gap: 9px; font-size: 14px; cursor: pointer; }
+.checkbox input { width: 20px; height: 20px; min-height: 0; margin: 2px 0 0; accent-color: var(--gold-600); flex: 0 0 20px; }
+
+.search-wrap { position: relative; }
+.search-wrap svg {
+  position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+  width: 16px; height: 16px; color: var(--faint); pointer-events: none;
+}
+.search-wrap input { padding-left: 35px; }
+
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.toolbar .grow { flex: 1 1 200px; }
+.toolbar select, .toolbar input { min-height: 42px; font-size: 14px; }
+
+/* ---------- the closing of the term ----------
+   Stands above everything on the Overview for as long as a term is declared, and
+   turns urgent inside the last fortnight. It is a notice, not an alarm: the work
+   underneath it carries on either way. */
+.term-banner {
+  border: 1px solid var(--gold-300); background: linear-gradient(160deg, #FFFDF6, var(--gold-100));
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 18px;
+}
+.term-banner.is-urgent { border-color: var(--st-overdue-bd); background: linear-gradient(160deg, #FFF8F7, var(--st-overdue-bg)); }
+.term-banner .tb-head { display: flex; align-items: flex-start; gap: 9px; font-size: 15px; }
+.term-banner .tb-head svg { width: 18px; height: 18px; flex: 0 0 18px; margin-top: 1px; color: var(--gold-700); }
+.term-banner.is-urgent .tb-head svg { color: var(--st-overdue-fg); }
+.term-banner .tb-body { font-size: 13px; margin-top: 8px; }
+.term-banner .tb-body.ok { color: var(--st-done-fg); font-weight: 600; }
+.term-banner .tb-body.muted { color: var(--muted); }
+.term-banner .tb-list { margin: 6px 0 0; padding-left: 18px; line-height: 1.8; }
+.term-banner .tb-note {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--gold-300);
+  font-size: 12.5px; color: var(--ink-2);
+}
+
+/* A button that reads as a link — used where a sentence names something you can open. */
+.linkish {
+  background: none; border: 0; padding: 0; font: inherit; color: var(--gold-700);
+  text-decoration: underline; cursor: pointer; text-align: left;
+}
+.linkish:hover { color: var(--gold-600); }
+
+/* ---------- empty states ---------- */
+
+.empty {
+  text-align: center; padding: 34px 22px; color: var(--muted);
+  border: 1px dashed var(--gold-300); border-radius: var(--radius);
+  background: linear-gradient(170deg, #FFFEFA, var(--gold-50));
+}
+.empty .art { width: 60px; height: 60px; margin: 0 auto 12px; color: var(--gold-400); opacity: .9; }
+.empty .art svg { width: 100%; height: 100%; }
+.empty strong { display: block; color: var(--ink); font-weight: 700; font-size: 15px; margin-bottom: 4px; }
+.empty p { margin-bottom: 14px; max-width: 40ch; margin-left: auto; margin-right: auto; }
+
+/* ---------- modal ---------- */
+
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100; background: rgba(23,23,27,.42);
+  display: grid; place-items: center; padding: 14px;
+}
+.modal {
+  background: var(--surface); border-radius: 16px; width: min(540px, 100%);
+  /* `width` is not a ceiling — wide content can still push the box past the
+     screen edge. max-width is what actually pins it inside the viewport. */
+  max-width: calc(100vw - 28px);
+  max-height: calc(100dvh - 32px); display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(23,23,27,.22);
+}
+.modal.wide { width: min(760px, 100%); }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 16px 18px 12px; border-bottom: 1px solid var(--line-2);
+}
+.modal-head h2 { font-size: 17px; }
+.modal-body {
+  padding: 16px 18px; overflow-y: auto; min-width: 0;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+.modal-foot {
+  display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap;
+  padding: 12px 18px 16px; border-top: 1px solid var(--line-2);
+}
+.modal-foot .left { margin-right: auto; }
+
+/* ---------- popup menu ---------- */
+
+.menu {
+  position: fixed; z-index: 120; min-width: 196px; padding: 5px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(23,23,27,.18);
+}
+.menu button {
+  display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px;
+  padding: 8px 10px; font: inherit; font-size: 14px; text-align: left;
+  background: transparent; border: 0; border-radius: 8px; cursor: pointer; color: var(--ink);
+}
+.menu button:hover { background: var(--gold-50); }
+.menu button[aria-checked="true"] { background: var(--gold-100); }
+.menu button.danger { color: var(--st-overdue-fg); }
+.menu .sep { height: 1px; background: var(--line-2); margin: 4px 2px; }
+
+/* ---------- toast ---------- */
+
+.toasts {
+  position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 200;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  pointer-events: none; width: min(440px, calc(100% - 24px));
+}
+.toast {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 12px 15px; border-radius: 11px; font-size: 14px; font-weight: 500;
+  background: #22222A; color: #FFF; box-shadow: var(--sh-3);
+  animation: toast-in .22s cubic-bezier(.2, .9, .3, 1.2);
+}
+.toast.error { background: #8F1D1D; }
+.toast.leaving { animation: toast-out .2s ease forwards; }
+.toast svg { width: 17px; height: 17px; flex: 0 0 17px; }
+.toast.success svg { color: #9BE6B4; }
+@keyframes toast-in  { from { opacity: 0; transform: translateY(14px) scale(.96); } }
+@keyframes toast-out { to   { opacity: 0; transform: translateY(8px); } }
+
+/* Dialogs settle in rather than snapping. */
+.modal-backdrop { animation: fade-in .13s ease; }
+.modal { animation: modal-in .17s cubic-bezier(.2, .9, .3, 1.05); }
+.menu  { animation: menu-in .12s ease; transform-origin: top left; }
+@keyframes fade-in  { from { opacity: 0; } }
+@keyframes modal-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+@keyframes menu-in  { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+
+/* ---------- misc ---------- */
+
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.tiny { font-size: 11.5px; }
+.strong { font-weight: 600; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.divider { height: 1px; background: var(--line-2); margin: 14px 0; }
+
+.breadcrumb {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+  font-size: 13px; color: var(--muted); text-decoration: none;
+}
+.breadcrumb:hover { color: var(--gold-700); }
+.breadcrumb svg { width: 15px; height: 15px; }
+
+.detail-head { margin-bottom: 18px; }
+.detail-head .page-head { align-items: flex-start; gap: 10px; }
+.detail-head .page-head h1 { font-size: 25px; line-height: 1.2; }
+@media (max-width: 700px) {
+  .detail-head .page-head h1 { font-size: 22px; }
+  .detail-head .page-head .btn { padding: 0 12px; }
+}
+.detail-meta { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.detail-meta .sep { opacity: .5; margin: 0 6px; }
+
+.result-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px;
+  padding: 10px 12px; background: transparent; border: 0; border-top: 1px solid var(--line-2);
+  font: inherit; text-align: left; cursor: pointer; color: inherit;
+}
+.result-item:first-child { border-top: 0; }
+.result-item:hover { background: var(--gold-50); }
+.result-item svg { width: 17px; height: 17px; color: var(--faint); flex: 0 0 17px; }
+.result-item .rt { flex: 1; min-width: 0; }
+.result-item .rs { display: block; font-size: 12px; color: var(--muted); }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 640px) {
+  body { font-size: 14.5px; }
+  h1 { font-size: 20px; }
+  main { padding: 16px 12px 72px; }
+  .appbar-inner { height: 52px; padding: 0 12px; }
+  .tabs-inner { padding: 0 6px; }
+  .tab { font-size: 13px; gap: 5px; }
+  .pills { gap: 7px; }
+  .pill { min-width: 0; padding: 9px 10px; min-height: 58px; }
+  .pill .n { font-size: 21px; }
+  .pill .l { font-size: 11px; }
+
+  /* The row stacks instead of scrolling sideways: badge and title share the first
+     line, the chips take the second. */
+  .task { flex-wrap: wrap; padding: 8px 12px 10px 8px; }
+  .task-who { padding-left: 4px; }
+  .task-main { flex: 1 1 calc(100% - 42px); padding: 6px 4px; }
+  .task-right { flex: 1 1 100%; justify-content: flex-start; padding-left: 4px; }
+
+  .event-row { flex-wrap: wrap; gap: 10px; }
+  .event-row .er-main { flex: 1 1 calc(100% - 60px); }
+  .event-row .er-chips { flex: 1 1 100%; }
+
+  .field-row { grid-template-columns: 1fr; }
+  .modal { width: 100%; max-height: calc(100dvh - 20px); }
+  .segmented { width: 100%; }
+  .segmented button { flex: 1; padding: 6px 8px; min-height: 44px; }
+
+  /* Every target reaches the 44px floor on a phone. */
+  .btn-sm { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* The printable report is built into the page only when it is being printed. */
+#print-report { display: none; }
+
+@media print {
+  .appbar, .tabs, .toasts, .modal-backdrop, .menu { display: none !important; }
+}
+
+/* ---------- accomplishment report wizard ---------- */
+
+.wiz-head { position: sticky; top: 0; z-index: 2; background: var(--surface); padding-bottom: 8px; }
+.wiz-event { font-size: 13px; font-weight: 600; color: var(--gold-700); }
+
+.wiz-steps { display: flex; gap: 6px; min-width: 0; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.wiz-steps::-webkit-scrollbar { display: none; }
+.wiz-step {
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  min-height: 36px; padding: 6px 11px;
+  font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap;
+  background: var(--bg); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px; cursor: pointer;
+}
+.wiz-step .n {
+  display: grid; place-items: center; width: 18px; height: 18px; flex: 0 0 18px;
+  border-radius: 50%; background: var(--line); color: var(--ink-2); font-size: 11px;
+}
+.wiz-step.is-done { color: var(--st-done-fg); border-color: var(--st-done-bd); background: var(--st-done-bg); }
+.wiz-step.is-done .n { background: var(--st-done-fg); color: #FFF; }
+.wiz-step.is-current { color: var(--gold-700); border-color: var(--gold-500); background: var(--gold-50); }
+.wiz-step.is-current .n { background: var(--gold-500); color: #241C02; }
+
+.wiz-body { padding-top: 12px; }
+
+/* upload block */
+.up-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.up-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+
+.thumb {
+  position: relative; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  overflow: hidden; background: var(--bg);
+}
+.thumb img { display: block; width: 100%; height: 104px; object-fit: cover; background: #FFF; }
+.thumb-ph { display: grid; place-items: center; height: 104px; font-size: 12px; color: var(--muted); }
+.thumb-n {
+  position: absolute; top: 6px; left: 6px; z-index: 1;
+  min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px;
+  display: grid; place-items: center; font-size: 11px; font-weight: 700;
+  background: rgba(23,23,27,.72); color: #FFF;
+}
+.thumb-bar { display: flex; gap: 2px; padding: 4px; border-top: 1px solid var(--line-2); background: var(--surface); }
+.thumb-bar .btn { flex: 1; min-height: 34px; padding: 4px; }
+
+@media (max-width: 640px) {
+  .up-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .wiz-step { font-size: 12px; padding: 6px 9px; }
+}
+
+/* the report banner on an event */
+.report-banner {
+  background: var(--gold-50); border: 1px solid var(--gold-300);
+  border-radius: var(--radius); padding: 14px; margin-bottom: 16px;
+}
+.report-banner .rb-title { font-weight: 700; font-size: 15px; }
+.report-banner .rb-sub { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+/* ---------- in-app camera ---------- */
+
+.cam-stage {
+  position: relative; background: #14141A; border-radius: var(--radius-sm);
+  overflow: hidden; display: grid; place-items: center; min-height: 220px;
+}
+.cam-stage video, .cam-stage canvas {
+  display: block; width: 100%; max-height: 56vh; object-fit: contain; background: #14141A;
+}
+
+/* ---------- live PDF preview inside the wizard ---------- */
+
+.wiz-preview { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-2); }
+.wiz-frame {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg); overflow: hidden; min-height: 320px;
+}
+.wiz-frame iframe { display: block; width: 100%; height: 46vh; min-height: 320px; border: 0; }
+
+@media (max-width: 640px) {
+  .wiz-frame iframe { height: 38vh; min-height: 260px; }
+}
+
+/* Four tabs plus their icons do not fit a small phone. The labels are what
+   people read, so the icons go first rather than the tab bar starting to
+   scroll — a nav you have to scroll is a nav you lose your place in. */
+/* ---------- the bar moves to the thumb ----------
+   Five tabs will not sit across a 375px screen as a row of words, and the top of
+   a phone is the hardest place on it to reach. Below 700px the navigation
+   becomes a bottom bar: icon over label, five equal columns, clear of the home
+   indicator. Above that it stays where it was. */
+@media (max-width: 700px) {
+  .tabs {
+    position: fixed; top: auto; bottom: 0; left: 0; right: 0;
+    border-bottom: 0; border-top: 1px solid var(--line);
+    background: rgba(255,255,255,.97);
+    box-shadow: 0 -2px 16px rgba(23,23,27,.07);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .tabs-inner { padding: 0; gap: 0; display: grid; grid-template-columns: repeat(5, 1fr); }
+
+  .tab {
+    flex-direction: column; justify-content: center; gap: 4px;
+    height: auto; min-height: 58px; padding: 8px 2px 7px;
+    font-size: 10.5px; letter-spacing: -0.01em; border-bottom: 0;
+    position: relative; border-radius: 12px;
+  }
+  .tab svg { display: block; width: 22px; height: 22px; flex: none; }
+  .tab.is-active { border-bottom-color: transparent; }
+  /* The active tab is marked by a tick above the icon rather than an underline,
+     which would sit under the label and read as a stray rule. */
+  .tab.is-active::before {
+    content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 26px; height: 3px; border-radius: 0 0 3px 3px; background: var(--gold-500);
+  }
+  .tab .count {
+    position: absolute; top: 4px; left: 50%; margin-left: 4px;
+    padding: 0 5px; min-width: 17px; text-align: center; line-height: 17px;
+    font-size: 10px;
+  }
+
+  /* Room for the bar, plus the home indicator underneath it. */
+  main { padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
+  .toasts { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* A 32px pill reads well and is uncomfortable to hit. Stretching an invisible
+   touch area around it does not survive contact with a wrapped row — the row
+   clips it — so on a phone the status control simply becomes the 44px a finger
+   needs. It is the most-tapped thing on the screen; it can afford the room. */
+@media (max-width: 700px) {
+  .status-edit { min-height: 44px; padding: 0 12px; font-size: 13px; }
+  .status-edit .dot { width: 7px; height: 7px; flex-basis: 7px; }
+}
+
+@media (max-width: 340px) {
+  .tab { font-size: 9.5px; }
+  .tab svg { width: 20px; height: 20px; }
+}

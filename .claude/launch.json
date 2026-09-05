@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fcusr-tracker",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.js"],
+      "port": 4321,
+      "autoPort": true
+    }
+  ]
+}

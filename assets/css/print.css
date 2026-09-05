@@ -1,0 +1,180 @@
+/* Event Task Report — browser print fallback.
+   The generated PDF (assets/js/report.js) is the primary path; this stylesheet
+   makes File → Print produce the same document without touching printer settings.
+
+   PAGE SIZE LIVES HERE. Change it here and in Report.PAGE in assets/js/report.js. */
+
+@page {
+  size: 330mm 216mm;   /* Long bond (8.5 × 13 in), landscape */
+  margin: 10mm 12mm;
+}
+
+/* Background tints must survive the trip to PDF. */
+* {
+  -webkit-print-color-adjust: exact !important;
+  print-color-adjust: exact !important;
+}
+
+body.printing > *:not(#print-report) { display: none !important; }
+
+body.printing {
+  margin: 0;
+  background: #FFF;
+  font-family: 'Montserrat', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
+
+#print-report {
+  display: block;
+  color: #17171B;
+  font-size: 9pt;
+  line-height: 1.35;
+}
+
+/* ---------- document header (first page) ---------- */
+
+.p-head {
+  display: flex; align-items: center; gap: 8mm; position: relative; min-height: 20mm;
+}
+.p-emblem { width: 20mm; height: 20mm; flex: 0 0 20mm; }
+.p-emblem img, .p-emblem svg { width: 100%; height: 100%; object-fit: contain; }
+.p-org { font-size: 8.5pt; color: #71717F; line-height: 1.45; }
+.p-org-name { font-size: 10.5pt; font-weight: 700; color: #17171B; letter-spacing: .02em; }
+.p-title {
+  position: absolute; left: 0; right: 0; text-align: center;
+  font-size: 21pt; font-weight: 700; letter-spacing: .01em; margin: 0; pointer-events: none;
+}
+.p-band { height: 1.8mm; background: #C9A227; margin: 3mm 0 0; }
+
+/* ---------- event information band ---------- */
+
+.p-info {
+  display: flex; gap: 10mm; align-items: flex-start; justify-content: space-between;
+  background: #FDFAF1; border: 0.3mm solid #EBD9A0; border-radius: 2mm;
+  padding: 4mm 6mm; margin-top: 4mm;
+}
+.p-event { font-size: 13pt; font-weight: 700; margin-bottom: 1.5mm; }
+.p-info-left { font-size: 9pt; color: #45454F; }
+.p-muted { color: #71717F; margin-top: 1mm; }
+.p-info-right { flex: 0 0 132mm; }
+.p-progress-label { font-size: 10.5pt; font-weight: 700; margin-bottom: 2mm; }
+.p-bar {
+  height: 4.5px; background: #E8E6DE; border-radius: 3px; overflow: hidden;
+  width: 126mm; max-width: 100%;
+}
+.p-bar > span { display: block; height: 100%; background: #C9A227; }
+.p-bar.sm { width: 26mm; display: inline-block; vertical-align: middle; height: 3.6px; }
+.p-pct { font-size: 8.5pt; color: #45454F; margin-left: 2mm; vertical-align: middle; }
+.p-counts { margin-top: 3mm; font-size: 9pt; color: #45454F; }
+.p-counts .p-od { margin: 0 6mm; }
+.p-od { color: #C42121; font-weight: 700; }
+
+/* ---------- section headings ---------- */
+
+.p-section {
+  font-size: 11pt; font-weight: 700; color: #7E6210; letter-spacing: .04em;
+  margin: 6mm 0 1mm; padding-bottom: 1mm;
+  border-bottom: 0.6mm solid #C9A227; display: inline-block;
+}
+
+/* ---------- tables ---------- */
+
+.p-table {
+  width: 100%; border-collapse: collapse; table-layout: fixed;
+  margin-top: 2mm; font-size: 9pt;
+}
+.p-table th, .p-table td {
+  border: 0.15mm solid #D6D6D1; padding: 1.8mm 2.4mm;
+  text-align: left; vertical-align: middle; word-wrap: break-word;
+}
+.p-table thead th {
+  background: #FDFAF1; color: #7E6210; font-weight: 700; font-size: 8.5pt;
+  border-color: #EBD9A0;
+}
+/* The column headers repeat on every page. */
+.p-table thead { display: table-header-group; }
+.p-table tr, .p-group-head { break-inside: avoid; page-break-inside: avoid; }
+
+.p-c { text-align: center; }
+.p-strong { font-weight: 700; }
+.p-done { color: #156D3B; }
+.p-note { display: block; font-weight: 400; font-size: 8pt; color: #71717F; margin-top: 0.6mm; }
+.p-empty { text-align: center; color: #71717F; font-style: italic; }
+
+/* Zebra striping, then the tints that override it. */
+.p-table tbody tr:nth-child(even) td { background: #FAFAF8; }
+.p-row-od td { background: #FDEEEE !important; }
+.p-row-done td { background: #F0F7F2 !important; }
+.p-bang { color: #C42121; font-weight: 700; }
+.p-od-cell { color: #C42121; font-weight: 700; background: #FDEEEE !important; }
+.p-sub td { background: #F0F7F2 !important; color: #156D3B; font-weight: 700; font-size: 8.5pt; }
+.p-total td { background: #FDFAF1 !important; font-weight: 700; border-color: #EBD9A0; }
+
+/* Status chips carry colour and the written label, never colour alone. */
+.p-st { font-weight: 700; }
+.p-st.st-not-started { background: #F2F2F0 !important; color: #4B5563; }
+.p-st.st-in-progress { background: #E9EFFD !important; color: #1D4ED8; }
+.p-st.st-for-review  { background: #FCF2E3 !important; color: #9A5309; }
+.p-st.st-done        { background: #E6F4EA !important; color: #156D3B; }
+.p-st.st-on-hold     { background: #FDECE3 !important; color: #B93E12; }
+
+.p-pri-high   { color: #B3261E; }
+.p-pri-medium { color: #45454F; }
+.p-pri-low    { color: #71717F; }
+
+/* Notes is intentionally blank — room to write during the meeting. */
+.p-notes { background: #FFF !important; }
+
+/* Officer summary column widths */
+.p-summary col, .p-summary th:nth-child(1) { width: 24.3%; }
+.p-summary th:nth-child(2) { width: 19.3%; }
+.p-summary th:nth-child(3),
+.p-summary th:nth-child(4) { width: 6.9%; }
+.p-summary th:nth-child(5),
+.p-summary th:nth-child(6) { width: 7.8%; }
+.p-summary th:nth-child(7) { width: 27%; }
+
+/* Detail table column widths — proportional to the PDF's millimetre widths */
+.p-group .p-table th:nth-child(1) { width: 3.1%; }
+.p-group .p-table th:nth-child(2) { width: 31.2%; }
+.p-group .p-table th:nth-child(3) { width: 11.8%; }
+.p-group .p-table th:nth-child(4) { width: 11.8%; }
+.p-group .p-table th:nth-child(5) { width: 6.2%; }
+.p-group .p-table th:nth-child(6) { width: 8.1%; }
+.p-group .p-table th:nth-child(7) { width: 10.3%; }
+.p-group .p-table th:nth-child(8) { width: 17.5%; }
+
+/* ---------- per-officer groups ---------- */
+
+.p-group { margin-top: 4mm; break-inside: auto; }
+.p-group-head {
+  display: flex; align-items: baseline; gap: 2mm;
+  background: #FDFAF1; border: 0.25mm solid #EBD9A0; border-left: 2.2mm solid #C9A227;
+  padding: 2mm 4mm;
+  /* A group header must never be the last thing on a page. */
+  break-after: avoid; page-break-after: avoid;
+}
+.p-group-name { font-size: 12pt; font-weight: 700; }
+.p-group-role { font-size: 9.5pt; color: #71717F; }
+.p-group-tally { margin-left: auto; font-size: 9.5pt; font-weight: 700; color: #45454F; }
+
+/* ---------- running footer ----------
+   A fixed element repeats on every printed page in Chrome and Safari. Browsers
+   cannot count pages from CSS, so "Page X of Y" only appears in the generated PDF. */
+
+.p-foot {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  border-top: 0.25mm solid #D6D6D1; padding-top: 1.5mm;
+  text-align: center; font-size: 8pt; color: #71717F;
+}
+
+/* ---------- signatures ---------- */
+
+.p-sign {
+  display: flex; gap: 20mm; margin-top: 10mm;
+  break-inside: avoid; page-break-inside: avoid;
+}
+.p-sign-col { flex: 1; display: flex; gap: 3mm; align-items: flex-start; }
+.p-sign-label { font-size: 9.5pt; font-weight: 700; white-space: nowrap; padding-top: 1mm; }
+.p-sign-lines { flex: 1; }
+.p-line { border-bottom: 0.3mm solid #45454F; height: 6mm; }
+.p-line-label { font-size: 7.5pt; color: #71717F; margin: 0.5mm 0 4mm; }
