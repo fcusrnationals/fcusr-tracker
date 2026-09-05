@@ -274,8 +274,18 @@ begin
     invited_by = excluded.invited_by;
 
   -- If they are already signed up, attach them to their activities now.
+  /* Only for activities this database actually knows about.
+
+     event_members.event_id is a foreign key, and an id that does not exist here
+     raises — which would fail the whole enrolment. Activities are still device
+     local while the sync layer is unbuilt, so most ids arriving from a phone
+     match nothing. A volunteer then gets no membership rows and reaches no
+     activities, which is wrong but recoverable; a hard failure is neither. */
   insert into event_members (event_id, profile_id)
-  select unnest(coalesce(p_event_ids,'{}')), p.id from profiles p where p.email = clean_email
+  select ev.id, p.id
+  from profiles p
+  join events ev on ev.id = any (coalesce(p_event_ids, '{}'))
+  where p.email = clean_email
   on conflict do nothing;
 
   insert into audit_log (actor_id, actor_name, action, entity, entity_id, detail)
@@ -309,8 +319,13 @@ begin
           e.position, e.unit_id, e.access)
   on conflict (id) do nothing;
 
+  /* Same guard, and it matters more here: this runs inside the trigger on
+     auth.users, so an unknown activity id would fail the sign-up itself and the
+     person could not get an account at all. */
   insert into event_members (event_id, profile_id)
-  select unnest(e.event_ids), new.id
+  select ev.id, new.id
+  from events ev
+  where ev.id = any (coalesce(e.event_ids, '{}'))
   on conflict do nothing;
 
   update enrolments set claimed_at = now() where email = e.email;
