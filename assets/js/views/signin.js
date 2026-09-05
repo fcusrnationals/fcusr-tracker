@@ -20,9 +20,14 @@
     var offline = Auth.isOffline();
 
     return '<div class="gate">' +
-      // The same campus as the Overview, pushed well back behind the card.
-      '<img class="gate-photo" src="assets/img/campus.jpg" alt="" aria-hidden="true">' +
       '<div class="gate-card">' +
+
+      /* The campus across the top of the card, with the seal sitting over the
+         join. Both are the council's own marks and both should be plainly
+         visible here — this is the first screen anybody sees. */
+      '<div class="gate-hero">' +
+        '<img class="gate-hero-img" src="assets/img/campus.jpg" alt="" aria-hidden="true">' +
+      '</div>' +
 
       '<div class="gate-brand">' +
         '<img class="gate-seal" src="assets/img/fcusr-seal.png" alt="">' +

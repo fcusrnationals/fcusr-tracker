@@ -15,6 +15,23 @@
     var html = '<div class="page-head"><div><h1>Settings</h1>' +
       '<div class="sub">Directory, letterhead and backup.</div></div></div>';
 
+    if (Store.dryRun().active) {
+      var invented = Store.events().filter(function (e) { return e.sample; }).length;
+      var real = Store.events().filter(function (e) { return !e.sample; }).length;
+      html += '<div class="card" style="background:var(--st-on-hold-bg);' +
+        'border-color:var(--st-on-hold-bd);margin-bottom:16px">' +
+        '<div class="strong" style="margin-bottom:4px">The system is in a dry run.</div>' +
+        '<div class="small">' + U.plural(invented, 'invented activity', 'invented activities') +
+        ' and a rehearsal closing date are in place so the end of term can be walked through. ' +
+        (real
+          ? U.plural(real, 'activity', 'activities') + ' of your own ' +
+            (real === 1 ? 'is' : 'are') + ' kept separately and will survive.'
+          : 'Anything you create yourself is kept separately and will survive.') +
+        '</div>' +
+        '<button type="button" class="btn btn-sm" style="margin-top:12px" data-end-dryrun>' +
+        'End the dry run</button></div>';
+    }
+
     /* ---- access and enrolment ---- */
     html += section('access', 'Access and enrolment', 'Executives only',
       '<div style="padding:14px">' +
@@ -152,6 +169,40 @@
       '<div class="field"><label for="org-email">Email</label>' +
       '<input type="text" id="org-email" maxlength="120" value="' + U.esc(org.email) + '"></div>' +
       '<button type="button" class="btn btn-primary" data-save-org>' + UI.icon('check') + 'Save letterhead</button>' +
+
+      /* Changing this changes every accomplishment report the council files, so
+         the constraint is spelled out and then actually checked on upload —
+         a warning nobody can act on is not a safeguard. */
+      '<div class="divider"></div>' +
+      '<div class="field-label" style="margin-bottom:6px">Accomplishment report letterhead</div>' +
+      (org.letterhead
+        ? '<div class="card" style="background:var(--st-done-bg);border-color:var(--st-done-bd);margin-bottom:12px">' +
+          '<div class="small strong">Using a replacement letterhead.</div>' +
+          '<div class="small muted">Uploaded' +
+          (org.letterheadBy ? ' by ' + U.esc(org.letterheadBy) : '') +
+          (org.letterheadAt ? ' on ' + U.esc(U.fmtDate(org.letterheadAt.slice(0, 10))) : '') +
+          '.</div></div>'
+        : '<p class="small muted" style="margin:0 0 12px">Using the letterhead that ships with the app.</p>') +
+
+      '<div class="card" style="background:var(--st-on-hold-bg);border-color:var(--st-on-hold-bd);margin-bottom:12px">' +
+      '<div class="strong" style="margin-bottom:6px">A new letterhead must keep the same measurements.</div>' +
+      '<div class="small" style="line-height:1.7">The report is written into a fixed area of the page. ' +
+      'Artwork that strays into it will sit underneath the text, and every report the council files ' +
+      'afterwards will carry the fault.' +
+      '<ul style="padding-left:18px;margin:8px 0 0">' +
+      '<li><strong>A4 portrait</strong>, 210 &times; 297 mm. Ideally 1240 &times; 1754 pixels.</li>' +
+      '<li>Leave the middle of the page <strong>empty</strong>: the top 58 mm and bottom 52 mm are ' +
+      'yours, and the 22 mm down each side.</li>' +
+      '<li>Keep the writable area pale. The text is dark and thin.</li>' +
+      '<li>PNG or JPG, under 3 MB.</li></ul></div></div>' +
+
+      '<div class="row" style="gap:6px">' +
+      '<label class="btn">' + UI.icon('upload') + 'Upload a letterhead' +
+      '<input type="file" id="letterhead-file" accept="image/png,image/jpeg" hidden></label>' +
+      (org.letterhead
+        ? '<button type="button" class="btn btn-ghost" data-clear-letterhead>Back to the default</button>'
+        : '') +
+      '</div>' +
       '</div>');
 
     /* ---- backup ---- */
@@ -276,6 +327,9 @@
     var cpw = root.querySelector('[data-change-pw]');
     if (cpw) cpw.addEventListener('click', function () { Auth.changePassword(); });
 
+    var endDry = root.querySelector('[data-end-dryrun]');
+    if (endDry && global.TermUI) endDry.addEventListener('click', TermUI.endDryRunForm);
+
     var mh = root.querySelector('[data-my-handover]');
     if (mh && global.TermUI) mh.addEventListener('click', TermUI.myHandoverForm);
 
@@ -376,6 +430,64 @@
       reader.onload = function () { Store.updateOrg({ emblem: String(reader.result) }); UI.toast('Emblem saved.'); };
       reader.onerror = function () { UI.toast('Could not read that image.', 'error'); };
       reader.readAsDataURL(f);
+    });
+
+    var lhFile = root.querySelector('#letterhead-file');
+    if (lhFile) lhFile.addEventListener('change', function () {
+      var f = lhFile.files && lhFile.files[0];
+      lhFile.value = '';
+      if (!f) return;
+      if (f.size > 3 * 1024 * 1024) {
+        return UI.toast('Too large — keep the letterhead under 3 MB.', 'error');
+      }
+      var reader = new FileReader();
+      reader.onerror = function () { UI.toast('That image could not be read.', 'error'); };
+      reader.onload = function () {
+        var src = String(reader.result);
+        // The proportions are checked, not just described. A landscape or
+        // square image would stretch across the sheet and ruin every report.
+        var img = new Image();
+        img.onerror = function () { UI.toast('That image could not be read.', 'error'); };
+        img.onload = function () {
+          var ratio = img.width / img.height;
+          var a4 = 210 / 297;                       // 0.707
+          var off = Math.abs(ratio - a4) / a4;
+          if (off > 0.02) {
+            return UI.confirm({
+              title: 'That is not A4 portrait',
+              message: 'The image is ' + img.width + ' × ' + img.height + ' pixels, which is ' +
+                (ratio > a4 ? 'wider' : 'taller') + ' than A4. It will be stretched to fit the ' +
+                'page, so the artwork will look distorted on every report.',
+              detail: 'A4 portrait is 210 × 297 mm — 1240 × 1754 pixels is the right size.',
+              confirmLabel: 'Use it anyway'
+            }).then(function (ok) {
+              if (ok) applyLetterhead(src);
+            });
+          }
+          applyLetterhead(src);
+        };
+        img.src = src;
+      };
+      reader.readAsDataURL(f);
+    });
+
+    function applyLetterhead(src) {
+      var who = (global.Auth && Auth.current() && Auth.current().name) || '';
+      Store.updateOrg({ letterhead: src, letterheadBy: who });
+      UI.toast('Letterhead replaced. Export one report and check it before filing anything.');
+    }
+
+    var clearLh = root.querySelector('[data-clear-letterhead]');
+    if (clearLh) clearLh.addEventListener('click', function () {
+      UI.confirm({
+        title: 'Go back to the default letterhead?',
+        message: 'Reports will print on the letterhead that ships with the app.',
+        confirmLabel: 'Use the default'
+      }).then(function (ok) {
+        if (!ok) return;
+        Store.updateOrg({ letterhead: '', letterheadBy: '' });
+        UI.toast('Back to the default letterhead.');
+      });
     });
 
     var clearEmblem = root.querySelector('[data-clear-emblem]');

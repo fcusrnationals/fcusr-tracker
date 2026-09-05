@@ -53,6 +53,17 @@ try {
     window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
   }
   check('all scripts evaluated', true);
+  /* The dry-run notice is deliberately not dismissible by clicking away, so it
+     is still on screen here and would answer every later $('.modal-…') query
+     ahead of the dialog actually under test. Read it and close it, as a person
+     would. */
+  check('the dry run announces itself at the door',
+    !!window.document.querySelector('.modal-backdrop'));
+  check('and it is the only notice shown',
+    window.document.querySelectorAll('.modal-backdrop').length === 1);
+  window.document.querySelectorAll('.modal-backdrop [data-close]').forEach((b) =>
+    b.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
+  check('and closes when acknowledged', !window.document.querySelector('.modal-backdrop'));
   /* This sandbox has no fetch() and no IndexedDB, which is the point: start-up
      must not depend on either. Loading the council seal for the report header
      once threw here and took the whole boot with it — no screen was wired at
@@ -312,8 +323,11 @@ console.log('\n--- export and search ---');
 goto('#/events/' + foundation.id);
 click($('[data-export]'));
 check('export dialog opens', !!$('#pending-only'));
+// Scope to the dialog on top: an earlier modal left open would otherwise be
+// the one this reads.
 check('names the file', /FCUSR-TaskReport-Foundation-Week-2026-\d{4}-\d{2}-\d{2}\.pdf/
-  .test($('.modal-body').textContent));
+  .test($$('.modal-body').pop().textContent),
+  ($$('.modal-body').pop().textContent || '').replace(/\s+/g, ' ').slice(0, 90));
 click($('[data-close]'));
 click($('#btn-search'));
 setValue($('#q'), 'tarpaulin');
@@ -345,6 +359,17 @@ check('no report banner while tasks are pending', !$('[data-open-report]') && !$
 S.tasks({ eventId: evId }).forEach((t) => S.setTaskStatus(t.id, 'Done'));
 goto('#/events/' + evId);
 check('all tasks done offers the completion toggle', !!$('[data-mark-complete]'));
+
+/* Every activity is evaluated, and that is enforced rather than suggested: an
+   activity with no feedback form cannot be marked finished, however complete
+   its tasks are. */
+check('the missing feedback form is called out', !!$('.fb-banner.is-missing'));
+click($('[data-mark-complete]'));
+check('and completion is refused without it', S.event(evId).status !== 'Completed');
+
+S.setFeedbackLink(evId, 'https://forms.gle/abc123');
+goto('#/events/' + evId);
+check('with a form the banner turns green', !!$('.fb-banner.is-done'));
 click($('[data-mark-complete]'));
 check('marking complete sets the event status', S.event(evId).status === 'Completed');
 goto('#/events/' + evId);

@@ -94,7 +94,11 @@
     name: 'FILAMER CHRISTIAN UNIVERSITY STUDENT REPUBLIC',
     address: 'Roxas Avenue, Roxas City, Capiz 5800',
     email: 'fcusrnational2026@gmail.com',
-    emblem: ''
+    emblem: '',
+    /* Blank means the letterhead that ships with the app. A replacement is held
+       here as a data URL, with who changed it and when — a new letterhead
+       changes every report the council files, so it is not an anonymous edit. */
+    letterhead: '', letterheadBy: '', letterheadAt: ''
   };
 
   var state = null;
@@ -127,6 +131,11 @@
       offices: seedOffices(),
       officesSeed: OFFICE_SEED_VERSION,
       term: blankTerm(),
+      /* The dry run: the site seeded with invented activities and a closing date
+         a month out, so the council can walk the end of term through before it
+         matters. Everything invented carries sample:true, which is what makes
+         ending the dry run able to keep the real work and drop the rest. */
+      dryRun: { active: false, startedAt: '' },
       people: [], events: [], tasks: [], reports: [], letters: [],
       positions: DEFAULT_POSITIONS.slice(),
       committees: DEFAULT_COMMITTEES.slice(),
@@ -202,6 +211,16 @@
     return v.length > 1400000 ? '' : v;
   }
 
+  /* A replacement letterhead for the accomplishment report. Bigger than the
+     emblem because it is a full A4 sheet, and still capped: this lives in
+     localStorage alongside everything else, and that has about five megabytes
+     in total. */
+  function letterhead(v) {
+    if (typeof v !== 'string') return '';
+    if (!/^data:image\/(png|jpe?g);base64,[A-Za-z0-9+/=\s]+$/.test(v)) return '';
+    return v.length > 3000000 ? '' : v;
+  }
+
   function email(v) {
     var t = str(v, 160).toLowerCase();
     return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t) ? t : '';
@@ -254,6 +273,15 @@
     };
   }
 
+  /* A feedback form is a Google Form, which comes in two shapes: the long
+     docs.google.com/forms address and the forms.gle short link people actually
+     share. Both are accepted; nothing else is. */
+  function formLink(v) {
+    if (typeof v !== 'string' || !v) return '';
+    var t = v.trim().slice(0, 500);
+    return /^https:\/\/(docs\.google\.com\/forms\/|forms\.gle\/)[^\s]*$/.test(t) ? t : '';
+  }
+
   function cleanEvent(e) {
     if (!e || typeof e !== 'object') return null;
     var title = str(e.title, LIMITS.title);
@@ -272,6 +300,21 @@
       venue: str(e.venue, LIMITS.title),
       headId: typeof e.headId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(e.headId) ? e.headId : '',
       status: oneOf(e.status, EVENT_STATUSES, 'Upcoming'),
+
+      /* Every activity gathers feedback. That is the standing rule, so it is the
+         default rather than something to remember to switch on — an activity
+         saved before this existed, or by a client that knows nothing about it,
+         still comes back requiring one.
+
+         It can be waived, because not every activity can sensibly be evaluated,
+         but a waiver is a departure from the standard and is recorded as one:
+         who, when, and why. */
+      feedbackRequired: e.feedbackRequired !== false,
+      feedbackLink: formLink(e.feedbackLink),
+      feedbackWaivedBy: str(e.feedbackWaivedBy, LIMITS.name),
+      feedbackWaivedReason: str(e.feedbackWaivedReason, LIMITS.reason),
+      feedbackWaivedAt: e.feedbackWaivedAt ? stamp(e.feedbackWaivedAt) : '',
+
       sample: !!e.sample,
       createdAt: stamp(e.createdAt),
       updatedAt: stamp(e.updatedAt)
@@ -431,6 +474,10 @@
     s.letters = (Array.isArray(data.letters) ? data.letters : []).map(cleanLetter).filter(Boolean);
 
     s.term = cleanTerm(data.term);
+    s.dryRun = {
+      active: !!(data.dryRun && data.dryRun.active),
+      startedAt: data.dryRun && data.dryRun.startedAt ? stamp(data.dryRun.startedAt) : ''
+    };
     s.positions = cleanList(data.positions, DEFAULT_POSITIONS);
     s.committees = cleanList(data.committees, DEFAULT_COMMITTEES);
     s.seeded = !!data.seeded;
@@ -440,6 +487,9 @@
       s.org.address = str(data.org.address, LIMITS.org);
       s.org.email = str(data.org.email, LIMITS.org);
       s.org.emblem = emblem(data.org.emblem);
+      s.org.letterhead = letterhead(data.org.letterhead);
+      s.org.letterheadBy = str(data.org.letterheadBy, LIMITS.name);
+      s.org.letterheadAt = data.org.letterheadAt ? stamp(data.org.letterheadAt) : '';
     }
 
     // Drop references that point nowhere: a task cannot exist outside an event,
@@ -731,6 +781,8 @@
       venue: (data.venue || '').trim(),
       headId: data.headId || '',
       status: EVENT_STATUSES.indexOf(data.status) >= 0 ? data.status : 'Upcoming',
+      feedbackRequired: data.feedbackRequired !== false,
+      feedbackLink: data.feedbackLink || '',
       createdAt: nowISO(),
       updatedAt: nowISO()
     };
@@ -750,6 +802,57 @@
     });
     if ('status' in data && EVENT_STATUSES.indexOf(data.status) >= 0) e.status = data.status;
     if ('unitId' in data && unit(data.unitId)) e.unitId = data.unitId;
+    if ('feedbackLink' in data) e.feedbackLink = formLink(data.feedbackLink);
+    e.updatedAt = nowISO();
+    commit();
+    return e;
+  }
+
+  /* Whether this activity still owes a feedback form. Derived, never stored, so
+     it cannot drift from the link and the waiver. */
+  function needsFeedback(e) {
+    if (!e) return false;
+    return e.feedbackRequired !== false && !e.feedbackLink;
+  }
+
+  function setFeedbackLink(id, link) {
+    var e = event(id);
+    if (!e) return null;
+    var v = formLink(link);
+    if (link && !v) {
+      throw new Error('That needs to be a Google Forms link — docs.google.com/forms or forms.gle.');
+    }
+    e.feedbackLink = v;
+    e.updatedAt = nowISO();
+    commit();
+    return e;
+  }
+
+  /* Waiving the requirement. The standard is that every activity is evaluated,
+     so stepping outside it is written down rather than silently toggled. */
+  function waiveFeedback(id, reason, by) {
+    var e = event(id);
+    if (!e) return null;
+    var r = (reason || '').trim();
+    if (r.length < 10) {
+      throw new Error('Write down why this activity does not need a feedback form.');
+    }
+    e.feedbackRequired = false;
+    e.feedbackWaivedReason = str(r, LIMITS.reason);
+    e.feedbackWaivedBy = str(by || '', LIMITS.name);
+    e.feedbackWaivedAt = nowISO();
+    e.updatedAt = nowISO();
+    commit();
+    return e;
+  }
+
+  function restoreFeedback(id) {
+    var e = event(id);
+    if (!e) return null;
+    e.feedbackRequired = true;
+    e.feedbackWaivedReason = '';
+    e.feedbackWaivedBy = '';
+    e.feedbackWaivedAt = '';
     e.updatedAt = nowISO();
     commit();
     return e;
@@ -1537,6 +1640,25 @@
 
   function term() { return state.term; }
 
+  function dryRun() { return state.dryRun; }
+
+  /* Ending the dry run. Everything invented goes; everything the council
+     actually made stays, because the two were never mixed — invented records
+     carry sample:true and real ones do not. The declared closing date goes with
+     it, since it was part of the rehearsal. */
+  function endDryRun() {
+    clearSampleData();
+    state.term = blankTerm();
+    state.dryRun = { active: false, startedAt: '' };
+    commit();
+    return {
+      events: state.events.length,
+      tasks: state.tasks.length,
+      letters: state.letters.length,
+      people: state.people.length
+    };
+  }
+
   function declareTerm(endDate, opts) {
     opts = opts || {};
     var d = dateOnly(endDate);
@@ -1699,6 +1821,19 @@
     ['name', 'address', 'email'].forEach(function (k) {
       if (k in data) state.org[k] = str(data[k], LIMITS.org);
     });
+    if ('letterhead' in data) {
+      var lh = letterhead(data.letterhead);
+      if (data.letterhead && !lh) {
+        if (global.UI) {
+          global.UI.toast('That letterhead could not be used — PNG or JPG, under 3 MB.', 'error');
+        }
+        return state.org;
+      }
+      state.org.letterhead = lh;
+      state.org.letterheadBy = str(data.letterheadBy, LIMITS.name);
+      state.org.letterheadAt = lh ? nowISO() : '';
+    }
+
     // An uploaded emblem goes through the same check as a restored one.
     if ('emblem' in data) {
       var img = emblem(data.emblem);
@@ -1764,12 +1899,13 @@
     var keepOrg = state.org;
     var keepUnits = state.units;
     var keepOffices = state.offices;
-    var keepTerm = state.term;
     state = blank();
     state.org = keepOrg;
     state.units = keepUnits;
     state.offices = keepOffices;
-    state.term = keepTerm;
+    /* The units, the offices and the letterhead are setup and survive. A closing
+       date is not setup — it belongs to the administration being deleted, and so
+       does the dry run. */
     state.seeded = true;
     commit();
   }
@@ -2053,6 +2189,16 @@
     seedLetter('CCS', 'Excuse letter for the Hour of Code facilitators',
       'Hour of Code — Roxas City', 'Hannah Mae Villaruel', ['OSA', 'DEAN'], 2);
 
+    /* The rehearsal. A closing date a month out, so a council opening this for
+       the first time lands in the end of term with something to look at rather
+       than an empty screen and an abstract explanation. */
+    state.term = blankTerm();
+    state.term.endDate = U.addDays(U.today(), 30);
+    state.term.note = 'Dry run — the system is being rehearsed before it is used for real.';
+    state.term.declaredAt = nowISO();
+    state.term.declaredBy = 'Dry run';
+    state.dryRun = { active: true, startedAt: nowISO() };
+
     state.seeded = true;
   }
 
@@ -2084,6 +2230,7 @@
     setLetterStatus: setLetterStatus, byLetterUrgency: byLetterUrgency,
     org: org, updateOrg: updateOrg,
     term: term, termStatus: termStatus, declareTerm: declareTerm, withdrawTerm: withdrawTerm,
+    dryRun: dryRun, endDryRun: endDryRun,
     compliance: compliance, unitCompliance: unitCompliance,
     overrideCompliance: overrideCompliance, setOverallLink: setOverallLink, closeTerm: closeTerm,
     report: report, reports: reports, saveReport: saveReport, deleteReport: deleteReport,
@@ -2091,6 +2238,8 @@
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
     addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
+    needsFeedback: needsFeedback, setFeedbackLink: setFeedbackLink,
+    waiveFeedback: waiveFeedback, restoreFeedback: restoreFeedback,
     tasks: tasks, task: task, addTask: addTask, updateTask: updateTask,
     setTaskStatus: setTaskStatus, deleteTask: deleteTask,
     isOverdue: isOverdue, isPending: isPending, isDueToday: isDueToday, isDueThisWeek: isDueThisWeek,

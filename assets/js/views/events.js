@@ -102,7 +102,11 @@
       UI.ring(s.done, s.total) +
       '<span class="er-main"><span class="er-title">' +
       (u && u.code ? '<span class="unit-code">' + U.esc(u.code) + '</span>' : '') +
-      U.esc(e.title) + '</span>' +
+      U.esc(e.title) +
+      // Marked on sight during the rehearsal, so nobody mistakes an invented
+      // activity for one of the council's own.
+      (e.sample && Store.dryRun().active
+        ? ' <span class="chip chip-plain">sample</span>' : '') + '</span>' +
       '<span class="er-meta">' + U.esc(U.fmtRange(e.dateStart, e.dateEnd)) +
         (e.venue ? '<span class="sep">·</span>' + U.esc(e.venue) : '') +
         '<span class="sep">·</span>' + s.done + ' of ' + s.total + ' done</span></span>' +

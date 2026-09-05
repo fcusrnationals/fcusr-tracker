@@ -67,6 +67,7 @@
         : '') +
       '</div>';
 
+    html += feedbackBanner(e, mine);
     html += reportBanner(e, s);
 
     var letterCount = Store.letters({ eventId: e.id }).length;
@@ -138,6 +139,44 @@
     }
 
     return html;
+  }
+
+  /* Every activity is evaluated. The form has to exist before the activity
+     runs, so this sits at the top of the screen from the day it is created —
+     not tucked inside the report wizard, which is opened afterwards. */
+  function feedbackBanner(e, mine) {
+    if (e.status === 'Archived') return '';
+
+    if (e.feedbackRequired === false) {
+      return '<div class="fb-banner is-waived">' + UI.icon('alert') +
+        '<div><div class="fb-title">No feedback form for this activity.</div>' +
+        '<div class="fb-sub">' +
+        (e.feedbackWaivedReason
+          ? '&ldquo;' + U.esc(e.feedbackWaivedReason) + '&rdquo;' +
+            (e.feedbackWaivedBy ? ' &mdash; ' + U.esc(e.feedbackWaivedBy) : '')
+          : 'The requirement was set aside.') + '</div>' +
+        (mine ? '<div class="fb-actions">' +
+          '<button type="button" class="btn btn-sm" data-fb-restore>Require one again</button></div>' : '') +
+        '</div></div>';
+    }
+
+    if (e.feedbackLink) {
+      return '<div class="fb-banner is-done">' + UI.icon('check') +
+        '<div><div class="fb-title">Feedback form ready.</div>' +
+        '<div class="fb-sub"><a href="' + U.esc(e.feedbackLink) + '" target="_blank" rel="noopener">' +
+        'Open the form</a>' + (mine ? ' &middot; <button type="button" class="linkish" data-fb-edit>' +
+        'Change the link</button>' : '') + '</div></div></div>';
+    }
+
+    return '<div class="fb-banner is-missing">' + UI.icon('alert') +
+      '<div><div class="fb-title">This activity still needs a feedback form.</div>' +
+      '<div class="fb-sub">Every activity is evaluated. Make a Google Form and add its link &mdash; ' +
+      'the activity cannot be marked completed without one.</div>' +
+      (mine ? '<div class="fb-actions">' +
+        '<button type="button" class="btn btn-sm btn-primary" data-fb-edit>Add the link</button>' +
+        '<button type="button" class="btn btn-sm" data-fb-waive>Not needed for this one</button>' +
+        '</div>' : '') +
+      '</div></div>';
   }
 
   /* Once the tasks are finished the activity is not finished — the report is the
@@ -388,8 +427,24 @@
 
     var markDone = root.querySelector('[data-mark-complete]');
     if (markDone) markDone.addEventListener('click', function () {
+      if (Store.needsFeedback(e)) {
+        return UI.toast('Add the feedback form first — every activity is evaluated.', 'error');
+      }
       Store.updateEvent(e.id, { status: 'Completed' });
       UI.toast('Activity marked completed. The report is the last step.');
+    });
+
+    U.els('[data-fb-edit]', root).forEach(function (b) {
+      b.addEventListener('click', function () { Forms.feedbackForm(e.id); });
+    });
+    U.els('[data-fb-waive]', root).forEach(function (b) {
+      b.addEventListener('click', function () { Forms.waiveFeedbackForm(e.id); });
+    });
+    U.els('[data-fb-restore]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        Store.restoreFeedback(e.id);
+        UI.toast('A feedback form is required again.');
+      });
     });
 
     var openReport = root.querySelector('[data-open-report]');

@@ -43,6 +43,12 @@
   var wiz = null;          // { eventId, step, draft, cache }
 
   function loadLetterhead() {
+    /* A letterhead uploaded by the National executives replaces the one that
+       ships with the app. Checked every time rather than cached, because it can
+       change between two exports in the same sitting. */
+    var own = (global.Store && Store.org && Store.org().letterhead) || '';
+    if (own) return Promise.resolve(own);
+
     if (letterheadData) return Promise.resolve(letterheadData);
     return fetch(LETTERHEAD)
       .then(function (r) { if (!r.ok) throw new Error('missing'); return r.blob(); })

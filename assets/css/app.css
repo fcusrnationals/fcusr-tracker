@@ -487,6 +487,31 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
 
 .tb-actions { margin-top: 12px; }
 
+/* Every activity is evaluated. This says so from the day it is created, and
+   says it where the work is rather than inside the report wizard. */
+.fb-banner {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 14px; border-radius: var(--radius); margin-bottom: 14px;
+  font-size: 13.5px; line-height: 1.55;
+}
+.fb-banner svg { width: 17px; height: 17px; flex: 0 0 17px; margin-top: 2px; }
+.fb-title { font-weight: 600; }
+.fb-sub { color: var(--ink-2); margin-top: 3px; }
+.fb-actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+.fb-banner.is-missing {
+  background: var(--st-on-hold-bg); border: 1px solid var(--st-on-hold-bd);
+}
+.fb-banner.is-missing svg { color: var(--st-on-hold-fg); }
+.fb-banner.is-done {
+  background: var(--st-done-bg); border: 1px solid var(--st-done-bd);
+}
+.fb-banner.is-done svg { color: var(--st-done-fg); }
+.fb-banner.is-waived {
+  background: var(--bg); border: 1px solid var(--line);
+}
+.fb-banner.is-waived svg { color: var(--muted); }
+
 /* The promise that the archive outlives the officers who made it. */
 .drive-vouch {
   align-items: flex-start; gap: 10px; margin: 4px 0 14px; padding: 12px;
@@ -561,17 +586,22 @@ body.is-gated main { padding-bottom: 32px; }
   min-height: calc(100vh - 120px);
   display: flex; align-items: center; justify-content: center; padding: 8px 0 32px;
 }
-/* The same campus photograph as the Overview, pushed right back so the card
-   reads cleanly over it — the front door should look like the same building. */
-.gate-photo {
-  position: fixed; inset: 0; z-index: -2;
-  width: 100%; height: 100%; object-fit: cover; object-position: center 62%;
+/* The campus runs across the top of the card, under a gold wash, with the seal
+   overlapping the join below it. Visible rather than a whisper: this is the
+   first screen anybody sees, and it should say whose building this is. */
+.gate-hero {
+  position: relative; height: 132px; margin: -28px -22px 0;
+  border-radius: 18px 18px 0 0; overflow: hidden; background: #3A2504;
 }
-.gate::before {
-  content: ""; position: fixed; inset: 0; z-index: -1;
+.gate-hero-img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; object-position: center 58%;
+}
+.gate-hero::after {
+  content: ""; position: absolute; inset: 0;
   background:
-    linear-gradient(180deg, rgb(253 250 244 / .74) 0%, rgb(253 250 244 / .90) 42%,
-      rgb(253 250 244 / .97) 78%, var(--bg) 100%);
+    linear-gradient(180deg, rgb(40 25 2 / .30) 0%, rgb(40 25 2 / .12) 45%,
+      rgb(58 37 4 / .55) 100%);
 }
 .gate-card {
   width: 100%; max-width: 400px;
@@ -579,7 +609,12 @@ body.is-gated main { padding-bottom: 32px; }
   padding: 28px 22px 22px; box-shadow: var(--sh-2);
 }
 .gate-brand { text-align: center; margin-bottom: 22px; }
-.gate-seal { width: 76px; height: 76px; display: block; margin: 0 auto 12px; }
+/* Lifted so it straddles the photograph and the card beneath it. */
+.gate-seal {
+  width: 84px; height: 84px; display: block; margin: -46px auto 12px;
+  position: relative; z-index: 1;
+  filter: drop-shadow(0 3px 10px rgb(26 16 1 / .35));
+}
 .gate-name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
 .gate-org {
   font-size: 10.5px; color: var(--muted); margin-top: 5px;
@@ -608,8 +643,11 @@ body.is-gated main { padding-bottom: 32px; }
 }
 
 @media (max-width: 700px) {
-  .gate { min-height: calc(100vh - 96px); align-items: flex-start; padding-top: 12px; }
-  .gate-card { border: 0; box-shadow: none; background: transparent; padding: 8px 0 0; }
+  .gate { min-height: calc(100vh - 96px); align-items: flex-start; padding-top: 0; }
+  /* On a phone the card is the screen, so it keeps its surface and its photo
+     runs to both edges rather than floating in the middle of nothing. */
+  .gate-card { border: 0; box-shadow: none; padding: 0 16px 8px; border-radius: 0; }
+  .gate-hero { margin: 0 -16px; border-radius: 0; height: 150px; }
 }
 
 /* ---------- sections within a screen ----------
@@ -1115,6 +1153,27 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   main { padding-bottom: calc(78px + env(safe-area-inset-bottom, 0px)); }
   .toasts { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
 }
+
+/* Anything a thumb has to find needs the 44px a thumb actually covers. These
+   three were all a few pixels short, which is the kind of miss that only shows
+   up when somebody is standing in a corridor trying to tap it. */
+@media (max-width: 700px) {
+  /* A link inside a sentence cannot grow without pushing the sentence apart, so
+     it becomes its own line with room around it instead. */
+  .term-banner .tb-list li { margin-bottom: 2px; }
+  .term-banner .tb-list .linkish {
+    display: inline-flex; align-items: center; min-height: 44px; padding: 2px 0;
+  }
+  .toolbar select, .toolbar input { min-height: 44px; }
+  .sub-tab { min-height: 44px; }
+  /* "Small" is a matter of weight and padding, not of being hard to hit. On a
+     touch screen these keep their lighter look and take the full height. */
+  .btn-sm { min-height: 44px; }
+  .segmented button { min-height: 44px; }
+}
+
+/* Even with a mouse, a target needs some height to aim at. */
+.linkish { min-height: 24px; line-height: 1.6; }
 
 /* A 32px pill reads well and is uncomfortable to hit. Stretching an invisible
    touch area around it does not survive contact with a wrapped row — the row

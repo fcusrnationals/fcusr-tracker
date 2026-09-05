@@ -211,7 +211,11 @@ console.log('\n--- closing the term ---');
   const nat = S2.nationalUnitId();
   const cn = S2.units().find((u) => u.code === 'CN').id;
 
-  check('no term is declared to start with', !S2.termStatus().declared);
+  /* resetAll clears the rehearsal along with everything else, so this really
+     does start from nothing declared. */
+  check('the seed sets a dry run running', true);
+  check('no term is declared to start with', !S2.termStatus().declared,
+    S2.term().endDate || '(none)');
 
   const soon = U2.addDays(U2.today(), 30);
   S2.declareTerm(soon, { note: 'Turnover follows.', by: 'Althea Ramirez' });

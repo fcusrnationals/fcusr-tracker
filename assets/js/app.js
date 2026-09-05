@@ -400,7 +400,10 @@
     window.scrollTo(0, 0);
 
     // Said once a visit; the banner on the Overview says it for the rest of the time.
-    if (global.TermUI) TermUI.maybeRemind();
+    /* One notice at a time. The rehearsal notice already explains the closing
+       date, so stacking the term reminder behind it would greet somebody with
+       two dialogs on top of each other saying overlapping things. */
+    if (global.TermUI && !TermUI.dryRunNotice()) TermUI.maybeRemind();
   }
 
   global.App = { go: go, render: render, openSearch: openSearch, route: function () { return current; } };

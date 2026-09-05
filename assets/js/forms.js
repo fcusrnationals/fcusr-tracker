@@ -39,7 +39,7 @@
     var isNew = !ev;
     var e = ev || {
       title: '', description: '', dateStart: U.today(), dateEnd: '', venue: '',
-      headId: '', status: 'Upcoming',
+      headId: '', status: 'Upcoming', feedbackRequired: true, feedbackLink: '',
       unitId: opts.unitId || (global.Auth ? Auth.myUnitId() : Store.nationalUnitId())
     };
 
@@ -67,6 +67,18 @@
       field({
         name: 'venue', label: 'Venue',
         control: '<input type="text" id="f-venue" maxlength="120" value="' + U.esc(e.venue) + '" placeholder="e.g. FCU Gymnasium">'
+      }) +
+      /* Every activity is evaluated. The field sits here rather than in the
+         report wizard because the form has to exist before the activity runs —
+         asking for it afterwards is asking too late to be any use. */
+      field({
+        name: 'feedbackLink', label: 'Feedback form',
+        control: '<input type="text" id="f-feedback" maxlength="300" value="' +
+          U.esc(e.feedbackLink || '') + '" placeholder="https://forms.gle/…">',
+        hint: e.feedbackRequired === false
+          ? 'Not required for this activity. The requirement can be put back from the activity itself.'
+          : 'Required by standard. Make a Google Form and paste its link. You can add it later, ' +
+            'but the activity cannot be marked completed without one.'
       }) +
       '<div class="field-row">' +
       field({
@@ -100,6 +112,14 @@
              unit's tracker, so an event you create there is that unit's — the
              question only ever had one answer. */
           if (isNew) data.unitId = e.unitId;
+
+          data.feedbackLink = root.querySelector('#f-feedback').value.trim();
+          if (data.feedbackLink &&
+              !/^https:\/\/(docs\.google\.com\/forms\/|forms\.gle\/)/.test(data.feedbackLink)) {
+            return showError(root, 'feedbackLink',
+              'That needs to be a Google Forms link \u2014 forms.gle or docs.google.com/forms.');
+          }
+
           if (!data.title) return showError(root, 'title', 'Give the event a title.');
           if (!data.dateStart) return showError(root, 'dateStart', 'Pick the event date.');
           if (data.dateEnd && data.dateEnd < data.dateStart) {
@@ -752,6 +772,81 @@
     });
   }
 
+  /* ---------- the feedback form ---------- */
+
+  function feedbackForm(eventId) {
+    var e = Store.event(eventId);
+    if (!e) return;
+
+    UI.modal({
+      title: 'Feedback form',
+      body:
+        '<p class="small">Make a Google Form for <strong>' + U.esc(e.title) + '</strong> and paste ' +
+        'its link here. The form itself lives in Google &mdash; this only records where it is, ' +
+        'the same way the accomplishment report does.</p>' +
+        field({
+          name: 'link', label: 'Link to the form', required: true,
+          control: '<input type="text" id="fb-link" data-autofocus maxlength="300" value="' +
+            U.esc(e.feedbackLink || '') + '" placeholder="https://forms.gle/…">',
+          hint: 'Either shape works: forms.gle/… or docs.google.com/forms/…'
+        }) +
+        '<p class="small muted">Set the form to accept responses from anyone, or the people you ' +
+        'are asking will be turned away.</p>',
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-save>Save the link</button>',
+      onMount: function (root, close) {
+        function submit() {
+          clearErrors(root);
+          var v = root.querySelector('#fb-link').value.trim();
+          if (!v) return showError(root, 'link', 'Paste the link to the form.');
+          try {
+            Store.setFeedbackLink(eventId, v);
+            close();
+            UI.toast('Feedback form saved.');
+          } catch (err) { showError(root, 'link', err.message); }
+        }
+        root.querySelector('[data-save]').addEventListener('click', submit);
+        root.querySelector('#fb-link').addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); submit(); }
+        });
+      }
+    });
+  }
+
+  /* Setting the requirement aside. The standard is that every activity is
+     evaluated, so a departure from it is written down rather than toggled. */
+  function waiveFeedbackForm(eventId) {
+    var e = Store.event(eventId);
+    if (!e) return;
+
+    UI.modal({
+      title: 'No feedback form for this one?',
+      body:
+        '<p class="small">Every activity is evaluated &mdash; that is the standing rule, and this ' +
+        'sets it aside for <strong>' + U.esc(e.title) + '</strong> only.</p>' +
+        field({
+          name: 'reason', label: 'Why this activity does not need one', required: true,
+          control: '<textarea id="fb-why" data-autofocus maxlength="300" ' +
+            'placeholder="e.g. An internal working meeting with no participants to survey."></textarea>',
+          hint: 'A sentence. It is kept on the activity and read at handover.'
+        }),
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-save>Set it aside</button>',
+      onMount: function (root, close) {
+        root.querySelector('[data-save]').addEventListener('click', function () {
+          clearErrors(root);
+          var why = root.querySelector('#fb-why').value.trim();
+          var who = (global.Auth && Auth.current() && Auth.current().name) || '';
+          try {
+            Store.waiveFeedback(eventId, why, who);
+            close();
+            UI.toast('Recorded. No feedback form is required for this activity.');
+          } catch (err) { showError(root, 'reason', err.message); }
+        });
+      }
+    });
+  }
+
   /* ---------- volunteers ---------- */
 
   /* Taking on one helper for one activity. Three questions, because the other
@@ -1281,6 +1376,7 @@
 
   global.Forms = {
     unitForm: unitForm,
+    feedbackForm: feedbackForm, waiveFeedbackForm: waiveFeedbackForm,
     officeForm: officeForm, letterForm: letterForm,
     receiveForm: receiveForm, releaseForm: releaseForm,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,

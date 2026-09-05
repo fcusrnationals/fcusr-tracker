@@ -84,6 +84,84 @@
      Once a visit, not once a minute. A notice that appears constantly stops
      being read; one that appears when you arrive, and a banner that never
      leaves, is what actually gets acted on. */
+  var DRYRUN_KEY = 'fcusr.tracker.dryrun.seen';
+
+  /* Said every time somebody signs in, for as long as the rehearsal lasts.
+
+     The point is not decoration. Somebody looking at this site is about to see
+     nine activities, sixteen officers and a term closing next month, and almost
+     none of it is real. Being told once, plainly, at the door is the difference
+     between a useful rehearsal and a council that thinks it has lost its data. */
+  function dryRunNotice() {
+    if (!Store.dryRun().active) return false;
+
+    var seen = '';
+    try { seen = global.sessionStorage.getItem(DRYRUN_KEY) || ''; } catch (e) { seen = ''; }
+    if (seen === Store.dryRun().startedAt) return false;
+    try { global.sessionStorage.setItem(DRYRUN_KEY, Store.dryRun().startedAt); } catch (e) { /* not vital */ }
+
+    var st = Store.termStatus();
+    var national = !global.Auth || !Auth.signedIn() || Auth.isNational();
+
+    UI.modal({
+      title: 'This is a dry run',
+      dismissible: false,
+      body:
+        '<div class="card" style="background:var(--st-on-hold-bg);border-color:var(--st-on-hold-bd)">' +
+        '<div class="strong" style="margin-bottom:4px">Most of what you are about to see is invented.</div>' +
+        '<div class="small">The activities, the officers, the letters and the closing date were all ' +
+        'put here to rehearse the end of term. They are not council records.</div></div>' +
+
+        '<p class="small" style="margin-top:14px"><strong>What is real:</strong> anything you create ' +
+        'yourself. Your own activities, tasks, letters and reports are kept apart from the invented ' +
+        'ones and will survive when the rehearsal ends.</p>' +
+
+        (st.declared
+          ? '<p class="small">The term is set to close on <strong>' +
+            U.esc(U.fmtDate(st.endDate)) + '</strong> so the closing can be walked through. ' +
+            'That date is part of the rehearsal too.</p>'
+          : '') +
+
+        (national
+          ? '<p class="small muted">When the council is ready to use this for real, a national ' +
+            'executive ends the dry run from <strong>Settings</strong>. Everything invented is ' +
+            'removed in one go and everything real is kept.</p>'
+          : '<p class="small muted">A national executive ends the rehearsal when the council is ' +
+            'ready to use this for real.</p>'),
+      footer: '<button type="button" class="btn btn-primary" data-close>I understand</button>'
+    });
+    return true;
+  }
+
+  /* The off switch, for the National executives. */
+  function endDryRunForm() {
+    var counts = {
+      sampleEvents: Store.events().filter(function (e) { return e.sample; }).length,
+      realEvents: Store.events().filter(function (e) { return !e.sample; }).length,
+      realLetters: Store.letters().filter(function (l) { return !l.sample; }).length
+    };
+
+    UI.confirm({
+      title: 'End the dry run?',
+      message: U.plural(counts.sampleEvents, 'invented activity', 'invented activities') +
+        ' and everything that came with them — the invented officers, letters and the rehearsal ' +
+        'closing date — will be removed.',
+      detail: counts.realEvents || counts.realLetters
+        ? 'Your own work is kept: ' + U.plural(counts.realEvents, 'activity', 'activities') +
+          ' and ' + U.plural(counts.realLetters, 'letter') + ' that you created stay exactly as ' +
+          'they are. This cannot be undone, so download a backup first if you are unsure.'
+        : 'You have not created anything of your own yet, so this leaves the tracker empty and ' +
+          'ready for real work. This cannot be undone.',
+      confirmLabel: 'End the dry run'
+    }).then(function (ok) {
+      if (!ok) return;
+      var left = Store.endDryRun();
+      UI.toast(left.events
+        ? 'Dry run ended. ' + U.plural(left.events, 'activity', 'activities') + ' kept.'
+        : 'Dry run ended. The tracker is ready for real work.');
+    });
+  }
+
   function maybeRemind() {
     var st = Store.termStatus();
     if (!st.declared || st.closed) return;
@@ -537,6 +615,7 @@
   global.TermUI = {
     banner: banner, mountBanner: mountBanner, archive: archive,
     maybeRemind: maybeRemind, declareForm: declareForm, handoverForm: handoverForm,
-    myHandoverForm: myHandoverForm, myOwed: myOwed
+    myHandoverForm: myHandoverForm, myOwed: myOwed,
+    dryRunNotice: dryRunNotice, endDryRunForm: endDryRunForm
   };
 })(window);
