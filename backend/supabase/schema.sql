@@ -30,9 +30,12 @@
 
 create table if not exists units (
   id          uuid primary key default gen_random_uuid(),
-  kind        text not null check (kind in ('national','province','comelec','judiciary')),
+  kind        text not null check (kind in ('national','province','comelec','judiciary','branch')),
   name        text not null,
   code        text unique,
+  -- What the app's header calls this unit: "FCUSR COE", "FCU COMELEC". Held per
+  -- unit because the council does not follow one rule.
+  tracker_name text not null default '',
   active      boolean not null default true,
   created_at  timestamptz not null default now()
 );
@@ -113,6 +116,13 @@ create table if not exists reports (
   event_id    uuid not null unique references events(id) on delete cascade,
   description text not null default '',
   drive_link  text not null default '',
+  /* A link is only an archive if the file behind it survives turnover, and that
+     cannot be read from the URL — a Shared Drive folder and a personal one look
+     identical. So somebody vouches for it on the record instead, and the term
+     will not close while any filed report is unvouched. */
+  drive_owned boolean not null default false,
+  drive_by    text not null default '',
+  drive_at    timestamptz,
   status      text not null default 'draft' check (status in ('draft','filed')),
   filed_at    timestamptz,
   created_at  timestamptz not null default now(),
@@ -169,6 +179,23 @@ $$;
 create or replace function my_unit() returns uuid
 language sql stable security definer set search_path = public as $$
   select unit_id from profiles where id = auth.uid();
+$$;
+
+-- COMELEC, the Judiciary and the independent bodies answer for themselves. The
+-- National government does not read their work — not their events, their tasks,
+-- their reports or their letters — until the accomplishment report is filed at
+-- the end of the term. The app hides them; this is what actually stops them
+-- being read, because hiding a row is not the same as refusing it.
+create or replace function is_independent(u uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from units where id = u and kind in ('comelec','judiciary','branch'));
+$$;
+
+-- Whether the person signed in may read something belonging to unit u.
+create or replace function sees_unit(u uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select u = (select unit_id from profiles where id = auth.uid())
+      or (is_national() and not is_independent(u));
 $$;
 
 -- --------------------------------------------------- enrollment gateway
@@ -381,8 +408,7 @@ create policy profiles_update on profiles for update
 -- Events and tasks belong to a unit; volunteers only reach the ones they joined.
 drop policy if exists events_read on events;
 create policy events_read on events for select using (
-  is_national()
-  or unit_id = my_unit()
+  sees_unit(unit_id)
   or exists (select 1 from event_members em where em.event_id = events.id and em.profile_id = auth.uid())
 );
 
@@ -394,7 +420,7 @@ create policy events_write on events for all
 drop policy if exists tasks_read on tasks;
 create policy tasks_read on tasks for select using (
   exists (select 1 from events e where e.id = tasks.event_id and (
-    is_national() or e.unit_id = my_unit()
+    sees_unit(e.unit_id)
     or exists (select 1 from event_members em where em.event_id = e.id and em.profile_id = auth.uid())
   ))
 );
@@ -427,8 +453,7 @@ create policy members_write on event_members for all
 
 drop policy if exists reports_read on reports;
 create policy reports_read on reports for select using (
-  exists (select 1 from events e where e.id = reports.event_id
-          and (is_national() or e.unit_id = my_unit()))
+  exists (select 1 from events e where e.id = reports.event_id and sees_unit(e.unit_id))
 );
 
 drop policy if exists reports_write on reports;
@@ -447,12 +472,147 @@ create policy audit_read on audit_log for select using (is_national());
 drop policy if exists audit_insert on audit_log;
 create policy audit_insert on audit_log for insert with check (auth.uid() is not null);
 
+
+-- ---------------------------------------------------------------- offices
+-- The desks a letter has to pass through. Reference data for the whole
+-- Republic, like units: everyone reads it, the National officers maintain it.
+
+create table if not exists offices (
+  id              uuid primary key default gen_random_uuid(),
+  code            text unique,
+  name            text not null,
+  -- How long this office usually takes. A letter sitting longer is called
+  -- stuck, which is the difference between a log and something that tells you
+  -- to go and chase it.
+  turnaround_days int not null default 3 check (turnaround_days between 1 and 400),
+  active          boolean not null default true,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------------- letters
+--
+-- A letters tracker, not a letter store: no document is ever kept here. What a
+-- council actually loses is the answer to "where is it now, and who has it".
+--
+-- The trail is a jsonb array rather than a child table because a letter is
+-- always read and written whole, and its stops are an ordered list that gets
+-- spliced — a second run at the same office is inserted directly beneath the
+-- one that sent it back. A child table would buy normalisation and cost an
+-- ordering column that nothing else needs.
+--
+-- Each stop: { id, officeId, forwardedBy, receivedBy, receivedAt, releasedAt,
+--              outcome, note }
+-- "receivedBy" is a typed name. The clerk at that office will never sign in
+-- here, so this is a logbook kept honestly, not a signature.
+
+create table if not exists letters (
+  id            uuid primary key default gen_random_uuid(),
+  unit_id       uuid not null references units(id) on delete cascade,
+  -- Null means council business belonging to no activity, as a directive does.
+  event_id      uuid references events(id) on delete set null,
+  subject       text not null,
+  in_charge_id  uuid references profiles(id) on delete set null,
+  in_charge_name text not null default '',
+  deadline      date,
+  status        text not null default 'Routing'
+                check (status in ('Routing','Approved','Declined','Withdrawn')),
+  stops         jsonb not null default '[]'::jsonb,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists letters_unit_idx on letters(unit_id);
+create index if not exists letters_event_idx on letters(event_id);
+
+-- ------------------------------------------------------------------- term
+-- One row, ever. The administration's closing date and what it leaves behind.
+
+create table if not exists term (
+  id            int primary key default 1 check (id = 1),
+  end_date      date,
+  note          text not null default '',
+  declared_at   timestamptz,
+  declared_by   text not null default '',
+  -- The link to the whole administration's record, and the promise that the
+  -- drive holding it belongs to the council rather than to a graduating officer.
+  overall_link  text not null default '',
+  overall_owned boolean not null default false,
+  closed_at     timestamptz,
+  -- Recorded when the National executives close with units still outstanding.
+  override      jsonb,
+  /* What survives the closing: unit names, activity titles and report links.
+     A few kilobytes, so the next administration inherits a readable record
+     instead of an empty app — without keeping the working data the closing was
+     meant to clear. */
+  archive       jsonb not null default '[]'::jsonb,
+  updated_at    timestamptz not null default now()
+);
+
+insert into term (id) values (1) on conflict (id) do nothing;
+
+-- ------------------------------------------------- row level security
+
+alter table offices enable row level security;
+alter table letters enable row level security;
+alter table term    enable row level security;
+
+-- Offices are read by everyone signed in and maintained by the nationals.
+drop policy if exists offices_read on offices;
+create policy offices_read on offices for select using (auth.uid() is not null);
+
+drop policy if exists offices_write on offices;
+create policy offices_write on offices for all
+  using (is_national()) with check (is_national());
+
+-- A letter follows its unit, exactly as an event does — including the rule that
+-- the independent bodies are sealed from the National government.
+drop policy if exists letters_read on letters;
+create policy letters_read on letters for select using (sees_unit(unit_id));
+
+drop policy if exists letters_write on letters;
+create policy letters_write on letters for all
+  using (unit_id = my_unit() and (select access from profiles where id = auth.uid()) = 'officer')
+  with check (unit_id = my_unit() and (select access from profiles where id = auth.uid()) = 'officer');
+
+/* Note the asymmetry, and that it is deliberate: a national officer READS every
+   province's letters and events but WRITES only their own unit's. Oversight is
+   not the same as authorship, and a college's work is that college's to change. */
+
+-- The term is the Republic's own business: everyone sees the closing date,
+-- only the National executives set it.
+drop policy if exists term_read on term;
+create policy term_read on term for select using (auth.uid() is not null);
+
+drop policy if exists term_write on term;
+create policy term_write on term for all
+  using (is_national()) with check (is_national());
+
+-- ------------------------------------------------------- seed the offices
+-- A starting list. Edit it in Settings once the app is running; the names and
+-- turnarounds here are a plausible guess, not gospel.
+
+insert into offices (code, name, turnaround_days) values
+  ('ADV',  'Adviser',                            2),
+  ('DEAN', 'Dean of the College',                3),
+  ('OSA',  'Office of Student Affairs',          3),
+  ('GUID', 'Guidance Office',                    3),
+  ('VPAA', 'VP for Academic Affairs',            5),
+  ('VPF',  'VP for Finance',                     5),
+  ('PPO',  'Physical Plant Office',              3),
+  ('REG',  'Office of the Registrar',            3),
+  ('CM',   'Campus Ministry',                    3),
+  ('SEC',  'Security Office',                    2),
+  ('OP',   'Office of the University President', 7)
+on conflict (code) do nothing;
+
 -- ----------------------------------------------------------- seed units
 
-insert into units (kind, name, code) values
-  ('national',  'FCUSR Nationals',            'NAT'),
-  ('comelec',   'Commission on Elections',    'COMELEC'),
-  ('judiciary', 'Supreme Court',              'JUDICIARY')
+insert into units (kind, name, code, tracker_name) values
+  ('national',  'FCUSR Nationals',         'NAT',     'FCUSR Nationals'),
+  ('comelec',   'Commission on Elections', 'COMELEC', 'FCU COMELEC'),
+  ('judiciary', 'Supreme Court',           'SC',      'FCUSR Judiciary'),
+  ('branch',    'DUAG Film Festival',      'DUAG',    'FCUSR DUAG Film Festival')
 on conflict (code) do nothing;
 
 -- Provinces are the colleges/departments, plus the basic-education levels.
