@@ -229,7 +229,8 @@
     var backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML =
-      '<div class="modal' + (opts.wide ? ' wide' : '') + '" role="dialog" aria-modal="true" aria-label="' + U.esc(opts.title) + '">' +
+      '<div class="modal' + (opts.wide ? ' wide' : '') + (opts.full ? ' full' : '') +
+        '" role="dialog" aria-modal="true" aria-label="' + U.esc(opts.title) + '">' +
         '<div class="modal-head"><h2>' + U.esc(opts.title) + '</h2>' +
           '<button type="button" class="icon-btn" data-close aria-label="Close">' + icon('close') + '</button></div>' +
         '<div class="modal-body">' + (opts.body || '') + '</div>' +

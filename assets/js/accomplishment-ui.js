@@ -25,7 +25,10 @@
 
     closeModal = UI.modal({
       title: 'Accomplishment Report',
-      wide: true,
+      /* This one takes the screen. The report is built by looking at the page
+         you are making — a preview you have to scroll to find is a preview
+         nobody looks at, so on anything wide enough the two sit side by side. */
+      full: true,
       body: '<div id="wiz"></div>',
       dismissible: false,
       footer: '<button type="button" class="btn btn-ghost left" data-save-close>Save and close</button>' +
@@ -368,7 +371,11 @@
   function render() {
     if (!state || !rootEl) return;
     var host = rootEl.querySelector('#wiz');
-    host.innerHTML = header() + '<div class="wiz-body">' + stepBody() + '</div>' + previewPane();
+    host.innerHTML = header() +
+      '<div class="wiz-layout">' +
+        '<div class="wiz-body">' + stepBody() + '</div>' +
+        previewPane() +
+      '</div>';
 
     // Fill every upload grid from the draft.
     U.els('[data-grid]', host).forEach(function (g) {

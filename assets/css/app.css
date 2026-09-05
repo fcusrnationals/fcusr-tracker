@@ -1107,8 +1107,38 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 }
 .wiz-frame iframe { display: block; width: 100%; height: 46vh; min-height: 320px; border: 0; }
 
+/* A dialog that takes the window, for the one job that needs the room. */
+.modal.full {
+  width: min(1320px, 100%);
+  max-width: calc(100vw - 20px);
+  height: calc(100dvh - 24px);
+  max-height: calc(100dvh - 24px);
+}
+.modal.full .modal-body { display: flex; flex-direction: column; }
+
+.wiz-layout { display: grid; gap: 18px; align-items: start; min-width: 0; }
+.wiz-layout > * { min-width: 0; }
+
+/* Side by side once there is width for it: the step you are filling in on the
+   left, the page it produces on the right, both visible at once. The preview
+   holds its place while the form scrolls. */
+@media (min-width: 1000px) {
+  .wiz-layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 22px; }
+  .wiz-preview {
+    margin-top: 0; padding-top: 0; border-top: 0;
+    position: sticky; top: 0;
+    border-left: 1px solid var(--line-2); padding-left: 22px;
+  }
+  .wiz-frame iframe { height: calc(100dvh - 250px); min-height: 420px; }
+}
+
+/* Stacked below that, but the preview is worth more of the screen than it had. */
+@media (max-width: 999px) {
+  .wiz-frame iframe { height: 52vh; min-height: 320px; }
+}
 @media (max-width: 640px) {
-  .wiz-frame iframe { height: 38vh; min-height: 260px; }
+  .modal.full { height: calc(100dvh - 12px); max-width: calc(100vw - 12px); }
+  .wiz-frame iframe { height: 46vh; min-height: 280px; }
 }
 
 /* Four tabs plus their icons do not fit a small phone. The labels are what
