@@ -82,7 +82,6 @@ backend/appsscript/Code.gs    Apps Script equivalent
 backend/SETUP.md              click-by-click setup for both
 tests/                        run-data.js, run-ui.js, run-auth.js,
                               report-proof.js, screens.js
-spike.html                    side-by-side backend comparison page
 ```
 
 ## 5. Decisions already made — do not silently reverse these

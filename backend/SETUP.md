@@ -4,9 +4,6 @@
 Section B is the Apps Script alternative, kept only as a fallback in case
 Supabase ever has to be abandoned; you do not need it.
 
-The comparison page that was used to choose between them is still at
-**http://localhost:4321/spike.html**.
-
 ---
 
 ## A. Supabase — the one to do

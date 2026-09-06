@@ -1965,11 +1965,6 @@
     return o ? o.id : '';
   }
 
-  function isPresidentOffice(oid) {
-    var pid = presidentOfficeId();
-    return !!pid && oid === pid;
-  }
-
   function routeTemplates() {
     return ROUTE_TEMPLATES.map(function (t) {
       return {
@@ -3111,7 +3106,7 @@
     commit: commit,
     insertStop: insertStop, presidentOfficeId: presidentOfficeId,
     stopName: stopName, stopTurnaround: stopTurnaround, sameDesk: sameDesk,
-    isPresidentOffice: isPresidentOffice, officeByCode: officeByCode,
+    officeByCode: officeByCode,
     setLetterStatus: setLetterStatus, byLetterUrgency: byLetterUrgency,
     org: org, updateOrg: updateOrg,
     templateFor: templateFor, setUnitTemplate: setUnitTemplate,
