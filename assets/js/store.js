@@ -662,6 +662,23 @@
     return true;
   }
 
+  /* Forget where syncing got to, so the next round sends everything this device
+     holds and takes in everything the server holds.
+
+     Needed because the marks are the one piece of state that can be wrong in a
+     way nothing else reveals. A round that failed part-way, a version with a
+     bug in it, a device restored from a backup taken after its last sync — any
+     of them can leave a device believing it has already sent work it never sent,
+     and the symptom is silence: everything looks synced and nobody else has your
+     activity. Re-sending is safe because every write is an upsert. */
+  function resetSyncMarks(opts) {
+    opts = opts || {};
+    if (opts.push !== false) state.sync.pushed = '';
+    if (opts.pull !== false) state.sync.pulled = '';
+    save();
+    return state.sync;
+  }
+
   function markSynced(patch) {
     Object.keys(patch || {}).forEach(function (k) { state.sync[k] = patch[k]; });
     save();
@@ -3032,6 +3049,7 @@
     applyRemoteTerm: applyRemoteTerm,
     outbound: outbound, deletions: deletions, isDeleted: isDeleted,
     syncState: syncState, markSynced: markSynced, remapIds: remapIds,
+    resetSyncMarks: resetSyncMarks,
     commit: commit,
     insertStop: insertStop, presidentOfficeId: presidentOfficeId,
     stopName: stopName, stopTurnaround: stopTurnaround, sameDesk: sameDesk,

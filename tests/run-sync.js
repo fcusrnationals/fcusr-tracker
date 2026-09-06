@@ -482,6 +482,52 @@ function makeDevice(server, name) {
       server2.tables.term[1].body.endDate === before, server2.tables.term[1].body.endDate);
   }
 
+  /* ---------------- clearing a rehearsal that already spread ----------------
+     Before the dry run was kept off the server, every device pushed its own
+     copy — so a council ends up with the same invented activity three or four
+     times over, each carrying a "sample" chip. Ending the rehearsal has to
+     clear it everywhere, not just on the phone that presses the button. */
+  console.log('\n--- ending the dry run reaches the other phones ---');
+  {
+    const s3 = makeServer();
+    const X = makeDevice(s3, 'Nationals');
+    const Y = makeDevice(s3, 'Senator');
+
+    /* What a device on the old version left behind: the rehearsal, on the
+       server, under ids nobody else agrees with. */
+    X.S.people().filter((p) => p.sample).slice(0, 3).forEach((p) => {
+      s3.tables.people[p.id] = { id: p.id, body: p, unit_id: p.unitId, updated_at: '2026-01-01T00:00:00.000Z' };
+    });
+    X.S.events().filter((e) => e.sample).forEach((e) => {
+      s3.tables.events[e.id] = { id: e.id, body: e, unit_id: e.unitId, updated_at: '2026-01-01T00:00:00.000Z' };
+    });
+    const strayIds = Object.keys(s3.tables.events);
+    check('the rehearsal is on the server, as it would be', strayIds.length > 0, strayIds.length);
+
+    await Y.Sync.now();
+    check('a device today does not take it in',
+      Y.S.events().filter((e) => e.sample && s3.tables.events[e.id]).length === 0);
+
+    // Ending it sweeps the server too.
+    X.S.endDryRun();
+    await X.Sync.now();
+    check('ending the rehearsal removes it from the server',
+      Object.keys(s3.tables.events).length === 0,
+      JSON.stringify(Object.keys(s3.tables.events).length));
+    check('and records the deletions so they travel',
+      Object.keys(s3.tables.deletions).length > 0);
+
+    await Y.Sync.now();
+    /* Y is left holding its own rehearsal, which was never shared and is Y's to
+       end — but not one copy of anybody else's, which is the duplication a
+       council actually sees. */
+    check('the other phone is left with none of the copies',
+      strayIds.every((id) => !Y.S.event(id)),
+      strayIds.filter((id) => !!Y.S.event(id)).length + ' copies left');
+    check('and still has its own rehearsal to end itself',
+      Y.S.events().filter((e) => e.sample).length > 0);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

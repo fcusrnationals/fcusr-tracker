@@ -317,7 +317,11 @@
 
       '<div class="row" style="margin-top:12px">' +
         '<button type="button" class="btn btn-primary" data-sync-now>Sync now</button>' +
+        '<button type="button" class="btn" data-resync>Send everything again</button>' +
       '</div>' +
+      '<p class="tiny muted" style="margin:8px 2px 0">Use <strong>Send everything again</strong> ' +
+      'if something you made is not showing up for anyone else. It forgets where syncing got to ' +
+      'and re-sends what this device holds \u2014 nothing is lost either way.</p>' +
 
       '<div class="gate-note" style="margin-top:14px">' + UI.icon('alert') +
       '<span><strong>Photographs are not synced.</strong> They stay in the browser that took ' +
@@ -497,6 +501,33 @@
             ? 'Synced \u2014 ' + (l.added + l.updated) + ' in, ' + l.sent + ' out.'
             : 'Everything was already up to date.');
         }
+      });
+    });
+
+    var rs = root.querySelector('[data-resync]');
+    if (rs) rs.addEventListener('click', function () {
+      UI.confirm({
+        title: 'Send everything again?',
+        message: 'This device will forget where syncing got to, then send everything it holds ' +
+          'and take in everything the server holds.',
+        detail: 'Nothing is lost: every write replaces a row rather than adding one. It is worth ' +
+          'doing when something you made has not reached anybody else.',
+        tone: 'primary',
+        cancelLabel: 'Not now',
+        confirmLabel: 'Send everything'
+      }).then(function (ok) {
+        if (!ok) return;
+        Store.resetSyncMarks();
+        rs.disabled = true;
+        rs.textContent = 'Sending\u2026';
+        Sync.now({ loud: true }).then(function (st) {
+          App.render();
+          if (!st.error) {
+            var l = st.last;
+            UI.toast('Sent ' + ((l && l.sent) || 0) + ' and took in ' +
+              ((l && (l.added + l.updated)) || 0) + '.');
+          }
+        });
       });
     });
 
