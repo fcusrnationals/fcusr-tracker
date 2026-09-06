@@ -7,6 +7,31 @@
 -- offers them, which is the only kind that matters: the screen is not the
 -- boundary, the database is, and anybody can send their own requests.
 
+-- ============================================ helpers that do not recurse
+-- A policy that reads another table makes that table's policies run, and if
+-- those read back, Postgres stops with "infinite recursion detected". That is
+-- exactly what happened: event_members' policy read events, whose policy reads
+-- event_members. Nobody could sign in.
+--
+-- These run as the owner, so they answer without triggering policies at all —
+-- the same thing is_national() and sees_unit() already do. Every policy below
+-- asks a question through one of them rather than joining across tables.
+
+create or replace function my_access() returns text
+language sql stable security definer set search_path = public as $$
+  select access from profiles where id = auth.uid();
+$$;
+
+create or replace function my_email() returns text
+language sql stable security definer set search_path = public as $$
+  select lower(email) from profiles where id = auth.uid();
+$$;
+
+create or replace function event_unit(ev uuid) returns uuid
+language sql stable security definer set search_path = public as $$
+  select unit_id from events where id = ev;
+$$;
+
 -- ============================================================ 1. escalation
 -- The worst of them.
 --
@@ -51,14 +76,8 @@ create trigger guard_profile_grants
 
 drop policy if exists deletions_write on deletions;
 create policy deletions_write on deletions for all
-  using (
-    exists (select 1 from profiles p where p.id = auth.uid() and p.access = 'officer'
-            and (is_national() or p.unit_id = deletions.unit_id))
-  )
-  with check (
-    exists (select 1 from profiles p where p.id = auth.uid() and p.access = 'officer'
-            and (is_national() or p.unit_id = deletions.unit_id))
-  );
+  using (my_access() = 'officer' and (is_national() or unit_id = my_unit()))
+  with check (my_access() = 'officer' and (is_national() or unit_id = my_unit()));
 
 -- =============================================== 3. letting yourself in
 -- An activity is readable by anybody attached to it. members_write asked only
@@ -68,16 +87,8 @@ create policy deletions_write on deletions for all
 
 drop policy if exists members_write on event_members;
 create policy members_write on event_members for all
-  using (
-    exists (select 1 from events e join profiles p on p.id = auth.uid()
-            where e.id = event_members.event_id and p.access = 'officer'
-              and (p.unit_id = e.unit_id or (is_national() and not is_independent(e.unit_id))))
-  )
-  with check (
-    exists (select 1 from events e join profiles p on p.id = auth.uid()
-            where e.id = event_members.event_id and p.access = 'officer'
-              and (p.unit_id = e.unit_id or (is_national() and not is_independent(e.unit_id))))
-  );
+  using (my_access() = 'officer' and sees_unit(event_unit(event_id)))
+  with check (my_access() = 'officer' and sees_unit(event_unit(event_id)));
 
 -- ======================================== 4. the seal was read-only
 -- COMELEC, the Judiciary and the independent bodies are sealed from the
@@ -85,44 +96,41 @@ create policy members_write on event_members for all
 -- `is_national() or ...`, so a national officer could edit, and delete,
 -- work they are not allowed to see. A seal that stops you reading a thing
 -- and lets you destroy it is not a seal.
---
--- sees_unit() already means "your own unit, or anywhere the National
--- government may look". Writing follows it.
 
 drop policy if exists events_write on events;
 create policy events_write on events for all
   using (sees_unit(unit_id)
-         and (is_national() or ((select access from profiles where id = auth.uid()) = 'officer'
-                                and unit_id = my_unit())))
+         and (is_national() or (my_access() = 'officer' and unit_id = my_unit())))
   with check (sees_unit(unit_id)
-         and (is_national() or ((select access from profiles where id = auth.uid()) = 'officer'
-                                and unit_id = my_unit())));
+         and (is_national() or (my_access() = 'officer' and unit_id = my_unit())));
 
-drop policy if exists tasks_insert on tasks;
-create policy tasks_insert on tasks for insert with check (
-  exists (select 1 from events e join profiles p on p.id = auth.uid()
-          where e.id = tasks.event_id and p.access = 'officer' and sees_unit(e.unit_id))
-);
+/* A volunteer may still finish the work they were given.
 
+   assignee_id used to point at profiles, so "assignee_id = auth.uid()" meant
+   something. sync.sql repointed it at people — the directory, which holds
+   everybody whether or not they hold a login — and that clause has quietly
+   matched nothing ever since: a volunteer could not tick off their own task.
+   The two are joined by the address they were enrolled with. */
 drop policy if exists tasks_update on tasks;
 create policy tasks_update on tasks for update using (
-  assignee_id = auth.uid()
-  or exists (select 1 from events e join profiles p on p.id = auth.uid()
-             where e.id = tasks.event_id and p.access = 'officer' and sees_unit(e.unit_id))
+  (my_email() is not null and exists (
+    select 1 from people pe where pe.id = tasks.assignee_id
+      and lower(pe.body->>'email') = my_email()))
+  or (my_access() = 'officer' and sees_unit(event_unit(tasks.event_id)))
 );
 
+drop policy if exists tasks_insert on tasks;
+create policy tasks_insert on tasks for insert
+  with check (my_access() = 'officer' and sees_unit(event_unit(tasks.event_id)));
+
 drop policy if exists tasks_delete on tasks;
-create policy tasks_delete on tasks for delete using (
-  exists (select 1 from events e join profiles p on p.id = auth.uid()
-          where e.id = tasks.event_id and p.access = 'officer' and sees_unit(e.unit_id))
-);
+create policy tasks_delete on tasks for delete
+  using (my_access() = 'officer' and sees_unit(event_unit(tasks.event_id)));
 
 drop policy if exists reports_write on reports;
 create policy reports_write on reports for all
-  using (exists (select 1 from events e join profiles p on p.id = auth.uid()
-                 where e.id = reports.event_id and p.access = 'officer' and sees_unit(e.unit_id)))
-  with check (exists (select 1 from events e join profiles p on p.id = auth.uid()
-                 where e.id = reports.event_id and p.access = 'officer' and sees_unit(e.unit_id)));
+  using (my_access() = 'officer' and sees_unit(event_unit(event_id)))
+  with check (my_access() = 'officer' and sees_unit(event_unit(event_id)));
 
 -- ================================ 5. what an officer may actually add
 -- offices_write was national-only, which is wrong now: a letter form lets any
@@ -132,8 +140,7 @@ create policy reports_write on reports for all
 
 drop policy if exists offices_write on offices;
 create policy offices_write on offices for all
-  using (exists (select 1 from profiles p where p.id = auth.uid() and p.access = 'officer'))
-  with check (exists (select 1 from profiles p where p.id = auth.uid() and p.access = 'officer'));
+  using (my_access() = 'officer') with check (my_access() = 'officer');
 
 -- The Republic's own setup stays with the National government: the unit list,
 -- the letter templates the whole council prints on, and the closing date.
