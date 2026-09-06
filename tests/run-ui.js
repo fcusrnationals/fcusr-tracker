@@ -171,7 +171,15 @@ check('3 summary pills, not 5 tiles', $$('.pill').length === 3);
 const heads = $$('.section-head h2').map((h) => h.textContent.replace(/\s+/g, ' ').trim());
 check('Needs attention comes first', /^Needs attention/.test(heads[0]), heads.join(' | '));
 check('Letters has its own block', heads.some((h) => /^Letters/.test(h)), heads.join(' | '));
-check('Republic roll-up is there for a national', heads.some((h) => /Across the Republic/.test(h)));
+/* The roll-up is a fold now, not a section heading — nine colleges listed in
+   full pushed a phone's first screen away for information that usually needs no
+   action. It states how things stand and opens when asked. */
+check('Republic roll-up is there for a national', !!$('[data-toggle-republic]'));
+check('and it starts closed', $('.roll').getAttribute('data-open') === 'false');
+click($('[data-toggle-republic]'));
+check('opening it shows the units', $('.roll').getAttribute('data-open') === 'true' &&
+  $('.roll-body .list').children.length > 0);
+click($('[data-toggle-republic]'));
 check('and the events are last', /^Events/.test(heads[heads.length - 1]), heads.join(' | '));
 check('five nav tabs', $$('.tab').length === 5);
 check('Letters is one of them', $$('.tab').some((t) => t.getAttribute('data-route') === 'letters'));
@@ -519,6 +527,17 @@ console.log('\n--- every wizard step draws itself ---');
   check('typing a name reaches the draft', st.draft.signatories.preparedBy.name === 'Job Sarmiento');
   check('and so does the position', st.draft.signatories.preparedBy.position === 'Secretary, FCUSR Nationals');
   check('which satisfies the step', A.stepDone(st.draft, 'signatories'));
+
+  // Three fixed slots do not fit a joint activity or a co-adviser, and a report
+  // that cannot name its own signatories is not the one the council files.
+  check('more signatories can be added', !!$('[data-sg-add]'));
+  click($('[data-sg-add]'));
+  check('a row appears', $$('[data-sg-name]').length === 1);
+  setValue($$('[data-sg-name]')[0], 'Dr. Ma. Luisa Arroyo');
+  setValue($$('[data-sg-pos]')[0], 'Dean, College of Nursing');
+  check('the extra signatory reaches the draft',
+    A._state().draft.signatories.others[0].name === 'Dr. Ma. Luisa Arroyo');
+  check('with their position', A._state().draft.signatories.others[0].position === 'Dean, College of Nursing');
 
   click(stepBtns()[A.STEPS.findIndex((x) => x.key === 'liquidation')]);
   check('liquidation offers an uploader', !!$('[data-grid="liquidation"]'));

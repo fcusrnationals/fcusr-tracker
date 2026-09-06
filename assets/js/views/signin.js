@@ -16,11 +16,13 @@
   var busy = false;
   var problem = '';
 
-  function render() {
+  /* The card itself, so the full-page door and the dialog you get when opening
+     Settings are the same thing rather than two designs drifting apart. */
+  function card(opts) {
+    opts = opts || {};
     var offline = Auth.isOffline();
 
-    return '<div class="gate">' +
-      '<div class="gate-card">' +
+    return '<div class="gate-card' + (opts.inModal ? ' in-modal' : '') + '">' +
 
       /* The campus across the top of the card, with the seal sitting over the
          join. Both are the council's own marks and both should be plainly
@@ -77,10 +79,15 @@
             'address you were enrolled with.') +
       '</p>' +
 
-      '</div></div>';
+      '</div>';
   }
 
-  function mount(root) {
+  function render() {
+    return '<div class="gate">' + card() + '</div>';
+  }
+
+  function mount(root, opts) {
+    opts = opts || {};
     var email = root.querySelector('#gate-email');
     var pass = root.querySelector('#gate-pass');
 
@@ -88,7 +95,7 @@
       b.addEventListener('click', function () {
         mode = b.getAttribute('data-mode');
         problem = '';
-        App.render();
+        if (opts.redraw) opts.redraw(); else App.render();
       });
     });
 
@@ -100,17 +107,17 @@
       if (!Auth.isOffline()) {
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
           problem = 'That email address does not look right.';
-          return App.render();
+          return (opts.redraw || App.render)();
         }
         if (mode === 'new' && pw.length < 8) {
           problem = 'Too short — use at least eight characters.';
-          return App.render();
+          return (opts.redraw || App.render)();
         }
       }
 
       busy = true;
       problem = '';
-      App.render();
+      if (opts.redraw) opts.redraw(); else App.render();
 
       var work = (mode === 'new' && !Auth.isOffline())
         ? Auth.signUp(addr, pw)
@@ -119,13 +126,14 @@
       work.then(function () {
         busy = false;
         problem = '';
+        if (opts.onDone) return opts.onDone();
         App.go('#/overview');
         App.render();
         UI.toast('Signed in as ' + Auth.current().name + '.');
       }).catch(function (err) {
         busy = false;
         problem = err.message || 'That did not work.';
-        App.render();
+        if (opts.redraw) opts.redraw(); else App.render();
       });
     }
 
@@ -143,5 +151,5 @@
   // Called on sign-out so the next person does not land on the last one's mode.
   function reset() { mode = 'in'; busy = false; problem = ''; }
 
-  global.ViewSignIn = { render: render, mount: mount, reset: reset };
+  global.ViewSignIn = { render: render, mount: mount, card: card, reset: reset };
 })(window);

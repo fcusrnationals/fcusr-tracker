@@ -5,7 +5,7 @@
   'use strict';
 
   var filter = 'attention';   // attention | overdue | week | all
-  var republicOpen = false;   // the fold holding units with nothing on the books
+  var republicOpen = false;   // the whole roll-up, closed until asked for
 
   var FILTERS = {
     attention: {
@@ -39,8 +39,12 @@
   };
 
   function render() {
-    var live = Store.tasks({ excludeArchived: true, kind: 'event' });
-    var events = Store.events({ activeOnly: true });
+    /* The Overview is your own desk. A national oversees the colleges through
+       the roll-up further down — mixing their activities into this list made the
+       first screen of the day read as somebody else's work. */
+    var mine = (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId();
+    var live = Store.tasks({ excludeArchived: true, kind: 'event', unitId: mine });
+    var events = Store.events({ activeOnly: true, unitId: mine });
     var s = Store.stats(live);
     var attention = live.filter(FILTERS.attention.test).length;
 
@@ -58,19 +62,17 @@
     else if (s.pending) headline = 'Nothing overdue — <span class="ok">all on schedule.</span>';
     else headline = '<span class="ok">Everything is done.</span> Well run.';
 
-    // What the term demands comes before what the day demands.
-    var html = global.TermUI ? TermUI.banner() : '';
-
     /* The campus, the way the Hub opens. The photograph is decoration and every
        word over it is ordinary text, so nothing depends on the image arriving —
        without it the block is a dark gold panel and still reads. */
-    html +=
+    var html =
       '<div class="photo-hero">' +
       '<img class="photo-hero-img" src="assets/img/campus.jpg" alt="" aria-hidden="true" ' +
       'decoding="async">' +
       '<div class="photo-hero-body">' +
       '<div class="hero-date">' + U.esc(U.fmtDate(U.today())) + '</div>' +
       '<div class="hero-line">' + headline + '</div>' +
+      (global.TermUI ? TermUI.heroStrip() : '') +
       '<div class="hero-actions">' +
       '<button type="button" class="btn btn-glass" data-create-event>' + UI.icon('plus') + 'New event</button>' +
       '</div></div></div>';
@@ -149,32 +151,41 @@
 
     var events = busy.reduce(function (n, r) { return n + r.s.events; }, 0);
 
-    var html = '<div class="section"><div class="section-head">' +
-      '<h2>Across the Republic</h2>' +
-      '<span class="section-note">' + U.plural(busy.length, 'unit') + ' with work · ' +
-      U.plural(events, 'event') + '</span></div>';
-
-    html += '<div class="list">' + busy.map(unitRow).join('') + '</div>';
-
-    if (idle.length) {
-      html += '<div class="group" style="margin-top:10px" data-collapsed="' + !republicOpen + '" data-group="idle">' +
-        '<button type="button" class="group-head" data-toggle-idle aria-expanded="' + republicOpen + '">' +
-        UI.icon('chevronDown', 'caret') +
-        '<span class="group-title">' + U.plural(idle.length, 'unit') + ' with nothing on the books</span>' +
-        '</button>' +
-        '<div class="group-body"><div class="list">' +
-        idle.sort(function (a, b) { return a.u.name.localeCompare(b.u.name); })
-            .map(unitRow).join('') +
-        '</div></div></div>';
-    }
-
+    var events = busy.reduce(function (n, r) { return n + r.s.events; }, 0);
+    var chase = busy.filter(function (r) { return r.s.overdue > 0; });
     var sealed = Store.units({ activeOnly: true, independentOnly: true });
-    if (sealed.length) {
-      html += '<p class="tiny muted" style="margin:10px 2px 0">' +
-        U.esc(sealed.map(function (u) { return u.name; }).join(', ')) +
-        ' run their own trackers. Their work is not shown here, and is read only ' +
-        'at the end of the term through the report they file.</p>';
-    }
+
+    /* One line, closed. Nine colleges listed in full pushed everything else off
+       a phone screen, and on most days there is nothing in it that needs acting
+       on — so it says how things stand and opens only when asked. */
+    var summary = chase.length
+      ? U.plural(chase.length, 'unit') + ' behind'
+      : U.plural(busy.length, 'unit') + ' on schedule';
+
+    var html = '<div class="roll" data-open="' + republicOpen + '">' +
+      '<button type="button" class="roll-head" data-toggle-republic ' +
+      'aria-expanded="' + republicOpen + '">' +
+        UI.icon('chevronDown', 'caret') +
+        '<span class="roll-title">Across the Republic</span>' +
+        '<span class="roll-sum' + (chase.length ? ' is-alert' : '') + '">' +
+          U.esc(summary) + '</span>' +
+      '</button>' +
+      '<div class="roll-body">' +
+        '<p class="tiny muted" style="margin:0 2px 8px">' +
+        U.plural(busy.length, 'unit') + ' with work · ' + U.plural(events, 'event') + '</p>' +
+        '<div class="list">' + busy.map(unitRow).join('') + '</div>' +
+        (idle.length
+          ? '<p class="tiny muted" style="margin:10px 2px 0">' +
+            U.plural(idle.length, 'unit') + ' with nothing on the books: ' +
+            U.esc(idle.sort(function (a, b) { return a.u.name.localeCompare(b.u.name); })
+              .map(function (r) { return r.u.code || r.u.name; }).join(', ')) + '.</p>'
+          : '') +
+        (sealed.length
+          ? '<p class="tiny muted" style="margin:8px 2px 0">' +
+            U.esc(sealed.map(function (u) { return u.name; }).join(', ')) +
+            ' run their own trackers and are read only at the end of the term.</p>'
+          : '') +
+      '</div></div>';
 
     return html + '</div>';
   }
@@ -259,6 +270,8 @@
     U.els('[data-open-event]', root).forEach(function (b) {
       b.addEventListener('click', function () { App.go('#/events/' + b.getAttribute('data-open-event')); });
     });
+    if (global.TermUI) TermUI.mountBanner(root);
+
     U.els('[data-open-letter]', root).forEach(function (b) {
       b.addEventListener('click', function () { App.go('#/letters/' + b.getAttribute('data-open-letter')); });
     });
@@ -266,12 +279,11 @@
       b.addEventListener('click', function () { ViewEvents.showUnit(b.getAttribute('data-open-unit')); });
     });
 
-    var idle = root.querySelector('[data-toggle-idle]');
-    if (idle) idle.addEventListener('click', function () {
+    var roll = root.querySelector('[data-toggle-republic]');
+    if (roll) roll.addEventListener('click', function () {
       republicOpen = !republicOpen;
-      var g = root.querySelector('[data-group="idle"]');
-      g.setAttribute('data-collapsed', String(!republicOpen));
-      idle.setAttribute('aria-expanded', String(republicOpen));
+      roll.closest('.roll').setAttribute('data-open', String(republicOpen));
+      roll.setAttribute('aria-expanded', String(republicOpen));
     });
     U.els('[data-edit]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.taskForm(b.getAttribute('data-edit')); });

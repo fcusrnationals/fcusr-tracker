@@ -263,6 +263,25 @@
         '" placeholder="Name of the Adviser"></div>' +
         '</div>' +
 
+        /* The three slots above cover the usual report. A joint activity, a
+           co-adviser or a department head does not fit them, and a report that
+           cannot name its own signatories is not the one the council files. */
+        '<div class="card" style="margin-bottom:12px">' +
+        '<div class="field-label" style="margin-bottom:8px">Anyone else who signs</div>' +
+        (sg.others && sg.others.length
+          ? '<div id="sg-others">' + sg.others.map(function (o, i) {
+              return '<div class="row" style="gap:6px;flex-wrap:nowrap;margin-bottom:8px">' +
+                '<input type="text" data-sg-name="' + i + '" maxlength="80" style="flex:1.2" ' +
+                'placeholder="Name" value="' + U.esc(o.name) + '">' +
+                '<input type="text" data-sg-pos="' + i + '" maxlength="60" style="flex:1" ' +
+                'placeholder="Position" value="' + U.esc(o.position) + '">' +
+                '<button type="button" class="btn btn-sm btn-ghost" data-sg-drop="' + i + '" ' +
+                'aria-label="Remove">' + UI.icon('close') + '</button></div>';
+            }).join('') + '</div>'
+          : '<p class="small muted" style="margin:0 0 8px">Nobody else yet.</p>') +
+        '<button type="button" class="btn btn-sm" data-sg-add>' + UI.icon('plus') + 'Add a signatory</button>' +
+        '</div>' +
+
         // The directory offered as suggestions, while still allowing a name that
         // is not in it — an adviser is staff, not a council officer.
         '<datalist id="sg-people">' + Store.people({ activeOnly: true }).map(function (pp) {
@@ -557,6 +576,42 @@
     bindSig('#sg-prep-pos', function (v) { state.draft.signatories.preparedBy.position = v; });
     bindSig('#sg-pres-name', function (v) { state.draft.signatories.president.name = v; });
     bindSig('#sg-adv-name', function (v) { state.draft.signatories.adviser.name = v; });
+
+    U.els('[data-sg-name]', host).forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var i = Number(inp.getAttribute('data-sg-name'));
+        if (state.draft.signatories.others[i]) {
+          state.draft.signatories.others[i].name = inp.value;
+          persist();
+        }
+      });
+    });
+    U.els('[data-sg-pos]', host).forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        var i = Number(inp.getAttribute('data-sg-pos'));
+        if (state.draft.signatories.others[i]) {
+          state.draft.signatories.others[i].position = inp.value;
+          persist();
+        }
+      });
+    });
+    U.els('[data-sg-drop]', host).forEach(function (b) {
+      b.addEventListener('click', function () {
+        state.draft.signatories.others.splice(Number(b.getAttribute('data-sg-drop')), 1);
+        persist();
+        render();
+      });
+    });
+    var sgAdd = host.querySelector('[data-sg-add]');
+    if (sgAdd) sgAdd.addEventListener('click', function () {
+      if (!state.draft.signatories.others) state.draft.signatories.others = [];
+      if (state.draft.signatories.others.length >= 8) {
+        return UI.toast('Eight signatories is as many as the page will hold.', 'error');
+      }
+      state.draft.signatories.others.push({ name: '', position: '' });
+      persist();
+      render();
+    });
 
     var presShow = host.querySelector('#sg-pres-show');
     if (presShow) presShow.addEventListener('change', function () {

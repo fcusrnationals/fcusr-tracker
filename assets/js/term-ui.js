@@ -22,6 +22,37 @@
 
   /* Shown at the top of the Overview for as long as a term is declared. It says
      the date, and then the only part that is actionable: what this unit owes. */
+  /* The closing date, folded into the photograph at the top of the Overview
+     rather than stacked above it as one more coloured box. It is a standing
+     fact about the year, not an alert — so it belongs with the date and the
+     headline, and it earns its place by being one line with a way in. */
+  function heroStrip() {
+    var st = Store.termStatus();
+    if (!st.declared || st.closed) return '';
+
+    var mine = Store.unitCompliance(myUnitId());
+    var urgent = st.passed || st.daysLeft <= 14 || !mine.complies;
+
+    /* One line inside the photograph, so what it says has to be chosen. What you
+       owe outranks how long is left — a date with nothing behind it is not news,
+       and the date is a tap away either way. */
+    var when;
+    if (st.passed) when = 'ended ' + U.fmtDateTiny(st.endDate);
+    else if (st.daysLeft === 0) when = 'ends today';
+    else when = 'ends ' + U.fmtDateTiny(st.endDate);
+
+    var line = mine.complies
+      ? 'Term ' + when + (st.passed ? '' : ' · ' + st.daysLeft + 'd left')
+      : U.plural(mine.outstanding.length, 'activity', 'activities') + ' owed · term ' + when;
+
+    return '<div class="ph-term' + (urgent ? ' is-urgent' : '') + '">' +
+      UI.icon('alert') +
+      '<span class="pht-line">' + U.esc(line) + '</span>' +
+      '<button type="button" class="pht-go" data-my-handover>' +
+      (mine.complies ? 'Review' : 'Open') + '</button>' +
+      '</div>';
+  }
+
   function banner() {
     var st = Store.termStatus();
     if (!st.declared || st.closed) return '';
@@ -615,6 +646,7 @@
   global.TermUI = {
     banner: banner, mountBanner: mountBanner, archive: archive,
     maybeRemind: maybeRemind, declareForm: declareForm, handoverForm: handoverForm,
+    heroStrip: heroStrip,
     myHandoverForm: myHandoverForm, myOwed: myOwed,
     dryRunNotice: dryRunNotice, endDryRunForm: endDryRunForm
   };

@@ -519,6 +519,60 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
 }
 .drive-vouch input { margin-top: 1px; }
 
+/* The closing date, living inside the photograph rather than as one more
+   coloured box stacked above it. A standing fact about the year, not an alarm. */
+.ph-term {
+  display: flex; align-items: center; gap: 8px; margin-top: 12px;
+  padding: 7px 8px 7px 11px; border-radius: 11px;
+  background: rgb(255 255 255 / .13); border: 1px solid rgb(255 255 255 / .26);
+  backdrop-filter: blur(6px);
+  font-size: 12.5px; color: #FFF; line-height: 1.4;
+}
+.ph-term svg { width: 15px; height: 15px; flex: 0 0 15px; color: var(--gold-300); }
+.ph-term.is-urgent { background: rgb(196 33 33 / .30); border-color: rgb(255 180 168 / .48); }
+.ph-term.is-urgent svg { color: #FFC9C0; }
+/* Two lines at most, wrapping rather than truncating. Chasing one line meant
+   losing the end of the sentence on a narrow phone, and the end of this
+   sentence is the part that says what is owed. */
+.pht-line {
+  flex: 1; min-width: 0; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.pht-owed {
+  display: inline-block; margin-left: 7px; padding: 1px 6px; border-radius: 999px;
+  background: rgb(255 255 255 / .22); font-weight: 700; font-size: 11.5px; white-space: nowrap;
+}
+.pht-go {
+  /* 44px on a touch screen like every other control; the strip grows to suit,
+     which is cheaper than a button people miss. */
+  flex: 0 0 auto; min-height: 44px; padding: 0 13px; border-radius: 9px;
+  background: rgb(255 255 255 / .92); border: 0; color: #2A1B02;
+  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.pht-go:hover { background: #FFF; }
+
+/* ---------- the Republic, folded away ----------
+   Nine colleges listed in full pushed a phone's whole first screen out of the
+   way, for information that on most days needs no action. One line that says
+   how things stand, and opens when asked. */
+.roll {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: 20px; overflow: hidden;
+}
+.roll-head {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  min-height: 52px; padding: 10px 14px;
+  background: transparent; border: 0; font: inherit; text-align: left; cursor: pointer;
+}
+.roll-head:hover { background: var(--gold-50); }
+.roll-head .caret { width: 14px; height: 14px; flex: 0 0 14px; color: var(--muted); transition: transform .15s ease; }
+.roll[data-open="false"] .caret { transform: rotate(-90deg); }
+.roll[data-open="false"] .roll-body { display: none; }
+.roll-title { font-weight: 600; font-size: 14.5px; flex: 1; min-width: 0; }
+.roll-sum { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+.roll-sum.is-alert { color: var(--st-overdue-fg); font-weight: 600; }
+.roll-body { padding: 0 14px 14px; }
+
 /* ---------- the campus behind a gold wash ----------
    Lifted from the FCUSR Hub so the two read as one institution: the College of
    Arts and Sciences building under a heavy diagonal wash, weighted to the left
@@ -608,6 +662,18 @@ body.is-gated main { padding-bottom: 32px; }
   background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
   padding: 28px 22px 22px; box-shadow: var(--sh-2);
 }
+/* The same card, dropped into a dialog: it already has the modal's surface
+   around it, so it drops its own and lets the photo run to the dialog's edges. */
+.gate-card.in-modal {
+  border: 0; box-shadow: none; background: transparent;
+  /* width:auto, not 100%: a percentage resolves against the dialog's content
+     box and then the negative margins push the card sideways, leaving it short
+     on the right. Auto lets the margins set both edges. */
+  width: auto; max-width: none; padding: 0 18px; margin: -16px -18px 0;
+}
+.gate-card.in-modal .gate-hero { margin: 0 -18px; border-radius: 0; height: 108px; }
+.gate-card.in-modal .gate-foot { margin-bottom: 2px; }
+
 .gate-brand { text-align: center; margin-bottom: 22px; }
 /* Lifted so it straddles the photograph and the card beneath it. */
 .gate-seal {
@@ -799,7 +865,9 @@ body.is-gated main { padding-bottom: 32px; }
 .field .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .field .req { color: var(--st-overdue-fg); }
 
-input[type="text"], input[type="date"], input[type="search"], select, textarea {
+input[type="text"], input[type="email"], input[type="password"], input[type="number"],
+input[type="tel"], input[type="url"], input[type="date"], input[type="search"],
+select, textarea {
   width: 100%; min-height: 44px; padding: 10px 12px;
   font-family: inherit; font-size: 16px; color: var(--ink);
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; appearance: none;

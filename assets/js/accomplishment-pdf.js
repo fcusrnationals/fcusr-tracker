@@ -193,6 +193,7 @@
       var prep = sig.preparedBy || { name: '', position: '' };
       var pres = sig.president || { name: '', show: true };
       var adv = sig.adviser || { name: '' };
+      var others = sig.others || [];
 
       function signatory(x, yy, name, position) {
         doc.setFont(FONT, 'bold');
@@ -212,21 +213,30 @@
         doc.text(text, x, yy);
       }
 
-      var sy = BOX.bottomY - 74;
-      var rightX = BOX.left + BOX.width / 2 + 6;
-
-      label(BOX.left, sy, 'Prepared by:');
-      signatory(BOX.left, sy + 18, prep.name, prep.position);
-
       // The president does not sign twice: if they wrote it, the slot is dropped.
       var noted = [];
       if (pres.show !== false && pres.name) noted.push([pres.name, 'President, FCUSR Nationals']);
       if (adv.name) noted.push([adv.name, 'Adviser, FCUSR Nationals']);
+      others.forEach(function (o) { if (o.name) noted.push([o.name, o.position]); });
+
+      /* Two to a row, and the block grows upward from the bottom margin as names
+         are added — so a report with five signatories sits on the page the same
+         way one with two does, instead of running off the bottom of the sheet. */
+      var rows = Math.ceil(noted.length / 2);
+      var rightX = BOX.left + BOX.width / 2 + 6;
+      var rowGap = 26;
+      var sy = BOX.bottomY - 56 - (rows ? 18 + rows * rowGap : 0);
+
+      label(BOX.left, sy, 'Prepared by:');
+      signatory(BOX.left, sy + 18, prep.name, prep.position);
 
       if (noted.length) {
         label(BOX.left, sy + 38, 'Noted:');
-        signatory(BOX.left, sy + 56, noted[0][0], noted[0][1]);
-        if (noted[1]) signatory(rightX, sy + 56, noted[1][0], noted[1][1]);
+        noted.forEach(function (n, i) {
+          var col = i % 2 === 0 ? BOX.left : rightX;
+          var row = Math.floor(i / 2);
+          signatory(col, sy + 56 + row * rowGap, n[0], n[1]);
+        });
       }
 
       /* ---- page 2 onwards: the letter of intent comes first ---- */

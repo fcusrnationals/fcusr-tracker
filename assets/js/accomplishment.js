@@ -94,7 +94,8 @@
       signatories: {
         preparedBy: { name: '', position: '' },
         president: { name: '', show: true },
-        adviser: { name: '' }
+        adviser: { name: '' },
+        others: []
       },
       driveLink: '', status: 'draft'
     };

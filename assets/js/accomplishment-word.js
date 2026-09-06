@@ -68,6 +68,7 @@
       var prep = sig.preparedBy || { name: '', position: '' };
       var pres = sig.president || { name: '', show: true };
       var adv = sig.adviser || { name: '' };
+      var others = sig.others || [];
       var headName = e.headId ? Store.personName(e.headId) : '';
 
       var body = '';
@@ -95,18 +96,25 @@
       var noted = [];
       if (pres.show !== false && pres.name) noted.push([pres.name, 'President, FCUSR Nationals']);
       if (adv.name) noted.push([adv.name, 'Adviser, FCUSR Nationals']);
+      others.forEach(function (o) { if (o.name) noted.push([o.name, o.position]); });
 
       body += '<div style="margin-top:44pt">' +
         '<p style="margin:0 0 22pt 0;font-size:11pt">Prepared by:</p>' +
         signatory(prep.name, prep.position);
 
+      // Two to a row, however many there are — the same shape as the PDF.
       if (noted.length) {
         body += '<p style="margin:14pt 0 22pt 0;font-size:11pt">Noted:</p>' +
-          '<table style="width:100%;border-collapse:collapse"><tr>' +
-          '<td style="width:50%;vertical-align:top;border:none">' + signatory(noted[0][0], noted[0][1]) + '</td>' +
-          '<td style="width:50%;vertical-align:top;border:none">' +
-            (noted[1] ? signatory(noted[1][0], noted[1][1]) : '') + '</td>' +
-          '</tr></table>';
+          '<table style="width:100%;border-collapse:collapse">';
+        for (var ni = 0; ni < noted.length; ni += 2) {
+          body += '<tr>' +
+            '<td style="width:50%;vertical-align:top;border:none">' +
+              signatory(noted[ni][0], noted[ni][1]) + '</td>' +
+            '<td style="width:50%;vertical-align:top;border:none">' +
+              (noted[ni + 1] ? signatory(noted[ni + 1][0], noted[ni + 1][1]) : '') + '</td>' +
+            '</tr>';
+        }
+        body += '</table>';
       }
       body += '</div>';
 

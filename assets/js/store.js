@@ -393,7 +393,18 @@
         },
         adviser: {
           name: str(r.signatories && r.signatories.adviser && r.signatories.adviser.name, LIMITS.name)
-        }
+        },
+        /* Anyone else who has to sign. The three fixed slots cover the usual
+           case; a joint activity, a co-adviser or a department head does not
+           fit them, and a report that cannot name its own signatories is not
+           the report the council actually files. */
+        others: ((r.signatories && Array.isArray(r.signatories.others)) ? r.signatories.others : [])
+          .slice(0, 8).map(function (o) {
+            return {
+              name: str(o && o.name, LIMITS.name),
+              position: str(o && o.position, LIMITS.role)
+            };
+          }).filter(function (o) { return o.name; })
       },
       evaluation: { assets: assetIds(r.evaluation && r.evaluation.assets) },
       driveLink: driveLink(r.driveLink),

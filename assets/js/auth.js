@@ -234,95 +234,36 @@
      already waiting for them. Doing it in this order means the app never handles
      anyone else's password, and a stranger who finds the site can make himself a
      login and still see nothing at all. */
+  /* Signing in without leaving the screen you were on — reached from Settings,
+     or when switching accounts. It shows the same card as the front door rather
+     than a second, plainer form: two sign-in screens that look different is how
+     people end up wondering which one is the real one. */
   function promptSignIn(after) {
-    var offline = isOffline();
-    var mode = 'in';        // 'in' = sign in · 'new' = set a password
+    if (!global.ViewSignIn) return;
 
-    UI.modal({
+    var close = UI.modal({
       title: 'Sign in',
-      body:
-        (offline
-          ? '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:14px">' +
-            '<div class="strong">No accounts yet</div>' +
-            '<div class="small muted">The Supabase project has not been connected, so everything stays ' +
-            'on this device and you are treated as a national executive. Add the two values to ' +
-            '<code>assets/js/backend/config.js</code> to turn on real accounts.</div></div>'
-          : '<div class="segmented" style="width:100%;margin-bottom:14px">' +
-            '<button type="button" data-mode="in" class="is-active" aria-pressed="true">Sign in</button>' +
-            '<button type="button" data-mode="new" aria-pressed="false">Set my password</button>' +
-            '</div>') +
-        '<div class="field"><label for="si-email">Email</label>' +
-        '<input type="text" id="si-email" data-autofocus autocomplete="username" ' +
-        'placeholder="you@filamer.edu.ph"' + (offline ? ' disabled' : '') + '></div>' +
-        '<div class="field"><label for="si-pass">Password</label>' +
-        '<input type="password" id="si-pass" autocomplete="current-password"' +
-        (offline ? ' disabled' : '') + '>' +
-        '<div class="hint" id="si-hint" hidden>At least eight characters. Choose it yourself — ' +
-        'nobody else, here or in the council, ever sees it.</div>' +
-        '<div class="error-text" hidden></div></div>',
-      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
-        '<button type="button" class="btn btn-primary" data-go>' +
-        (offline ? 'Continue' : 'Sign in') + '</button>',
-      onMount: function (root, close) {
-        var go = root.querySelector('[data-go]');
-        var pass = root.querySelector('#si-pass');
-        var hint = root.querySelector('#si-hint');
+      body: '<div id="signin-host">' + ViewSignIn.card({ inModal: true }) + '</div>',
+      onMount: function (root) {
+        var host = root.querySelector('#signin-host');
 
-        U.els('[data-mode]', root).forEach(function (b) {
-          b.addEventListener('click', function () {
-            mode = b.getAttribute('data-mode');
-            U.els('[data-mode]', root).forEach(function (o) {
-              var on = o === b;
-              o.classList.toggle('is-active', on);
-              o.setAttribute('aria-pressed', String(on));
-            });
-            go.textContent = mode === 'new' ? 'Set my password' : 'Sign in';
-            hint.hidden = mode !== 'new';
-            pass.setAttribute('autocomplete', mode === 'new' ? 'new-password' : 'current-password');
-          });
-        });
-
-        function fail(msg) {
-          go.disabled = false;
-          var f = pass.closest('.field');
-          f.classList.add('has-error');
-          var e = f.querySelector('.error-text');
-          e.textContent = msg;
-          e.hidden = false;
-        }
-
-        function submit() {
-          var email = (root.querySelector('#si-email').value || '').trim();
-          var pw = pass.value || '';
-          var f = pass.closest('.field');
-          f.classList.remove('has-error');
-          f.querySelector('.error-text').hidden = true;
-
-          if (!offline) {
-            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-              return fail('That email address does not look right.');
+        function wire() {
+          ViewSignIn.mount(host, {
+            // Redrawing the card in place, so a typed password is not lost to a
+            // full re-render of the page behind the dialog.
+            redraw: function () {
+              host.innerHTML = ViewSignIn.card({ inModal: true });
+              wire();
+            },
+            onDone: function () {
+              close();
+              if (global.App) App.render();
+              UI.toast('Signed in as ' + me.name + '.');
+              if (after) after();
             }
-            if (mode === 'new' && pw.length < 8) {
-              return fail('Too short — use at least eight characters.');
-            }
-          }
-
-          go.disabled = true;
-          var work = mode === 'new' && !offline ? signUp(email, pw) : signIn(email, pw);
-          work.then(function () {
-            close();
-            if (global.App) App.render();
-            UI.toast('Signed in as ' + me.name + '.');
-            if (after) after();
-          }).catch(function (err) {
-            fail(err.message || 'That did not work.');
           });
         }
-
-        go.addEventListener('click', submit);
-        pass.addEventListener('keydown', function (ev) {
-          if (ev.key === 'Enter') submit();
-        });
+        wire();
       }
     });
   }
