@@ -72,10 +72,12 @@
       '<div class="photo-hero-body">' +
       '<div class="hero-date">' + U.esc(U.fmtDate(U.today())) + '</div>' +
       '<div class="hero-line">' + headline + '</div>' +
-      (global.TermUI ? TermUI.heroStrip() : '') +
       '<div class="hero-actions">' +
       '<button type="button" class="btn btn-glass" data-create-event>' + UI.icon('plus') + 'New event</button>' +
-      '</div></div></div>';
+      '</div>' +
+      // Below the action, so the photograph has room to be a photograph.
+      (global.TermUI ? TermUI.heroStrip() : '') +
+      '</div></div>';
 
     html += '<div class="pills" role="group" aria-label="Filter the task list">' +
       pill('attention', attention, 'Needs attention', attention > 0) +

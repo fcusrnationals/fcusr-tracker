@@ -33,24 +33,39 @@
     var mine = Store.unitCompliance(myUnitId());
     var urgent = st.passed || st.daysLeft <= 14 || !mine.complies;
 
-    /* One line inside the photograph, so what it says has to be chosen. What you
-       owe outranks how long is left — a date with nothing behind it is not news,
-       and the date is a tap away either way. */
-    var when;
-    if (st.passed) when = 'ended ' + U.fmtDateTiny(st.endDate);
-    else if (st.daysLeft === 0) when = 'ends today';
-    else when = 'ends ' + U.fmtDateTiny(st.endDate);
+    /* Two lines, because one could not say the thing that matters. "Term ends
+       Oct 6" reads as a diary note; what an officer needs to know is that
+       everything they hold has to be finished and filed BEFORE that day, and
+       how much of it is still outstanding.
 
-    var line = mine.complies
-      ? 'Term ' + when + (st.passed ? '' : ' · ' + st.daysLeft + 'd left')
-      : U.plural(mine.outstanding.length, 'activity', 'activities') + ' owed · term ' + when;
+       The whole band is the way in. A white button beside the words pushed the
+       band onto three rows on a phone and turned the foot of the photograph
+       into a poster; a row you press is smaller, and there is nothing to miss. */
+    var head, sub;
 
-    return '<div class="ph-term' + (urgent ? ' is-urgent' : '') + '">' +
-      UI.icon('alert') +
-      '<span class="pht-line">' + U.esc(line) + '</span>' +
-      '<button type="button" class="pht-go" data-my-handover>' +
-      (mine.complies ? 'Review' : 'Open') + '</button>' +
-      '</div>';
+    if (st.passed) {
+      head = 'The term ended on ' + U.fmtDateShort(st.endDate);
+      sub = mine.complies
+        ? 'Everything here is filed — nothing further is owed'
+        : U.plural(mine.outstanding.length, 'activity', 'activities') +
+          ' still to finish and file';
+    } else {
+      head = 'Finish and file everything before ' + U.fmtDateShort(st.endDate);
+      sub = (st.daysLeft === 0 ? 'That is today' : U.plural(st.daysLeft, 'day') + ' left') +
+        (mine.complies
+          ? ' · everything here is filed'
+          : ' · ' + U.plural(mine.outstanding.length, 'activity', 'activities') + ' still owed');
+    }
+
+    return '<button type="button" class="ph-term' + (urgent ? ' is-urgent' : '') +
+      '" data-my-handover>' +
+      UI.icon('alert', 'pht-mark') +
+      '<span class="pht-text">' +
+        '<span class="pht-head">' + U.esc(head) + '</span>' +
+        '<span class="pht-sub">' + U.esc(sub) + '</span>' +
+      '</span>' +
+      UI.icon('chevronRight', 'pht-chev') +
+      '</button>';
   }
 
   function banner() {
@@ -159,7 +174,10 @@
             'removed in one go and everything real is kept.</p>'
           : '<p class="small muted">A national executive ends the rehearsal when the council is ' +
             'ready to use this for real.</p>'),
-      footer: '<button type="button" class="btn btn-primary" data-close>I understand</button>'
+      footer: '<button type="button" class="btn btn-primary" data-close>I understand</button>',
+      // One dialog at a time, but not one instead of the other: what the term
+      // still owes is the reason the rehearsal exists.
+      onClose: function () { global.setTimeout(maybeRemind, 220); }
     });
     return true;
   }
@@ -193,6 +211,12 @@
     });
   }
 
+  /* Said when the app opens, once a day for as long as a term is declared.
+
+     It used to be a notice about a date with a button on it, and the checklist
+     it pointed at only ever opened if somebody pressed that button. If a unit
+     is still holding work, the checklist IS the message — so it opens itself,
+     and the notice is kept only for a unit that has nothing left to do. */
   function maybeRemind() {
     var st = Store.termStatus();
     if (!st.declared || st.closed) return;
@@ -200,41 +224,44 @@
     var t = Store.term();
     var seen = '';
     try { seen = global.sessionStorage.getItem(REMINDED_KEY) || ''; } catch (e) { seen = ''; }
-    // Re-declaring the term, or changing the date, makes it worth saying again.
-    var stamp = t.declaredAt + '|' + t.endDate;
+    /* Re-declaring the term or moving the date makes it worth saying again, and
+       so does a new day: a deadline six weeks out and a deadline on Friday are
+       not the same message, and being told once in September does not carry to
+       the week it matters. */
+    var stamp = t.declaredAt + '|' + t.endDate + '|' + U.today();
     if (seen === stamp) return;
     try { global.sessionStorage.setItem(REMINDED_KEY, stamp); } catch (e) { /* not vital */ }
 
     var mine = Store.unitCompliance(myUnitId());
     var unitName = Store.unitName(myUnitId());
 
+    if (!mine.complies) return myHandoverForm({ auto: true });
+
     UI.modal({
-      title: st.passed ? 'The term has ended' : 'The term is closing',
+      title: st.passed ? 'The term has ended' : 'The term closes ' + U.fmtDate(st.endDate),
       body:
         '<p class="small">' +
         (st.passed
           ? 'The administration closed on <strong>' + U.esc(U.fmtDate(st.endDate)) + '</strong>.'
-          : 'The National executives have set the end of this administration for <strong>' +
-            U.esc(U.fmtDate(st.endDate)) + '</strong> — ' + U.plural(st.daysLeft, 'day') + ' from today.') +
-        ' Every activity must be marked finished and its accomplishment report filed ' +
-        'before then.</p>' +
+          : 'This administration ends on <strong>' + U.esc(U.fmtDate(st.endDate)) + '</strong> — ' +
+            (st.daysLeft === 0 ? '<strong>today</strong>' : U.plural(st.daysLeft, 'day') + ' from today') +
+            '. Every activity must be marked finished and its accomplishment report filed ' +
+            '<strong>before that day</strong>, not after it.') +
+        '</p>' +
         (t.note ? '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
           '<div class="small">' + U.esc(t.note) + '</div></div>' : '') +
-        (mine.complies
-          ? '<div class="card" style="margin-top:12px"><div class="strong">' +
-            U.esc(unitName) + ' is up to date.</div>' +
-            '<div class="small muted">Every activity is finished and filed. Nothing is owed.</div></div>'
-          : '<div class="card" style="margin-top:12px;background:var(--st-overdue-bg);border-color:var(--st-overdue-bd)">' +
-            '<div class="strong">' + U.esc(unitName) + ' still owes ' +
-            U.plural(mine.outstanding.length, 'activity', 'activities') + '.</div>' +
-            '<ul class="small" style="padding-left:18px;line-height:1.7;margin:6px 0 0">' +
-            mine.outstanding.slice(0, 8).map(function (e) {
-              return '<li>' + U.esc(e.title) + '</li>';
-            }).join('') + '</ul></div>') +
+        '<div class="card" style="margin-top:12px;background:var(--st-done-bg);border-color:var(--st-done-bd)">' +
+        '<div class="strong">' + U.esc(unitName) + ' is up to date.</div>' +
+        '<div class="small muted">Every activity is finished and filed. Nothing is owed.</div></div>' +
         '<p class="small muted" style="margin-top:12px">Work is not stopped by this date — ' +
         'you can carry on afterwards. But nothing is deleted, and the next administration ' +
         'cannot be set up, until every unit has filed.</p>',
-      footer: '<button type="button" class="btn btn-primary" data-close>Understood</button>'
+      footer: '<button type="button" class="btn" data-close>Close</button>' +
+        '<button type="button" class="btn btn-primary" data-review data-close>Review what I hold</button>',
+      onMount: function (root) {
+        var r = root.querySelector('[data-review]');
+        if (r) r.addEventListener('click', function () { global.setTimeout(myHandoverForm, 220); });
+      }
     });
   }
 
@@ -245,7 +272,7 @@
       });
     });
     U.els('[data-my-handover]', root).forEach(function (b) {
-      b.addEventListener('click', myHandoverForm);
+      b.addEventListener('click', function () { myHandoverForm(); });
     });
   }
 
@@ -437,7 +464,9 @@
     };
   }
 
-  function myHandoverForm() {
+  function myHandoverForm(opts) {
+    // Guard against being handed a click event by an addEventListener.
+    var auto = !!(opts && opts.auto === true);
     var unitId = myUnitId();
     var unit = Store.unit(unitId);
     var owed = myOwed(unitId);
@@ -462,13 +491,23 @@
 
     var body = '';
 
+    /* Opened by itself, it has to say why it is in the way. Opened by pressing
+       the button, that is already obvious and the line would be noise. */
+    if (auto) {
+      body += '<p class="small" style="margin-top:0">This opened by itself because ' +
+        U.esc(unit ? unit.name : 'this unit') + ' is still holding ' +
+        U.plural(owed.total, 'thing') + ' and the term is closing.</p>';
+    }
+
     if (st.declared) {
       body += '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:16px">' +
-        '<div class="strong">The term closes ' + U.esc(U.fmtDate(st.endDate)) + '</div>' +
+        '<div class="strong">Everything below must be finished and filed before ' +
+        U.esc(U.fmtDate(st.endDate)) + '</div>' +
         '<div class="small muted">' +
         (st.passed
-          ? 'That date has passed. Nothing is deleted while anything below is outstanding.'
-          : U.plural(st.daysLeft, 'day') + ' to go. Work carries on until then, and afterwards.') +
+          ? 'That day has passed. Nothing is deleted while anything below is outstanding.'
+          : (st.daysLeft === 0 ? 'That is today.' : U.plural(st.daysLeft, 'day') + ' left') +
+            '. Work carries on afterwards, but the handover is not complete until this list is empty.') +
         '</div></div>';
     }
 
@@ -478,9 +517,11 @@
         '<p>Every activity is finished, every report is filed on a drive the council owns, ' +
         'and no letter is still out. Nothing is owed.</p></div>';
     } else {
-      body += '<p class="small" style="margin-top:0">' +
-        U.plural(owed.total, 'thing') + ' still owed before ' +
-        U.esc(unit ? unit.name : 'this unit') + ' can hand over.</p>';
+      if (!auto) {
+        body += '<p class="small" style="margin-top:0">' +
+          U.plural(owed.total, 'thing') + ' still owed before ' +
+          U.esc(unit ? unit.name : 'this unit') + ' can hand over.</p>';
+      }
 
       body += block('Activities not finished',
         'Mark the activity complete once its tasks are done.',

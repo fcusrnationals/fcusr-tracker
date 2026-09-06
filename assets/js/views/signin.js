@@ -8,11 +8,16 @@
    There is no "register" here in the usual sense. An executive enrols an email
    address first; setting a password is how that person claims the enrolment
    already waiting for them. Someone who finds the address of the site and signs
-   themselves up gets a login that opens onto nothing at all. */
+   themselves up gets a login that opens onto nothing at all.
+
+   That used to be a second tab on this card, which asked people to know which
+   of two things they were before they had done either. Now there is one form.
+   The first time an address is used, the door works out that no password has
+   ever been set on it and puts up a dialog that cannot be dismissed: choose one
+   now, or go no further. Nobody has to be told which button they are. */
 (function (global) {
   'use strict';
 
-  var mode = 'in';        // 'in' = sign in · 'new' = set a password
   var busy = false;
   var problem = '';
 
@@ -24,17 +29,17 @@
 
     return '<div class="gate-card' + (opts.inModal ? ' in-modal' : '') + '">' +
 
-      /* The campus across the top of the card, with the seal sitting over the
-         join. Both are the council's own marks and both should be plainly
-         visible here — this is the first screen anybody sees. */
-      '<div class="gate-hero">' +
-        '<img class="gate-hero-img" src="assets/img/campus.jpg" alt="" aria-hidden="true">' +
-      '</div>' +
-
-      '<div class="gate-brand">' +
-        '<img class="gate-seal" src="assets/img/fcusr-seal.png" alt="">' +
-        '<div class="gate-name">' + U.esc(Store.trackerTitle(Store.nationalUnitId())) + '</div>' +
-        '<div class="gate-org">' + U.esc(Store.org().name) + '</div>' +
+      /* The council's gold, with the campus inside it rather than pasted on top:
+         the photograph is tinted into the gradient and fades out as it reaches
+         the name, so the picture, the seal and the title read as one field
+         instead of a banner sitting above a form. */
+      '<div class="gate-top">' +
+        '<img class="gate-hero-img" src="assets/img/campus.jpg" alt="" aria-hidden="true" decoding="async">' +
+        '<div class="gate-brand">' +
+          '<img class="gate-seal" src="assets/img/fcusr-seal.png" alt="">' +
+          '<div class="gate-name">' + U.esc(Store.trackerTitle(Store.nationalUnitId())) + '</div>' +
+          '<div class="gate-org">' + U.esc(Store.org().name) + '</div>' +
+        '</div>' +
       '</div>' +
 
       (offline
@@ -43,40 +48,23 @@
           'stays on this device.</span></div>'
         : '') +
 
-      '<div class="segmented gate-modes">' +
-        '<button type="button" data-mode="in"' +
-          (mode === 'in' ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"') +
-          '>Sign in</button>' +
-        '<button type="button" data-mode="new"' +
-          (mode === 'new' ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"') +
-          '>Set my password</button>' +
-      '</div>' +
-
       '<div class="field"><label for="gate-email">Email</label>' +
       '<input type="email" id="gate-email" autocomplete="username" inputmode="email" ' +
       'autocapitalize="off" spellcheck="false" placeholder="you@filamer.edu.ph"></div>' +
 
       '<div class="field"><label for="gate-pass">Password</label>' +
-      '<input type="password" id="gate-pass" autocomplete="' +
-      (mode === 'new' ? 'new-password' : 'current-password') + '">' +
-      (mode === 'new'
-        ? '<div class="hint">At least eight characters. Choose it yourself &mdash; nobody else, ' +
-          'here or in the council, ever sees it.</div>'
-        : '') +
+      '<input type="password" id="gate-pass" autocomplete="current-password">' +
       (problem ? '<div class="error-text">' + U.esc(problem) + '</div>' : '') +
       '</div>' +
 
       '<button type="button" class="btn btn-primary btn-block gate-go"' +
         (busy ? ' disabled' : '') + '>' +
-        U.esc(busy ? 'One moment…' : mode === 'new' ? 'Set my password' : 'Sign in') +
+        U.esc(busy ? 'One moment…' : 'Sign in') +
       '</button>' +
 
       '<p class="gate-foot">' +
-        (mode === 'new'
-          ? 'Your address has to be enrolled by a national executive first. ' +
-            'Setting a password on an address nobody enrolled will not let you in.'
-          : 'First time here? Choose <strong>Set my password</strong> above and use the ' +
-            'address you were enrolled with.') +
+        'First time here? Use the address a national executive enrolled you with. ' +
+        'You will be asked to choose your password once you do.' +
       '</p>' +
 
       '</div>';
@@ -86,52 +74,119 @@
     return '<div class="gate">' + card() + '</div>';
   }
 
+  /* Shown when an address is used for the first time: the password the door was
+     given was not accepted, and no account has ever existed on that address, so
+     the only thing left to do is set one. It cannot be dismissed by clicking
+     away or pressing Escape — there is nothing behind it to go back to, and a
+     half-claimed enrolment is worse than none. */
+  function firstTime(email, typed, onDone) {
+    var working = false;
+
+    UI.modal({
+      title: 'Set your password',
+      dismissible: false,
+      body:
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+        '<div class="strong" style="margin-bottom:3px">This is the first time ' +
+        U.esc(email) + ' has signed in.</div>' +
+        '<div class="small">Choose the password you will use from now on. ' +
+        'You cannot go any further until you do.</div></div>' +
+
+        '<div class="field" style="margin-top:16px"><label for="ft-a">New password</label>' +
+        '<input type="password" id="ft-a" autocomplete="new-password" data-autofocus value="' +
+        U.esc(typed || '') + '">' +
+        '<div class="hint">At least eight characters. Nobody else — here or in the council — ' +
+        'ever sees it, and no executive can look it up.</div></div>' +
+
+        '<div class="field"><label for="ft-b">Type it again</label>' +
+        '<input type="password" id="ft-b" autocomplete="new-password"></div>' +
+
+        '<div class="error-text" data-err hidden></div>' +
+
+        '<p class="small muted">Signed in before? This address would already have a password, ' +
+        'so close this and check what you typed.</p>',
+      footer: '<button type="button" class="btn" data-close>Close</button>' +
+        '<button type="button" class="btn btn-primary" data-go>Set it and sign in</button>',
+      onMount: function (root, close) {
+        var a = root.querySelector('#ft-a');
+        var b = root.querySelector('#ft-b');
+        var err = root.querySelector('[data-err]');
+        var go = root.querySelector('[data-go]');
+
+        function fail(msg) {
+          working = false;
+          go.disabled = false;
+          go.textContent = 'Set it and sign in';
+          err.hidden = false;
+          err.textContent = msg;
+        }
+
+        function submit() {
+          if (working) return;
+          var pw = a.value || '';
+          if (pw.length < 8) return fail('Too short — use at least eight characters.');
+          if (pw !== (b.value || '')) return fail('The two do not match.');
+
+          working = true;
+          err.hidden = true;
+          go.disabled = true;
+          go.textContent = 'One moment…';
+
+          Auth.signUp(email, pw).then(function () {
+            close();
+            onDone();
+          }).catch(function (e) {
+            fail(e && e.alreadyClaimed
+              ? 'This address already has a password. Close this and check the one you typed.'
+              : (e && e.message) || 'That could not be set.');
+          });
+        }
+
+        go.addEventListener('click', submit);
+        [a, b].forEach(function (el) {
+          el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submit(); });
+        });
+      }
+    });
+  }
+
   function mount(root, opts) {
     opts = opts || {};
     var email = root.querySelector('#gate-email');
     var pass = root.querySelector('#gate-pass');
-
-    U.els('[data-mode]', root).forEach(function (b) {
-      b.addEventListener('click', function () {
-        mode = b.getAttribute('data-mode');
-        problem = '';
-        if (opts.redraw) opts.redraw(); else App.render();
-      });
-    });
 
     function submit() {
       if (busy) return;
       var addr = (email.value || '').trim();
       var pw = pass.value || '';
 
-      if (!Auth.isOffline()) {
-        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
-          problem = 'That email address does not look right.';
-          return (opts.redraw || App.render)();
-        }
-        if (mode === 'new' && pw.length < 8) {
-          problem = 'Too short — use at least eight characters.';
-          return (opts.redraw || App.render)();
-        }
+      if (!Auth.isOffline() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
+        problem = 'That email address does not look right.';
+        return (opts.redraw || App.render)();
       }
 
       busy = true;
       problem = '';
       if (opts.redraw) opts.redraw(); else App.render();
 
-      var work = (mode === 'new' && !Auth.isOffline())
-        ? Auth.signUp(addr, pw)
-        : Auth.signIn(addr, pw);
-
-      work.then(function () {
+      function arrived() {
         busy = false;
         problem = '';
         if (opts.onDone) return opts.onDone();
         App.go('#/overview');
         App.render();
         UI.toast('Signed in as ' + Auth.current().name + '.');
-      }).catch(function (err) {
+      }
+
+      Auth.signIn(addr, pw).then(arrived).catch(function (err) {
         busy = false;
+        /* The pair was refused. Either the password is wrong or this address has
+           never had one — and the second is the common case on a system nobody
+           has used yet, so it is handled rather than reported. */
+        if (err && err.badCredentials && !Auth.isOffline()) {
+          if (opts.redraw) opts.redraw(); else App.render();
+          return firstTime(addr, pw, arrived);
+        }
         problem = err.message || 'That did not work.';
         if (opts.redraw) opts.redraw(); else App.render();
       });
@@ -148,8 +203,8 @@
     if (!busy && email && !email.value) email.focus();
   }
 
-  // Called on sign-out so the next person does not land on the last one's mode.
-  function reset() { mode = 'in'; busy = false; problem = ''; }
+  // Called on sign-out so the next person does not land in the last one's state.
+  function reset() { busy = false; problem = ''; }
 
   global.ViewSignIn = { render: render, mount: mount, card: card, reset: reset };
 })(window);

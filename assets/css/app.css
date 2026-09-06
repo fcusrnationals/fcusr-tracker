@@ -519,37 +519,35 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
 }
 .drive-vouch input { margin-top: 1px; }
 
-/* The closing date, living inside the photograph rather than as one more
-   coloured box stacked above it. A standing fact about the year, not an alarm. */
+/* The closing date, as the foot of the photograph rather than a line floating
+   in the middle of it. It runs the full width of the hero, on the fade where
+   the picture has already given out — and the whole band is the button, so it
+   costs two lines rather than three and nothing has to be aimed at. */
 .ph-term {
-  display: flex; align-items: center; gap: 8px; margin-top: 12px;
-  padding: 7px 8px 7px 11px; border-radius: 11px;
-  background: rgb(255 255 255 / .13); border: 1px solid rgb(255 255 255 / .26);
-  backdrop-filter: blur(6px);
-  font-size: 12.5px; color: #FFF; line-height: 1.4;
+  display: flex; align-items: center; gap: 11px; width: 100%;
+  margin: 16px 0 0; padding: 12px 16px 13px;
+  border: 0; border-top: 1px solid rgb(255 255 255 / .16);
+  background: linear-gradient(180deg, rgb(44 29 3 / .30), rgb(32 21 2 / .74));
+  color: #FFF; font: inherit; text-align: left; cursor: pointer;
+  border-radius: 0 0 var(--radius) var(--radius);
 }
-.ph-term svg { width: 15px; height: 15px; flex: 0 0 15px; color: var(--gold-300); }
-.ph-term.is-urgent { background: rgb(196 33 33 / .30); border-color: rgb(255 180 168 / .48); }
-.ph-term.is-urgent svg { color: #FFC9C0; }
-/* Two lines at most, wrapping rather than truncating. Chasing one line meant
-   losing the end of the sentence on a narrow phone, and the end of this
-   sentence is the part that says what is owed. */
-.pht-line {
-  flex: 1; min-width: 0; line-height: 1.35;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+.ph-term:hover { background: linear-gradient(180deg, rgb(52 34 4 / .40), rgb(38 25 2 / .82)); }
+.ph-term.is-urgent {
+  background: linear-gradient(180deg, rgb(78 17 13 / .52), rgb(46 11 8 / .88));
+  border-top-color: rgb(255 180 168 / .34);
 }
-.pht-owed {
-  display: inline-block; margin-left: 7px; padding: 1px 6px; border-radius: 999px;
-  background: rgb(255 255 255 / .22); font-weight: 700; font-size: 11.5px; white-space: nowrap;
+.ph-term.is-urgent:hover {
+  background: linear-gradient(180deg, rgb(94 21 16 / .62), rgb(56 13 9 / .92));
 }
-.pht-go {
-  /* 44px on a touch screen like every other control; the strip grows to suit,
-     which is cheaper than a button people miss. */
-  flex: 0 0 auto; min-height: 44px; padding: 0 13px; border-radius: 9px;
-  background: rgb(255 255 255 / .92); border: 0; color: #2A1B02;
-  font: inherit; font-size: 12px; font-weight: 700; cursor: pointer;
+.pht-mark { width: 17px; height: 17px; flex: 0 0 17px; color: var(--gold-300); }
+.ph-term.is-urgent .pht-mark { color: #FFC9C0; }
+.pht-text { flex: 1; min-width: 0; }
+.pht-head {
+  display: block; font-size: 13.5px; font-weight: 700;
+  letter-spacing: -0.01em; line-height: 1.35;
 }
-.pht-go:hover { background: #FFF; }
+.pht-sub { display: block; font-size: 11.5px; color: rgb(255 255 255 / .76); margin-top: 2px; }
+.pht-chev { width: 17px; height: 17px; flex: 0 0 17px; color: rgb(255 255 255 / .62); }
 
 /* ---------- the Republic, folded away ----------
    Nine colleges listed in full pushed a phone's whole first screen out of the
@@ -583,26 +581,42 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
    fails to load the block is still a dark gold panel with legible type on it. */
 .photo-hero {
   position: relative; isolation: isolate; overflow: hidden;
-  background: #3A2504;
+  /* The council's gold is the ground; the photograph is what happens inside it.
+     It is also the fallback — if the picture never loads this is still a gold
+     panel with legible type on it, not a black box. */
+  background: linear-gradient(146deg, #4A3406 0%, #7A5C0E 44%, #A8811A 76%, #C9A227 100%);
   border-radius: var(--radius); margin-bottom: 14px;
   box-shadow: var(--sh-2);
+  min-height: 232px; display: flex; flex-direction: column; justify-content: flex-end;
 }
+/* `luminosity` hands the picture's light to the gold underneath it and keeps
+   none of its own colour, so the building reads as part of the gradient rather
+   than a photograph pasted behind the words. */
 .photo-hero-img {
   position: absolute; inset: 0; z-index: 0;
-  width: 100%; height: 100%; object-fit: cover; object-position: center 62%;
+  width: 100%; height: 100%; object-fit: cover; object-position: center 58%;
+  opacity: .62; mix-blend-mode: luminosity;
 }
-/* The wash: heavy where the copy is, lighter towards the right. */
+/* Two washes. One across, keeping the left dark enough to carry white text;
+   one down, so the picture gives out into flat gold before the band at the
+   foot rather than being cut off mid-brick. */
 .photo-hero::before {
   content: ""; position: absolute; inset: 0; z-index: 1;
   background:
     linear-gradient(104deg,
-      rgb(40 25 2 / 0.95) 0%,
-      rgb(52 33 3 / 0.88) 34%,
-      rgb(74 48 6 / 0.70) 62%,
-      rgb(104 70 12 / 0.54) 100%),
-    linear-gradient(0deg, rgb(58 37 4 / 0.30), rgb(58 37 4 / 0.30));
+      rgb(40 26 2 / 0.82) 0%,
+      rgb(52 35 3 / 0.68) 36%,
+      rgb(92 68 10 / 0.42) 66%,
+      rgb(140 106 20 / 0.24) 100%),
+    linear-gradient(180deg,
+      rgb(46 30 3 / 0.28) 0%,
+      rgb(46 30 3 / 0.10) 30%,
+      rgb(52 35 4 / 0.44) 74%,
+      rgb(40 26 2 / 0.72) 100%);
 }
-.photo-hero-body { position: relative; z-index: 2; padding: 22px 20px; }
+.photo-hero-body { position: relative; z-index: 2; padding: 22px 20px 0; width: 100%; }
+/* The band is flush with the hero, so the body's side padding stops at it. */
+.photo-hero-body > .ph-term { margin-left: -20px; margin-right: -20px; width: calc(100% + 40px); }
 
 .photo-hero .hero-date {
   color: var(--gold-300); font-size: 12px; font-weight: 700;
@@ -640,23 +654,38 @@ body.is-gated main { padding-bottom: 32px; }
   min-height: calc(100vh - 120px);
   display: flex; align-items: center; justify-content: center; padding: 8px 0 32px;
 }
-/* The campus runs across the top of the card, under a gold wash, with the seal
-   overlapping the join below it. Visible rather than a whisper: this is the
-   first screen anybody sees, and it should say whose building this is. */
-.gate-hero {
-  position: relative; height: 132px; margin: -28px -22px 0;
-  border-radius: 18px 18px 0 0; overflow: hidden; background: #3A2504;
+/* The campus, the seal and the council's name as one gold field that fades out
+   into the card beneath it. A photograph with a hard bottom edge read as a
+   banner stuck on top of a form; tinted into the gradient and faded through the
+   title, the top of the door is one thing rather than two. */
+.gate-top {
+  position: relative; isolation: isolate; overflow: hidden;
+  margin: -28px -22px 20px; padding: 30px 22px 20px;
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(158deg, #7A5D11 0%, #A9841A 36%, #C9A227 68%, #DFC163 100%);
 }
+/* Directly in the gold, with no wrapper: a positioned span with a z-index of
+   its own would make a stacking context, and a blend cannot reach a backdrop it
+   is sealed away from — the picture would come back its own washed-out colour. */
 .gate-hero-img {
-  position: absolute; inset: 0; width: 100%; height: 100%;
-  object-fit: cover; object-position: center 58%;
+  position: absolute; inset: 0;
+  width: 100%; height: 100%; object-fit: cover; object-position: center 66%;
+  opacity: .52; mix-blend-mode: luminosity;
 }
-.gate-hero::after {
-  content: ""; position: absolute; inset: 0;
-  background:
-    linear-gradient(180deg, rgb(40 25 2 / .30) 0%, rgb(40 25 2 / .12) 45%,
-      rgb(58 37 4 / .55) 100%);
+/* Gold at the top where the seal sits, the page's own surface by the bottom,
+   so the name and the council's title are read on paper, not on a picture.
+   The wash has to be heavy: a photograph of a bright building lends its light
+   to the gold beneath it and comes back nearly white unless it is held down. */
+.gate-top::after {
+  content: ""; position: absolute; inset: 0; z-index: 1;
+  background: linear-gradient(180deg,
+    rgb(126 94 14 / .58) 0%,
+    rgb(160 122 24 / .34) 28%,
+    rgb(246 236 209 / .56) 60%,
+    rgb(253 250 244 / .93) 84%,
+    var(--surface) 100%);
 }
+
 .gate-card {
   width: 100%; max-width: 400px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 18px;
@@ -671,15 +700,13 @@ body.is-gated main { padding-bottom: 32px; }
      on the right. Auto lets the margins set both edges. */
   width: auto; max-width: none; padding: 0 18px; margin: -16px -18px 0;
 }
-.gate-card.in-modal .gate-hero { margin: 0 -18px; border-radius: 0; height: 108px; }
+.gate-card.in-modal .gate-top { margin: -16px -18px 18px; border-radius: 0; padding-top: 26px; }
 .gate-card.in-modal .gate-foot { margin-bottom: 2px; }
 
-.gate-brand { text-align: center; margin-bottom: 22px; }
-/* Lifted so it straddles the photograph and the card beneath it. */
+.gate-brand { position: relative; z-index: 2; text-align: center; }
 .gate-seal {
-  width: 84px; height: 84px; display: block; margin: -46px auto 12px;
-  position: relative; z-index: 1;
-  filter: drop-shadow(0 3px 10px rgb(26 16 1 / .35));
+  width: 82px; height: 82px; display: block; margin: 0 auto 12px;
+  filter: drop-shadow(0 3px 12px rgb(26 16 1 / .38));
 }
 .gate-name { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
 .gate-org {
@@ -696,9 +723,6 @@ body.is-gated main { padding-bottom: 32px; }
 }
 .gate-note svg { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 2px; color: var(--gold-700); }
 
-.gate-modes { width: 100%; margin-bottom: 18px; }
-.gate-modes button { flex: 1; }
-
 .gate-card .field { margin-bottom: 16px; }
 .gate-card input { min-height: 48px; font-size: 16px; }   /* 16px stops iOS zooming in */
 .gate-go { min-height: 50px; font-size: 15px; margin-top: 4px; }
@@ -713,7 +737,7 @@ body.is-gated main { padding-bottom: 32px; }
   /* On a phone the card is the screen, so it keeps its surface and its photo
      runs to both edges rather than floating in the middle of nothing. */
   .gate-card { border: 0; box-shadow: none; padding: 0 16px 8px; border-radius: 0; }
-  .gate-hero { margin: 0 -16px; border-radius: 0; height: 150px; }
+  .gate-top { margin: 0 -16px 18px; border-radius: 0; padding: 34px 16px 22px; }
 }
 
 /* ---------- sections within a screen ----------

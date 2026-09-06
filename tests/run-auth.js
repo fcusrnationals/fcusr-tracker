@@ -353,7 +353,9 @@ const FILES = [
     check('signed out, the app shows the door instead', !!D.querySelector('.gate-card'), txt().slice(0, 60));
     check('and not the Overview', !/Needs attention/.test(txt()));
     check('the navigation goes with it', D.body.classList.contains('is-gated'));
-    check('both ways in are offered', D.querySelectorAll('[data-mode]').length === 2);
+    check('one form, not a choice of two', D.querySelectorAll('[data-mode]').length === 0);
+    check('and it asks for both halves',
+      !!D.querySelector('#gate-email') && !!D.querySelector('#gate-pass'));
 
     // A bad address never reaches the network.
     const before = SB.requests.length;
@@ -362,6 +364,73 @@ const FILES = [
     D.querySelector('.gate-go').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     check('a malformed address is caught here', SB.requests.length === before);
     check('and it says so', /does not look right/i.test(txt()), txt().slice(0, 80));
+
+    /* ---- an address that has never had a password ----
+       The door must not report this as a bad password: it must stop the person
+       and make them set one, with no way past the dialog. */
+    SB.enrolments['newbie@filamer.edu.ph'] = {
+      full_name: 'Newbie Officer', position: 'Secretary',
+      unit_id: CN, access: 'officer', event_ids: []
+    };
+    D.querySelector('#gate-email').value = 'newbie@filamer.edu.ph';
+    D.querySelector('#gate-pass').value = 'whatever-they-typed';
+    D.querySelector('.gate-go').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 60));
+
+    const ftDialog = () => {
+      const f = D.querySelector('#ft-a');
+      return f ? f.closest('.modal-backdrop') : null;
+    };
+    const dlg = ftDialog();
+    check('a first sign-in is stopped and asked for a password', !!dlg);
+    check('and it is not signed in yet', !Auth.signedIn());
+    check('it offers no corner to escape through', !dlg.querySelector('.modal-head [data-close]'));
+    check('the dialog cannot be clicked away', (() => {
+      dlg.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true }));
+      return !!ftDialog();
+    })());
+    check('nor pressed away', (() => {
+      D.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return !!ftDialog();
+    })());
+
+    // Too short, and the two must agree.
+    D.querySelector('#ft-a').value = 'short';
+    D.querySelector('#ft-b').value = 'short';
+    dlg.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    check('a short password is refused', !SB.users['newbie@filamer.edu.ph']);
+    D.querySelector('#ft-a').value = 'a-real-password';
+    D.querySelector('#ft-b').value = 'a-real-passwrod';
+    dlg.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    check('and so is a mistyped repeat', !SB.users['newbie@filamer.edu.ph']);
+
+    D.querySelector('#ft-b').value = 'a-real-password';
+    dlg.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 60));
+    check('setting one claims the enrolment', !!SB.users['newbie@filamer.edu.ph']);
+    check('and lets them straight in', Auth.signedIn() && Auth.current().name === 'Newbie Officer');
+    check('the dialog is gone', !ftDialog());
+    check('and so is the door', !D.querySelector('.gate-card'));
+
+    // A wrong password on an address that DOES have one is still a wrong password.
+    await Auth.signOut();
+    window.App.render();
+    D.querySelector('#gate-email').value = 'newbie@filamer.edu.ph';
+    D.querySelector('#gate-pass').value = 'not-it';
+    D.querySelector('.gate-go').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 60));
+    const dlg2 = ftDialog();
+    D.querySelector('#ft-a').value = 'another-password';
+    D.querySelector('#ft-b').value = 'another-password';
+    dlg2.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 60));
+    check('a claimed address cannot be re-claimed',
+      SB.users['newbie@filamer.edu.ph'].password === 'a-real-password');
+    check('and it says the address already has one',
+      /already has a password/i.test(dlg2.querySelector('[data-err]').textContent));
+    dlg2.querySelector('[data-close]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    check('closing it leaves you at the door, not inside',
+      !Auth.signedIn() && !!D.querySelector('.gate-card'));
 
     // The real thing.
     D.querySelector('#gate-email').value = 'president@filamer.edu.ph';

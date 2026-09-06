@@ -8,6 +8,7 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',
+    chevronRight: '<path d="m9 6 6 6-6 6"/>',
     calendar: '<rect x="3" y="4.5" width="18" height="16.5" rx="2.5"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
     users: '<circle cx="9" cy="8" r="3.6"/><path d="M2.5 21a6.5 6.5 0 0 1 13 0"/><path d="M17 5.2a3.6 3.6 0 0 1 0 6.9M18 14.5a6.5 6.5 0 0 1 3.5 5.8"/>',
@@ -232,7 +233,12 @@
       '<div class="modal' + (opts.wide ? ' wide' : '') + (opts.full ? ' full' : '') +
         '" role="dialog" aria-modal="true" aria-label="' + U.esc(opts.title) + '">' +
         '<div class="modal-head"><h2>' + U.esc(opts.title) + '</h2>' +
-          '<button type="button" class="icon-btn" data-close aria-label="Close">' + icon('close') + '</button></div>' +
+          /* A dialog that must be answered offers no corner to escape through.
+             Every one of them carries its own buttons saying what the answers
+             are, so there is nothing to be stranded by. */
+          (opts.dismissible === false ? '' :
+            '<button type="button" class="icon-btn" data-close aria-label="Close">' + icon('close') + '</button>') +
+        '</div>' +
         '<div class="modal-body">' + (opts.body || '') + '</div>' +
         (opts.footer ? '<div class="modal-foot">' + opts.footer + '</div>' : '') +
       '</div>';
@@ -253,7 +259,12 @@
     }
 
     function onKey(ev) {
-      if (ev.key === 'Escape') { ev.stopPropagation(); close(); return; }
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        // dismissible:false means answered, not merely difficult.
+        if (opts.dismissible !== false) close();
+        return;
+      }
       if (ev.key !== 'Tab') return;
       var f = U.els('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled])', backdrop);
       if (!f.length) return;

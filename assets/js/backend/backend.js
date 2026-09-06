@@ -172,6 +172,13 @@
     signIn: function (email, password) {
       return sbRaw('/auth/v1/token?grant_type=password', {
         method: 'POST', auth: false, body: { email: email, password: password }
+      }).catch(function (err) {
+        /* 400 from the token endpoint means the pair was not accepted — either
+           the password is wrong or no account has ever been made on this
+           address. The door needs to tell those apart, so the fact is carried
+           on the error rather than sniffed out of its wording later. */
+        if (err && err.status === 400) err.badCredentials = true;
+        throw err;
       }).then(function (res) {
         adoptTokens(res, email);
         return supabaseDriver.whoami();
@@ -190,6 +197,9 @@
     signUp: function (email, password) {
       return sbRaw('/auth/v1/signup', {
         method: 'POST', auth: false, body: { email: email, password: password }
+      }).catch(function (err) {
+        if (err && /already/i.test(err.message || '')) err.alreadyClaimed = true;
+        throw err;
       }).then(function (res) {
         if (!res.access_token) {
           // Email confirmation is switched on for this project.
