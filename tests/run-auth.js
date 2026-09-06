@@ -201,14 +201,41 @@ const FILES = [
 ];
 
 (async function main() {
+  /* config.js holds the council's real Supabase project. This suite is about
+     what the driver does, so it supplies its own credentials at each step and
+     must start from nothing — otherwise the first assertion below would be
+     testing a deployment file rather than the code. */
+  const TEST_CONFIG = "window.FCU_BACKEND = { driver: 'supabase', " +
+    "supabase: { url: '', anonKey: '' }, appsscript: { url: '' } };";
+
   FILES.forEach((f) => {
     const s = window.document.createElement('script');
-    s.textContent = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    s.textContent = f === 'assets/js/backend/config.js'
+      ? TEST_CONFIG
+      : fs.readFileSync(path.join(ROOT, f), 'utf8');
     window.document.head.appendChild(s);
   });
   window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
 
   const { Backend, Auth, Store } = window;
+
+  /* Every suite now stubs config.js, which means nothing would notice if the
+     real one were emptied — and an empty config.js is a live site with its front
+     door wedged open, showing whatever happens to be on the visitor's device.
+     So the deployed file is read here as text and checked for what it must hold. */
+  console.log('\n--- the deployed credentials ---');
+  {
+    const cfg = fs.readFileSync(path.join(ROOT, 'assets/js/backend/config.js'), 'utf8');
+    const url = (cfg.match(/url:\s*'([^']*)'/) || [])[1] || '';
+    const key = (cfg.match(/anonKey:\s*'([^']*)'/) || [])[1] || '';
+    check('a project URL is deployed', /^https:\/\/[a-z0-9]+\.supabase\.co$/.test(url), url);
+    check('and a publishable key with it', key.length > 20, key.slice(0, 24) + '…');
+    check('the driver is supabase', /driver:\s*'supabase'/.test(cfg));
+    /* The one that would matter. A secret key in a page students can read hands
+       every row in the Republic to anyone who opens the developer tools. */
+    check('no secret key is anywhere in the page',
+      !/sb_secret_|service_role/.test(cfg));
+  }
 
   console.log('\n--- before anything is configured ---');
   check('with no credentials the app falls back to local', Backend.isFallback());

@@ -36,6 +36,22 @@ const SCREENS = [
     executablePath: CHROME, headless: 'new', args: ['--hide-scrollbars']
   });
   const page = await browser.newPage();
+
+  /* Without this the deployed config.js applies, the front door stands, and
+     every screen below audits the same sign-in card — a clean result that means
+     nothing. The audit is about the app behind the door. */
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    if (/assets\/js\/backend\/config\.js/.test(req.url())) {
+      return req.respond({
+        status: 200,
+        contentType: 'application/javascript',
+        body: "window.FCU_BACKEND = { driver: 'supabase', " +
+              "supabase: { url: '', anonKey: '' }, appsscript: { url: '' } };"
+      });
+    }
+    req.continue();
+  });
   await page.setViewport({ width, height, deviceScaleFactor: 2 });
 
   await page.goto(BASE, { waitUntil: 'networkidle0' });

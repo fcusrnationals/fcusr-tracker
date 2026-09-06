@@ -161,6 +161,24 @@ function table(census) {
   const page = await browser.newPage();
   page.on('console', (m) => { if (m.type() === 'error') console.log('  console:', m.text()); });
 
+  /* config.js carries the council's live Supabase project, and a configured
+     backend changes what this page is: the front door stands, and Auth.signIn
+     below would go out to the real server. This suite is about what comes out of
+     the PDF writer, so it serves its own empty credentials in place of the
+     deployed ones and the app runs the way it does before Supabase is wired. */
+  await page.setRequestInterception(true);
+  page.on('request', (req) => {
+    if (/assets\/js\/backend\/config\.js/.test(req.url())) {
+      return req.respond({
+        status: 200,
+        contentType: 'application/javascript',
+        body: "window.FCU_BACKEND = { driver: 'supabase', " +
+              "supabase: { url: '', anonKey: '' }, appsscript: { url: '' } };"
+      });
+    }
+    req.continue();
+  });
+
   const keepPdf = process.argv.indexOf('--pdf') >= 0;
 
   async function scenario(opts) {

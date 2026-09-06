@@ -11,7 +11,12 @@ window.FCU_BACKEND = {
   supabase: {
     // Supabase → Project Settings → API
     url: 'https://wjpsztvvuplppzswnrdx.supabase.co',
-    anonKey: ''     // the long "anon public" key — safe to put in a web page
+    /* The publishable key. It ships inside this page on purpose — it identifies
+       the project, it does not grant anything. What a caller may actually read
+       or write is decided by the row-level security policies in
+       backend/supabase/schema.sql, which is why an anonymous request with this
+       key gets an empty list rather than the Republic's data. */
+    anonKey: 'sb_publishable_-EL0NMs6E2dk1UYLwWY7TQ_sEZAHzdI'
   },
 
   appsscript: {

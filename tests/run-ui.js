@@ -35,6 +35,16 @@ const FILES = [
   'assets/js/forms.js', 'assets/js/app.js'
 ];
 
+/* The app reads its backend credentials from config.js, which now holds a live
+   Supabase project — and a configured backend changes how the whole app behaves:
+   the front door stands, and nobody sees anything until they sign in. A test
+   suite must not inherit that from a deployment file. It decides the mode it is
+   testing, so this stands in for config.js and the walk-through below runs the
+   way a council runs it before Supabase is connected. The gate is tested on its
+   own, further down, by switching the credentials on at runtime. */
+const TEST_CONFIG = "window.FCU_BACKEND = { driver: 'supabase', " +
+  "supabase: { url: '', anonKey: '' }, appsscript: { url: '' } };";
+
 window.HTMLCanvasElement.prototype.getContext = () => null;
 window.scrollTo = () => {};
 window.Element.prototype.scrollIntoView = function () {};
@@ -46,7 +56,9 @@ console.log('--- boot ---');
 try {
   FILES.forEach((f) => {
     const s = window.document.createElement('script');
-    s.textContent = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    s.textContent = f === 'assets/js/backend/config.js'
+      ? TEST_CONFIG
+      : fs.readFileSync(path.join(ROOT, f), 'utf8');
     window.document.head.appendChild(s);
   });
   if (window.document.readyState === 'loading') {
@@ -94,6 +106,30 @@ const setValue = (el, v) => {
 
 check('booted with a rendered view', view().children.length > 0);
 check('no errors on boot', errors.length === 0, errors.join(' | '));
+
+/* ---------------- the front door ----------------
+   Offline there is nothing to authenticate against and a password box would be
+   theatre, so the app opens straight in. Connect a backend and the door stands.
+   Both are real states of this app — a council runs offline until Supabase is
+   wired — so both are checked here by switching the credentials at runtime. */
+console.log('\n--- the gate ---');
+check('offline, the app opens without asking', !$('.gate-card') && !!$('#view').children.length);
+check('and it knows it is offline', window.Auth.isOffline());
+
+const CFG = window.Backend.config.supabase;
+CFG.url = 'https://example.supabase.co';
+CFG.anonKey = 'sb_publishable_test';
+window.App.render();
+check('with a backend connected the door stands', !!$('.gate-card'));
+check('the shell is hidden behind it', D.body.classList.contains('is-gated'));
+check('and the Republic\'s work is not on screen', !$('.photo-hero'));
+check('the sign-in card is the whole screen', !!$('.gate .gate-card'));
+
+CFG.url = '';
+CFG.anonKey = '';
+window.App.render();
+check('and it opens again once the backend is gone', !$('.gate-card') &&
+  !D.body.classList.contains('is-gated'));
 
 /* ---------------- scroll regressions ---------------- */
 console.log('\n--- scroll behaviour ---');
