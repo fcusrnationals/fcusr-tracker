@@ -531,7 +531,16 @@
       if (l.eventId && !eventIds[l.eventId]) l.eventId = '';
       if (!unitIds[l.unitId]) l.unitId = nat.id;
       if (!personIds[l.inChargeId]) l.inChargeId = '';
-      l.stops = l.stops.filter(function (st) { return officeIds[st.officeId]; });
+      /* An office that has been deleted leaves its stops behind: the letter
+         did go there. The name it was called at the time is kept so the trail
+         still reads, and only a stop with neither is dropped. */
+      l.stops.forEach(function (st) {
+        if (st.officeId && !officeIds[st.officeId]) {
+          if (!st.label) st.label = 'A former office';
+          st.officeId = '';
+        }
+      });
+      l.stops = l.stops.filter(function (st) { return st.officeId || st.label; });
     });
     s.letters = s.letters.filter(function (l) { return l.stops.length > 0; });
     s.tasks.forEach(function (t) { if (!personIds[t.assigneeId]) t.assigneeId = ''; });
@@ -1121,34 +1130,63 @@
      logbook kept honestly, not a signature, and it is worth saying plainly so
      nobody mistakes one for the other. */
 
-  var OFFICE_SEED_VERSION = 1;
+  var OFFICE_SEED_VERSION = 2;
 
   /* A starting list, editable in Settings. Turnaround is how long that office
      usually takes; a letter sitting longer than that is called stuck, which is
      the difference between a record and something that tells you to go and
      chase it. */
   var DEFAULT_OFFICES = [
-    ['ADV',  'Adviser',                            2],
-    ['DEAN', 'Dean of the College',                3],
-    ['OSA',  'Office of Student Affairs',          3],
-    ['GUID', 'Guidance Office',                    3],
+    // The council's own signatories come first: a letter is signed inside the
+    // Republic before it is sent anywhere in the University.
+    ['AUTH', 'The author / Senator / Governor',    1],
+    ['GOV',  'Governor / FCUSR President',         2],
+    ['PRES', 'FCUSR President',                    2],
+    ['ADV',  'Adviser (JHS, SHS, National)',       2],
+    ['DEAN', 'Principal / Dean',                   3],
+    ['OSA',  'OSA, Director',                      3],
+    ['BUD',  'Budget Officer / Accountant / Business Manager', 3],
     ['VPAA', 'VP for Academic Affairs',            5],
     ['VPF',  'VP for Finance',                     5],
+    ['OP',   'University President',               7],
+    // Not on any of the three standard routes, but real desks a letter reaches.
+    ['GUID', 'Guidance Office',                    3],
     ['PPO',  'Physical Plant Office',              3],
     ['REG',  'Office of the Registrar',            3],
     ['CM',   'Campus Ministry',                    3],
-    ['SEC',  'Security Office',                    2],
-    ['OP',   'Office of the University President', 7]
+    ['SEC',  'Security Office',                    2]
   ];
 
-  /* The paths most letters take, offered when one is created so nobody types
-     the same five offices out again. The route can still be changed afterwards. */
+  /* Every letter the council sends out is signed by the FCUSR President. It is
+     not one office among the others, so the app knows which one it is. */
+  var PRESIDENT_CODE = 'PRES';
+
+  /* The three routes the council actually uses, copied from the FCUSR's own
+     briefing, in the order the signatures are collected. Offered when a letter
+     is created so nobody types ten offices out again — and so a letter that
+     skips a desk is a decision somebody made rather than something forgotten.
+
+     The route can still be changed afterwards: these are the common cases, not
+     the only ones. */
   var ROUTE_TEMPLATES = [
-    ['Activity proposal',      ['ADV', 'DEAN', 'OSA', 'VPAA', 'OP']],
-    ['Venue or equipment',     ['OSA', 'PPO']],
-    ['Solicitation or budget', ['ADV', 'OSA', 'VPF']],
-    ['Excuse from classes',    ['OSA', 'DEAN', 'VPAA']],
-    ['Simple request',         ['OSA']]
+    {
+      name: 'Collection of money or request for budget',
+      codes: ['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'BUD', 'VPAA', 'VPF', 'OP']
+    },
+    {
+      name: 'Permission to attend a conference or seminar',
+      codes: ['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'BUD', 'VPAA', 'VPF', 'OP'],
+      note: 'Attach the invitation letter.'
+    },
+    {
+      name: 'Excusing students from their classes',
+      codes: ['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'VPAA']
+    },
+    {
+      name: 'Something else — start with the council',
+      codes: ['AUTH', 'GOV', 'PRES'],
+      note: 'Add the University offices this particular letter has to reach.'
+    }
   ];
 
   var LETTER_STATUSES = ['Routing', 'Approved', 'Declined', 'Withdrawn'];
@@ -1180,14 +1218,21 @@
     };
   }
 
+  /* A signatory is an office wherever there is one, because an office outlives
+     whoever is sitting in it — "the Dean" is still right next year. Some
+     signatures belong to no office at all, though: the senator who wrote the
+     letter, an accountant standing in, a person named on this letter only. So a
+     stop is an office id or, failing that, a typed name, and never neither. */
   function cleanStop(st) {
     if (!st || typeof st !== 'object') return null;
     var officeId = typeof st.officeId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(st.officeId)
       ? st.officeId : '';
-    if (!officeId) return null;
+    var label = str(st.label, LIMITS.name);
+    if (!officeId && !label) return null;
     return {
       id: id(st.id, 'stp'),
       officeId: officeId,
+      label: label,
       // Who walked it over, and who took it in. Both are names, not accounts.
       forwardedBy: str(st.forwardedBy, LIMITS.name),
       receivedBy: str(st.receivedBy, LIMITS.name),
@@ -1216,6 +1261,10 @@
       inChargeName: str(l.inChargeName, LIMITS.name),
       deadline: dateOnly(l.deadline),
       status: oneOf(l.status, LETTER_STATUSES, 'Routing'),
+      /* Set only when somebody answered, in as many words, that this letter
+         never leaves the council — which is the one reason the President's
+         signature may be missing from it. */
+      internal: !!l.internal,
       stops: (Array.isArray(l.stops) ? l.stops : []).map(cleanStop).filter(Boolean).slice(0, 30),
       sample: !!l.sample,
       createdAt: stamp(l.createdAt),
@@ -1290,12 +1339,33 @@
     return true;
   }
 
+  function officeByCode(code) {
+    for (var i = 0; i < state.offices.length; i++) {
+      if (state.offices[i].code === code && state.offices[i].active !== false) return state.offices[i];
+    }
+    return null;
+  }
+
+  /* Which office is the President's. Returns '' if somebody has deleted or
+     deactivated it, in which case the app cannot insist on a signature from a
+     desk that no longer exists. */
+  function presidentOfficeId() {
+    var o = officeByCode(PRESIDENT_CODE);
+    return o ? o.id : '';
+  }
+
+  function isPresidentOffice(oid) {
+    var pid = presidentOfficeId();
+    return !!pid && oid === pid;
+  }
+
   function routeTemplates() {
     return ROUTE_TEMPLATES.map(function (t) {
       return {
-        name: t[0],
-        officeIds: t[1].map(function (code) {
-          var match = state.offices.filter(function (o) { return o.code === code && o.active !== false; })[0];
+        name: t.name,
+        note: t.note || '',
+        officeIds: t.codes.map(function (code) {
+          var match = officeByCode(code);
           return match ? match.id : '';
         }).filter(Boolean)
       };
@@ -1321,22 +1391,73 @@
     return null;
   }
 
+  /* What to call a stop, wherever one is shown. */
+  function stopName(st) {
+    if (!st) return '';
+    if (st.officeId) {
+      var o = office(st.officeId);
+      if (o) return o.name;
+    }
+    return st.label || 'Office';
+  }
+
+  /* How long this desk usually takes. A named person has no turnaround on
+     record, so they get the same three days an unknown office would. */
+  function stopTurnaround(st) {
+    var o = st && st.officeId ? office(st.officeId) : null;
+    return o ? o.turnaroundDays : 3;
+  }
+
+  /* Two stops are the same desk when they are the same office, or — for a
+     person — the same name. Used to tell a second run at a desk from a new one. */
+  function sameDesk(a, b) {
+    if (!a || !b) return false;
+    if (a.officeId || b.officeId) return a.officeId === b.officeId;
+    return !!a.label && a.label === b.label;
+  }
+
   function letterInCharge(l) {
     if (!l) return 'Unassigned';
     var p = person(l.inChargeId);
     return p ? p.name : (l.inChargeName || 'Unassigned');
   }
 
+  /* A fresh attempt at the same desk, after that desk sent the letter back. */
+  function respawn(st) {
+    var fresh = newStop(st.officeId);
+    fresh.label = st.label;
+    return fresh;
+  }
+
   function newStop(oid) {
     return {
-      id: U.uid('stp'), officeId: oid, forwardedBy: '', receivedBy: '',
+      id: U.uid('stp'), officeId: oid, label: '', forwardedBy: '', receivedBy: '',
       receivedAt: '', releasedAt: '', outcome: '', note: ''
     };
   }
 
+  /* A route arrives either as `route` — entries that may name an office or a
+     person — or as plain `officeIds`, which is the same thing said the shorter
+     way when every signatory is an office. */
+  function toEntries(data) {
+    if (Array.isArray(data.route)) return data.route;
+    return (data.officeIds || []).map(function (oid) { return { officeId: oid }; });
+  }
+
+  function entryStop(e) {
+    if (!e) return null;
+    if (typeof e === 'string') e = { officeId: e };
+    var oid = e.officeId && office(e.officeId) ? e.officeId : '';
+    var label = str(e.label, LIMITS.name);
+    if (!oid && !label) return null;
+    var st = newStop(oid);
+    st.label = label;
+    return st;
+  }
+
   function addLetter(data) {
-    var stops = (data.officeIds || []).filter(function (oid) { return !!office(oid); }).map(newStop);
-    if (!stops.length) throw new Error('Choose at least one office for it to go to.');
+    var stops = toEntries(data).map(entryStop).filter(Boolean);
+    if (!stops.length) throw new Error('Choose at least one office or person to sign it.');
 
     var l = cleanLetter({
       id: U.uid('ltr'),
@@ -1345,6 +1466,7 @@
       subject: data.subject,
       inChargeId: data.inChargeId, inChargeName: data.inChargeName,
       deadline: data.deadline, status: 'Routing', stops: stops,
+      internal: !!data.internal,
       createdAt: nowISO(), updatedAt: nowISO()
     });
     if (!l) throw new Error('Give the letter a subject.');
@@ -1362,7 +1484,34 @@
     if ('inChargeName' in data) l.inChargeName = str(data.inChargeName, LIMITS.name);
     if ('deadline' in data) l.deadline = dateOnly(data.deadline);
     if ('status' in data && LETTER_STATUSES.indexOf(data.status) >= 0) l.status = data.status;
-    if ('officeIds' in data && Array.isArray(data.officeIds)) setRoute(l, data.officeIds);
+    if ('internal' in data) l.internal = !!data.internal;
+    if (Array.isArray(data.route) || Array.isArray(data.officeIds)) setRoute(l, toEntries(data));
+    l.updatedAt = nowISO();
+    commit();
+    return l;
+  }
+
+  /* An office that has the letter in front of it can refuse to sign until
+     somebody else has signed first. That happens constantly, and until now the
+     only way to record it was to edit the whole route — which is the one thing
+     you cannot do calmly while standing at a counter. So: put a desk in at a
+     named place, without disturbing anything already signed.
+
+     `before` is the index to insert at. Anything already received or released
+     is history and cannot be pushed aside, so the insertion point is clamped
+     past it. */
+  function insertStop(lid, entry, before) {
+    var l = letter(lid);
+    if (!l) return null;
+    var st = entryStop(entry);
+    if (!st) throw new Error('Choose an office, or type who has to sign.');
+    if (l.stops.length >= 30) throw new Error('That letter already has thirty signatories on it.');
+
+    var settled = l.stops.filter(function (s) { return s.receivedAt || s.releasedAt; }).length;
+    var at = Math.max(settled, Math.min(Number(before), l.stops.length));
+    if (!isFinite(at)) at = l.stops.length;
+
+    l.stops.splice(at, 0, st);
     l.updatedAt = nowISO();
     commit();
     return l;
@@ -1371,17 +1520,16 @@
   /* Changing the route keeps whatever has already happened. A stop an office has
      already taken the letter in at stays exactly as recorded, and only the ones
      not yet reached are rearranged — history is not editable by reordering. */
-  function setRoute(l, officeIds) {
+  function setRoute(l, entries) {
     var kept = l.stops.filter(function (s) { return s.receivedAt || s.releasedAt; });
-    var keptOffices = {};
-    kept.forEach(function (s) { keptOffices[s.officeId] = true; });
-    var fresh = officeIds.filter(function (oid) {
-      return office(oid) && !keptOffices[oid];
-    }).map(function (oid) {
+    var fresh = entries.map(entryStop).filter(Boolean).filter(function (st) {
+      return !kept.some(function (k) { return sameDesk(k, st); });
+    }).map(function (st) {
+      // Reuse the entry already standing for that desk, so its id survives.
       var existing = l.stops.filter(function (s) {
-        return s.officeId === oid && !s.receivedAt && !s.releasedAt;
+        return sameDesk(s, st) && !s.receivedAt && !s.releasedAt;
       })[0];
-      return existing || newStop(oid);
+      return existing || st;
     });
     l.stops = kept.concat(fresh).slice(0, 30);
   }
@@ -1412,7 +1560,7 @@
   function isRepeatOf(l, s) {
     var i = l.stops.indexOf(s);
     var prev = i > 0 ? l.stops[i - 1] : null;
-    return !!prev && wasReturned(prev) && prev.officeId === s.officeId;
+    return !!prev && wasReturned(prev) && sameDesk(prev, s);
   }
 
   function sentBackAwaitingRelodge(l) {
@@ -1446,8 +1594,7 @@
     // from the day it came back rather than after a grace period.
     if (sentBackAwaitingRelodge(l)) return true;
     if (!s.receivedAt) return false;
-    var o = office(s.officeId);
-    return daysAtCurrent(l) > (o ? o.turnaroundDays : 3);
+    return daysAtCurrent(l) > stopTurnaround(s);
   }
 
   function isLetterOverdue(l) {
@@ -1465,7 +1612,7 @@
 
     var s = currentStop(l);
     if (!s) return 'Approved';
-    var name = officeName(s.officeId);
+    var name = stopName(s);
     if (!s.receivedAt) {
       if (isRepeatOf(l, s)) return 'Returned by ' + name + ' — needs revising';
       var moved = l.stops.some(function (x) { return !!x.releasedAt; });
@@ -1521,7 +1668,7 @@
        shows both passes and the reason it came back is still readable. */
     if (wasReturned(s)) {
       var at = l.stops.indexOf(s);
-      l.stops.splice(at + 1, 0, newStop(s.officeId));
+      l.stops.splice(at + 1, 0, respawn(s));
       l.status = 'Routing';
     } else {
       l.status = currentStop(l) ? 'Routing' : 'Approved';
@@ -1541,8 +1688,8 @@
     if (!s || !wasReturned(s)) return l;
     var at = l.stops.indexOf(s);
     var nextOne = l.stops[at + 1];
-    if (!nextOne || nextOne.officeId !== s.officeId) {
-      l.stops.splice(at + 1, 0, newStop(s.officeId));
+    if (!nextOne || !sameDesk(nextOne, s)) {
+      l.stops.splice(at + 1, 0, respawn(s));
     }
     l.status = 'Routing';
     l.updatedAt = nowISO();
@@ -2238,6 +2385,9 @@
     isStuck: isStuck, isLetterOverdue: isLetterOverdue, letterNeedsAttention: letterNeedsAttention,
     letterWhere: letterWhere, letterProgress: letterProgress, letterStats: letterStats,
     receiveStop: receiveStop, releaseStop: releaseStop, reopenStop: reopenStop,
+    insertStop: insertStop, presidentOfficeId: presidentOfficeId,
+    stopName: stopName, stopTurnaround: stopTurnaround, sameDesk: sameDesk,
+    isPresidentOffice: isPresidentOffice, officeByCode: officeByCode,
     setLetterStatus: setLetterStatus, byLetterUrgency: byLetterUrgency,
     org: org, updateOrg: updateOrg,
     term: term, termStatus: termStatus, declareTerm: declareTerm, withdrawTerm: withdrawTerm,

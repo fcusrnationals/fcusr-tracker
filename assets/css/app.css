@@ -1298,6 +1298,9 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
      touch screen these keep their lighter look and take the full height. */
   .btn-sm { min-height: 44px; }
   .segmented button { min-height: 44px; }
+  /* Reordering the signatories is three targets side by side in a narrow row —
+     the easiest place in the app to hit the wrong one. */
+  .rp-bar .btn { min-height: 44px; min-width: 40px; }
 }
 
 /* Even with a mouse, a target needs some height to aim at. */

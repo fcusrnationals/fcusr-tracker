@@ -79,10 +79,9 @@
          for the office to complete by hand. Signature is always blank — this
          system never claims to hold anybody's signature. */
       var rows = l.stops.map(function (s, i) {
-        var o = Store.office(s.officeId);
         return [
           String(i + 1),
-          o ? o.name : 'Office',
+          Store.stopName(s),
           s.receivedBy || '',
           s.receivedAt ? U.fmtDateTiny(s.receivedAt) : '',
           s.outcome || '',

@@ -287,7 +287,9 @@
     return close;
   }
 
-  // Confirmations are reserved for deletions.
+  /* Confirmations are mostly deletions, so that is the default shape: a red
+     button and a plain Cancel. A few are a real question with two honest
+     answers instead — those pass their own labels and tone:'primary'. */
   function confirm(opts) {
     return new Promise(function (resolve) {
       var settled = false;
@@ -295,8 +297,10 @@
         title: opts.title,
         body: '<p>' + U.esc(opts.message) + '</p>' +
           (opts.detail ? '<p class="small muted">' + U.esc(opts.detail) + '</p>' : ''),
-        footer: '<button type="button" class="btn" data-cancel>Cancel</button>' +
-          '<button type="button" class="btn btn-danger" data-ok data-autofocus>' +
+        footer: '<button type="button" class="btn" data-cancel>' +
+          U.esc(opts.cancelLabel || 'Cancel') + '</button>' +
+          '<button type="button" class="btn ' +
+          (opts.tone === 'primary' ? 'btn-primary' : 'btn-danger') + '" data-ok data-autofocus>' +
           U.esc(opts.confirmLabel || 'Delete') + '</button>',
         onMount: function (root, close) {
           root.querySelector('[data-ok]').addEventListener('click', function () {

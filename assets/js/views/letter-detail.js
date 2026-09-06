@@ -23,6 +23,7 @@
     if (e) meta.push(e.title);
     else meta.push('Council business');
     if (l.deadline) meta.push('Needed by ' + U.fmtDateShort(l.deadline));
+    if (l.internal) meta.push('Internal to the council');
 
     var html = '<a class="breadcrumb" href="#/letters">' + UI.icon('back') + 'All letters</a>';
 
@@ -42,7 +43,7 @@
       '<span class="wn-label">Where it is now</span>' +
       '<span class="wn-line">' + U.esc(Store.letterWhere(l)) + '</span>' +
       (Store.isStuck(l) && cur && !Store.wasReturned(cur)
-        ? '<span class="wn-note">Longer than ' + U.esc(Store.officeName(cur.officeId)) +
+        ? '<span class="wn-note">Longer than ' + U.esc(Store.stopName(cur)) +
           ' usually takes. Worth following up.</span>'
         : '') +
       '</div>';
@@ -90,6 +91,10 @@
         actions = '<button type="button" class="btn btn-sm btn-primary" data-release="' + U.esc(s.id) + '">' +
           'Record the outcome</button>';
       }
+      /* The commonest thing an office says is "not until so-and-so has signed".
+         Recording that should not mean editing the whole route from a counter. */
+      actions += '<button type="button" class="btn btn-sm btn-ghost" data-insert="' + U.esc(s.id) + '">' +
+        UI.icon('plus') + 'Someone must sign first</button>';
     }
 
     // A repeat is the same desk a second time, after it sent the letter back.
@@ -101,7 +106,8 @@
         (st === 'released' ? UI.icon('check') : st === 'returned' ? '!' :
          st === 'noted' ? '\u00b7' : (i + 1)) + '</span>' +
       '<div class="ts-body">' +
-        '<div class="ts-office">' + U.esc(Store.officeName(s.officeId)) +
+        '<div class="ts-office">' + U.esc(Store.stopName(s)) +
+          (!s.officeId ? ' <span class="chip chip-plain">person</span>' : '') +
           (repeat ? ' <span class="chip chip-plain">second time</span>' : '') +
           (isCurrent ? ' <span class="chip chip-plain">here now</span>' : '') + '</div>' +
         '<div class="ts-lines">' + lines.join('<br>') + '</div>' +
@@ -118,6 +124,9 @@
     });
     U.els('[data-release]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.releaseForm(l.id, b.getAttribute('data-release')); });
+    });
+    U.els('[data-insert]', root).forEach(function (b) {
+      b.addEventListener('click', function () { Forms.insertStopForm(l.id, b.getAttribute('data-insert')); });
     });
     var slip = root.querySelector('[data-slip]');
     if (slip) slip.addEventListener('click', function () {

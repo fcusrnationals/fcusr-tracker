@@ -461,6 +461,25 @@
       U.esc(l ? l.inChargeName : '') + '">';
   }
 
+  /* The FCUSR President signs the council's papers. The one exception anybody
+     could name is a letter that never leaves the council, so that is exactly
+     what this asks — and the answer is kept on the letter, because "we decided
+     this one is internal" is a fact worth being able to see later. */
+  function askIfInternal(subject) {
+    return UI.confirm({
+      title: 'The FCUSR President signs this',
+      message: 'The President signs every letter and communication the council ' +
+        'sends out. Taking them off the list is only right if ' +
+        (subject ? '\u201c' + subject + '\u201d' : 'this letter') +
+        ' stays inside the FCUSR and goes to no University office.',
+      detail: 'If it is going to an adviser, a dean, the OSA or anyone else outside ' +
+        'the council, the President signs it first.',
+      tone: 'primary',
+      cancelLabel: 'Keep the President',
+      confirmLabel: 'It is internal — remove'
+    });
+  }
+
   function letterForm(letterId, opts) {
     opts = opts || {};
     var l = letterId ? Store.letter(letterId) : null;
@@ -472,7 +491,11 @@
 
     // The offices already chosen, in order. Stops that have happened cannot be
     // moved, so they are shown locked.
-    var route = (d.stops || []).map(function (s) { return s.officeId; });
+    /* Entries, not office ids: most signatories are an office, but a letter can
+       also be signed by somebody who holds none. */
+    var route = (d.stops || []).map(function (s) {
+      return { officeId: s.officeId, label: s.label };
+    });
     var lockedCount = (d.stops || []).filter(function (s) { return s.receivedAt || s.releasedAt; }).length;
     var templates = Store.routeTemplates();
     var openEvents = Store.events({ activeOnly: true });
@@ -501,21 +524,32 @@
         hint: 'Optional.'
       }) +
       '</div>' +
-      '<div class="field"><span class="field-label">Where it has to go <span class="req">*</span></span>' +
+      '<div class="field"><span class="field-label">Signatories, in order <span class="req">*</span></span>' +
+      '<p class="hint" style="margin:-2px 0 8px">Every desk the letter has to be signed at, ' +
+      'from the person who wrote it to the last signature. Start from one of the council&rsquo;s ' +
+      'three usual letters and change what does not apply.</p>' +
       (templates.length
         ? '<select id="f-ltemplate" style="margin-bottom:10px">' +
-          '<option value="">Start from a common route…</option>' +
+          '<option value="">Start from a common letter…</option>' +
           templates.map(function (t, i) {
             return '<option value="' + i + '">' + U.esc(t.name) + '</option>';
           }).join('') + '</select>'
         : '') +
+      '<div id="tpl-note" hidden></div>' +
       '<div id="route-list"></div>' +
       '<div class="row" style="gap:6px;flex-wrap:nowrap;margin-top:8px">' +
-      '<select id="f-laddoffice" style="flex:1"><option value="">Add an office…</option>' +
+      '<select id="f-laddoffice" style="flex:1">' +
+      '<option value="">Add an office or person…</option>' +
       Store.offices({ activeOnly: true }).map(function (o) {
         return '<option value="' + U.esc(o.id) + '">' + U.esc(o.name) + '</option>';
-      }).join('') + '</select></div>' +
-      '<div class="error-text" hidden>Choose at least one office.</div></div>';
+      }).join('') +
+      '<option value="__typed">Somebody with no office…</option>' +
+      '</select></div>' +
+      '<div class="row" style="gap:6px;flex-wrap:nowrap;margin-top:6px" id="f-lnamerow" hidden>' +
+      '<input type="text" id="f-laddname" maxlength="80" style="flex:1" ' +
+      'placeholder="Who has to sign — name or title">' +
+      '<button type="button" class="btn" data-addname>Add</button></div>' +
+      '<div class="error-text" hidden>Choose at least one office or person.</div></div>';
 
     UI.modal({
       title: isNew ? 'Track a letter' : 'Edit letter',
@@ -526,6 +560,16 @@
         (isNew ? 'Start tracking' : 'Save changes') + '</button>',
       onMount: function (root, close) {
         var listEl = root.querySelector('#route-list');
+        var noteEl = root.querySelector('#tpl-note');
+        var presidentId = Store.presidentOfficeId();
+        var internal = !!d.internal;
+
+        function indexOfPresident() {
+          if (!presidentId) return -1;
+          for (var i = 0; i < route.length; i++) if (route[i].officeId === presidentId) return i;
+          return -1;
+        }
+        function hasPresident() { return !presidentId || indexOfPresident() >= 0; }
 
         function drawRoute() {
           if (!route.length) {
@@ -533,11 +577,14 @@
               'pick a common route above, or add offices one at a time.</p>';
             return;
           }
-          listEl.innerHTML = '<ol class="route-pick">' + route.map(function (oid, i) {
+          listEl.innerHTML = '<ol class="route-pick">' + route.map(function (e, i) {
             var locked = i < lockedCount;
+            var pres = presidentId && e.officeId === presidentId;
             return '<li' + (locked ? ' class="is-locked"' : '') + '>' +
               '<span class="rp-n">' + (i + 1) + '</span>' +
-              '<span class="rp-name">' + U.esc(Store.officeName(oid)) +
+              '<span class="rp-name">' + U.esc(Store.stopName(e)) +
+                (!e.officeId ? ' <span class="chip chip-plain">person</span>' : '') +
+                (pres ? ' <span class="chip st-done">signs everything</span>' : '') +
                 (locked ? ' <span class="chip chip-plain">already been</span>' : '') + '</span>' +
               (locked ? '' :
                 '<span class="rp-bar">' +
@@ -562,10 +609,36 @@
           });
           U.els('[data-rdrop]', listEl).forEach(function (b) {
             b.addEventListener('click', function () {
-              route.splice(Number(b.getAttribute('data-rdrop')), 1);
+              var i = Number(b.getAttribute('data-rdrop'));
+              if (presidentId && route[i].officeId === presidentId && !internal) {
+                return askIfInternal(root.querySelector('#f-lsubject').value.trim())
+                  .then(function (ok) {
+                    if (!ok) return;
+                    internal = true;
+                    route.splice(i, 1);
+                    drawRoute();
+                  });
+              }
+              route.splice(i, 1);
               drawRoute();
             });
           });
+
+          // Said under the list, where the gap is, rather than only on removal.
+          if (!hasPresident()) {
+            listEl.insertAdjacentHTML('beforeend',
+              '<div class="gate-note" style="margin:10px 0 0">' + UI.icon('alert') +
+              '<span><strong>No FCUSR President on this letter.</strong> That is only right ' +
+              'for a letter that stays inside the council. ' +
+              '<button type="button" class="linkish" data-readd>Put the President back</button>' +
+              '</span></div>');
+            var re = listEl.querySelector('[data-readd]');
+            if (re) re.addEventListener('click', function () {
+              internal = false;
+              route.splice(Math.min(lockedCount + 2, route.length), 0, { officeId: presidentId, label: '' });
+              drawRoute();
+            });
+          }
         }
         drawRoute();
 
@@ -574,19 +647,56 @@
           if (tpl.value === '') return;
           var picked = templates[Number(tpl.value)];
           // Anything already visited stays; the rest is replaced by the template.
-          route = route.slice(0, lockedCount).concat(picked.officeIds.filter(function (oid) {
-            return route.slice(0, lockedCount).indexOf(oid) < 0;
-          }));
+          var head = route.slice(0, lockedCount);
+          route = head.concat(picked.officeIds.filter(function (oid) {
+            return !head.some(function (e) { return e.officeId === oid; });
+          }).map(function (oid) { return { officeId: oid, label: '' }; }));
+          internal = false;
           tpl.value = '';
+          // Some routes carry an instruction of their own; it belongs on screen
+          // at the moment the route is chosen, not in a handbook nobody opens.
+          if (picked.note) {
+            noteEl.innerHTML = '<div class="gate-note" style="margin:0 0 10px">' + UI.icon('alert') +
+              '<span>' + U.esc(picked.note) + '</span></div>';
+            noteEl.hidden = false;
+          } else {
+            noteEl.hidden = true;
+            noteEl.innerHTML = '';
+          }
           drawRoute();
         });
 
         var add = root.querySelector('#f-laddoffice');
+        var nameRow = root.querySelector('#f-lnamerow');
+        var nameIn = root.querySelector('#f-laddname');
+
         add.addEventListener('change', function () {
           if (!add.value) return;
-          if (route.indexOf(add.value) < 0) route.push(add.value);
+          if (add.value === '__typed') {
+            nameRow.hidden = false;
+            nameIn.focus();
+            add.value = '';
+            return;
+          }
+          var oid = add.value;
+          if (!route.some(function (e) { return e.officeId === oid; })) {
+            route.push({ officeId: oid, label: '' });
+          }
           add.value = '';
           drawRoute();
+        });
+
+        function addTypedName() {
+          var name = nameIn.value.trim();
+          if (!name) return nameIn.focus();
+          route.push({ officeId: '', label: name });
+          nameIn.value = '';
+          nameRow.hidden = true;
+          drawRoute();
+        }
+        root.querySelector('[data-addname]').addEventListener('click', addTypedName);
+        nameIn.addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); addTypedName(); }
         });
 
         var charge = root.querySelector('#f-lcharge');
@@ -613,9 +723,29 @@
             deadline: root.querySelector('#f-ldeadline').value,
             inChargeId: charge.value === '__typed' ? '' : charge.value,
             inChargeName: charge.value === '__typed' ? chargeName.value.trim() : '',
-            officeIds: route
+            route: route,
+            internal: !hasPresident() && internal
           };
 
+          /* A route can lose the President without the remove button — a
+             template picked over the top of one, say — so the question is asked
+             again here rather than trusted to have been asked already. */
+          if (!hasPresident() && !internal) {
+            return askIfInternal(subject).then(function (ok) {
+              if (!ok) {
+                internal = false;
+                route.splice(Math.min(lockedCount + 2, route.length), 0,
+                  { officeId: presidentId, label: '' });
+                return drawRoute();
+              }
+              internal = true;
+              data.internal = true;
+              commit();
+            });
+          }
+          commit();
+
+          function commit() {
           if (isNew) {
             data.unitId = global.Auth ? Auth.myUnitId() : Store.nationalUnitId();
             var made = Store.addLetter(data);
@@ -627,6 +757,90 @@
             close();
             UI.toast('Letter saved.');
           }
+          }
+        });
+      }
+    });
+  }
+
+  /* ---------- an office asks for another signature first ----------
+
+     A dean who will not sign until the OSA has, an accountant who wants the
+     adviser's name on it first. The letter is already out, so the route is not
+     a plan any more — it is a thing in someone's hands. This puts one desk in,
+     immediately before or after the desk holding it, and leaves everything
+     already signed exactly as it was. */
+
+  function insertStopForm(letterId, stopId) {
+    var l = Store.letter(letterId);
+    if (!l) return;
+    var at = -1;
+    l.stops.forEach(function (s, i) { if (s.id === stopId) at = i; });
+    if (at < 0) return;
+
+    var here = Store.stopName(l.stops[at]);
+    var choices = Store.offices({ activeOnly: true });
+
+    var body =
+      '<p class="small" style="margin-top:0">' + U.esc(here) + ' has the letter. ' +
+      'Add whoever they are waiting on — the route keeps everything already signed.</p>' +
+      field({
+        name: 'office', label: 'Who has to sign', required: true,
+        control: '<select id="f-isoffice" data-autofocus>' +
+          '<option value="">Choose an office or person…</option>' +
+          choices.map(function (o) {
+            return '<option value="' + U.esc(o.id) + '">' + U.esc(o.name) + '</option>';
+          }).join('') +
+          '<option value="__typed">Somebody with no office…</option>' +
+          '</select>' +
+          '<input type="text" id="f-isname" maxlength="80" style="margin-top:8px" hidden ' +
+          'placeholder="Their name or title">',
+        hint: 'An office wherever there is one — it outlasts whoever is sitting in it. ' +
+          'Type a name only when the signature belongs to no office.'
+      }) +
+      field({
+        name: 'where', label: 'Signs when',
+        control: '<select id="f-iswhere">' +
+          '<option value="before">Before ' + U.esc(here) + ' — they are waiting on it</option>' +
+          '<option value="after">After ' + U.esc(here) + ' — sent on there next</option>' +
+          '</select>'
+      });
+
+    UI.modal({
+      title: 'Add an office to the route',
+      body: body,
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-save>Add the office</button>',
+      onMount: function (root, close) {
+        var pick = root.querySelector('#f-isoffice');
+        var typed = root.querySelector('#f-isname');
+        pick.addEventListener('change', function () {
+          typed.hidden = pick.value !== '__typed';
+          if (!typed.hidden) typed.focus();
+        });
+
+        root.querySelector('[data-save]').addEventListener('click', function () {
+          clearErrors(root);
+          var entry;
+          if (pick.value === '__typed') {
+            var name = typed.value.trim();
+            if (!name) return showError(root, 'office', 'Who has to sign it?');
+            entry = { officeId: '', label: name };
+          } else if (pick.value) {
+            entry = { officeId: pick.value, label: '' };
+          } else {
+            return showError(root, 'office', 'Who has to sign first?');
+          }
+
+          var where = root.querySelector('#f-iswhere').value;
+          try {
+            Store.insertStop(letterId, entry, where === 'before' ? at : at + 1);
+          } catch (err) {
+            return showError(root, 'office', err.message);
+          }
+          close();
+          UI.toast((entry.label || Store.officeName(entry.officeId)) +
+            ' added ' + where + ' ' + here + '.');
         });
       }
     });
@@ -645,7 +859,7 @@
     var carrier = Store.letterInCharge(l);
     var body =
       '<p class="small">Handing <strong>' + U.esc(l.subject) + '</strong> in at ' +
-      '<strong>' + U.esc(Store.officeName(s.officeId)) + '</strong>.</p>' +
+      '<strong>' + U.esc(Store.stopName(s)) + '</strong>.</p>' +
       field({
         name: 'receivedBy', label: 'Who received it', required: true,
         control: '<input type="text" id="f-rby" data-autofocus maxlength="80" ' +
@@ -681,7 +895,7 @@
               receivedAt: root.querySelector('#f-rwhen').value
             });
             close();
-            UI.toast('Recorded — ' + Store.officeName(s.officeId) + ' has it.');
+            UI.toast('Recorded — ' + Store.stopName(s) + ' has it.');
           } catch (err) { showError(root, 'receivedBy', err.message); }
         }
         root.querySelector('[data-save]').addEventListener('click', submit);
@@ -702,7 +916,7 @@
 
     var outcome = 'Approved';
     var body =
-      '<p class="small"><strong>' + U.esc(Store.officeName(s.officeId)) + '</strong> has finished with ' +
+      '<p class="small"><strong>' + U.esc(Store.stopName(s)) + '</strong> has finished with ' +
       '<strong>' + U.esc(l.subject) + '</strong>.</p>' +
       '<div class="field"><span class="field-label">What happened <span class="req">*</span></span>' +
       '<div class="segmented" style="width:100%">' +
@@ -1587,7 +1801,8 @@
     unitForm: unitForm,
     feedbackForm: feedbackForm, waiveFeedbackForm: waiveFeedbackForm,
     officeForm: officeForm, letterForm: letterForm,
-    receiveForm: receiveForm, releaseForm: releaseForm,
+    receiveForm: receiveForm, releaseForm: releaseForm, insertStopForm: insertStopForm,
+    askIfInternal: askIfInternal,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,
     readVolunteerCSV: readVolunteerCSV, parseCSV: parseCSV,
     eventForm: eventForm, taskForm: taskForm, personForm: personForm,

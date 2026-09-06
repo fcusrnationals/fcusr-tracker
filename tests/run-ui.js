@@ -614,7 +614,8 @@ console.log('\n--- the letters tracker ---');
   setValue(inDlg('#f-rby'), 'Mrs. Ferrer');
   click(inDlg('[data-save]'));
   check('the hand-over is recorded', S.letter(L.id).stops[0].receivedBy === 'Mrs. Ferrer');
-  check('the screen now names the office', /with dean of the college/i.test(text()), text().slice(0, 140));
+  const has = (phrase, o) => text().toLowerCase().includes(phrase + ' ' + S.officeName(o.id).toLowerCase());
+  check('the screen now names the office', has('with', dean), text().slice(0, 140));
   check('and offers the outcome next', $$('[data-release]').length === 1);
 
   // A blank receiver is refused.
@@ -628,8 +629,8 @@ console.log('\n--- the letters tracker ---');
   click(inDlg('[data-save]'));
 
   goto('#/letters/' + L.id);
-  check('a returned letter says so', /returned by dean of the college/i.test(text()), text().slice(0, 160));
-  check('it does not advance to the next office', !/with office of student affairs/i.test(text()));
+  check('a returned letter says so', has('returned by', dean), text().slice(0, 160));
+  check('it does not advance to the next office', !has('with', osa));
   /* A return opens a fresh attempt at the same office directly beneath it, so
      there is nothing to "reopen" — the next hand-over is already waiting, and
      the reason it came back stays readable above it. */
@@ -665,6 +666,112 @@ console.log('\n--- the letters tracker ---');
     access: before.access });
 
   S.deleteLetter(L.id);
+}
+
+/* ---- the signatories, through the real form ----
+   Three rules the council gave, each of which is a dialog somebody has to get
+   past: the President signs everything, a signatory may be a person, and an
+   office already holding the letter can demand another signature first. */
+console.log('\n--- signatories ---');
+{
+  // Anything an earlier block left open would answer for the dialog on top.
+  $$('.modal-backdrop').forEach((e) => e.remove());
+
+  const dlg = () => $$('.modal-backdrop').pop();        // whatever is on top
+  const inDlg = (sel) => dlg().querySelector(sel);
+  const dlgAll = (sel) => Array.from(dlg().querySelectorAll(sel));
+  const presId = S.presidentOfficeId();
+  // A confirmation answers through a promise, so the redraw lands a tick later.
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  goto('#/letters');
+  click($('[data-new-letter]'));
+  check('the letter form opens', !!inDlg('#f-lsubject'));
+  // Held by reference: a confirmation opens on top of it and must not be mistaken for it.
+  const form = dlg();
+  const inForm = (sel) => form.querySelector(sel);
+  const formAll = (sel) => Array.from(form.querySelectorAll(sel));
+  setValue(inDlg('#f-lsubject'), 'Request for the foundation week budget');
+
+  // Start from the council's own route.
+  const tpl = inDlg('#f-ltemplate');
+  const budget = Array.from(tpl.options).find((o) => /Collection of money/.test(o.text));
+  check('the council routes are offered by name', !!budget);
+  setValue(tpl, budget.value);
+  check('picking one lays out all ten signatories', dlgAll('.route-pick li').length === 10,
+    dlgAll('.route-pick li').length + ' rows');
+  check('and the President is marked as signing everything',
+    /signs everything/i.test(inDlg('.route-pick').textContent));
+
+  // The conference route carries an instruction of its own.
+  const conf = Array.from(tpl.options).find((o) => /conference/i.test(o.text));
+  setValue(tpl, conf.value);
+  check('a route with an instruction shows it',
+    /attach the invitation letter/i.test(inDlg('#tpl-note').textContent),
+    inDlg('#tpl-note').textContent);
+
+  setValue(tpl, budget.value);
+
+  // Removing the President must ask whether the letter stays inside the council.
+  const presRow = dlgAll('.route-pick li').findIndex((li) => /signs everything/i.test(li.textContent));
+  click(dlgAll('[data-rdrop]')[presRow]);
+  check('removing the President asks a question first',
+    /President signs this/i.test(dlg().textContent), dlg().textContent.slice(0, 90));
+  click(inDlg('[data-cancel]'));
+  await settle();
+  check('and keeping them leaves the route alone', formAll('.route-pick li').length === 10);
+
+  // Answering that it is internal is the one way through.
+  formAll('[data-rdrop]')[presRow].dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  click(inDlg('[data-ok]'));
+  await settle();
+  check('saying it is internal removes them', formAll('.route-pick li').length === 9,
+    formAll('.route-pick li').length + ' rows');
+  check('and the gap is said plainly, with a way back',
+    /No FCUSR President on this letter/i.test(form.textContent) && !!inForm('[data-readd]'));
+
+  click(inForm('[data-readd]'));
+  check('putting them back restores the route', formAll('.route-pick li').length === 10);
+
+  // A signatory who holds no office.
+  setValue(inForm('#f-laddoffice'), '__typed');
+  check('choosing a person reveals the name box', !inForm('#f-lnamerow').hidden);
+  setValue(inForm('#f-laddname'), 'Sen. Kyla Villanueva');
+  click(inForm('[data-addname]'));
+  check('a person joins the signatories', formAll('.route-pick li').length === 11);
+  check('and is marked as a person, not an office',
+    /Sen\. Kyla Villanueva/.test(form.textContent) &&
+    /person/i.test(formAll('.route-pick li')[10].textContent));
+
+  click(inForm('[data-save]'));
+  await settle();
+  const made = S.letters().find((x) => x.subject === 'Request for the foundation week budget');
+  check('the letter saves with every signatory', !!made && made.stops.length === 11, made && made.stops.length);
+  check('the President is on it', made.stops.some((x) => x.officeId === presId));
+  check('it is not marked internal', made.internal === false);
+  check('and the person was kept by name',
+    made.stops[10].label === 'Sen. Kyla Villanueva' && made.stops[10].officeId === '');
+
+  /* ---- an office that will not sign until somebody else has ---- */
+  goto('#/letters/' + made.id);
+  check('the desk holding it can ask for another signature first',
+    $$('[data-insert]').length === 1);
+  click($('[data-insert]'));
+  check('the insert dialog opens', !!inDlg('#f-isoffice'));
+  check('and offers a person as well as an office',
+    Array.from(inDlg('#f-isoffice').options).some((o) => o.value === '__typed'));
+  setValue(inDlg('#f-isoffice'), S.officeByCode('REG').id);
+  setValue(inDlg('#f-iswhere'), 'before');
+  click(inDlg('[data-save]'));
+
+  const after = S.letter(made.id);
+  check('the office goes in ahead of the one holding it',
+    after.stops[0].officeId === S.officeByCode('REG').id, S.stopName(after.stops[0]));
+  check('and nothing else was disturbed', after.stops.length === 12);
+  check('the screen now waits on the new office',
+    /Office of the Registrar/.test(text()), text().slice(0, 120));
+
+  S.deleteLetter(made.id);
 }
 
 console.log('\n--- console cleanliness ---');

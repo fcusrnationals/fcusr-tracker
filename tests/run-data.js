@@ -336,13 +336,15 @@ console.log('\n--- routing a letter ---');
     (() => { try { S3.addLetter({ subject: 'x', officeIds: [] }); return false; } catch (e) { return true; } })());
   check('and a subject',
     (() => { try { S3.addLetter({ subject: '', officeIds: [dean.id] }); return false; } catch (e) { return true; } })());
-  check('it starts unsent', S3.letterWhere(L) === 'Not yet sent — for Dean of the College', S3.letterWhere(L));
+  check('it starts unsent', S3.letterWhere(L) === 'Not yet sent — for ' + S3.officeName(dean.id),
+    S3.letterWhere(L));
   check('council business needs no event', L.eventId === '');
   check('whoever is walking it round is named', S3.letterInCharge(L) === 'Job Sarmiento');
 
   // ---- handing it over ----
   S3.receiveStop(L.id, L.stops[0].id, { receivedBy: 'Mrs. Ferrer', forwardedBy: 'Job Sarmiento' });
-  check('the office that has it is named', /With Dean of the College/.test(S3.letterWhere(L)), S3.letterWhere(L));
+  check('the office that has it is named',
+    S3.letterWhere(L).indexOf('With ' + S3.officeName(dean.id)) === 0, S3.letterWhere(L));
   check('who received it is kept', L.stops[0].receivedBy === 'Mrs. Ferrer');
   check('so is who handed it over', L.stops[0].forwardedBy === 'Job Sarmiento');
   check('a hand-over must name a receiver',
@@ -357,7 +359,8 @@ console.log('\n--- routing a letter ---');
 
   S3.releaseStop(L.id, L.stops[0].id, { outcome: 'Approved' });
   check('once released it moves on',
-    /on its way to office of student affairs/i.test(S3.letterWhere(L)), S3.letterWhere(L));
+    S3.letterWhere(L).toLowerCase().indexOf('on its way to ' + S3.officeName(osa.id).toLowerCase()) === 0,
+    S3.letterWhere(L));
   check('and stops being stuck', !S3.isStuck(L));
   check('progress counts offices cleared', S3.letterProgress(L).done === 1);
 
@@ -371,7 +374,8 @@ console.log('\n--- routing a letter ---');
   check('a returned letter does not advance',
     !/president/i.test(S3.letterWhere(L)), S3.letterWhere(L));
   check('it names the office that sent it back',
-    /returned by office of student affairs/i.test(S3.letterWhere(L)), S3.letterWhere(L));
+    S3.letterWhere(L).toLowerCase().indexOf('returned by ' + S3.officeName(osa.id).toLowerCase()) === 0,
+    S3.letterWhere(L));
   check('a return does not count as progress', S3.letterProgress(L).done === 1);
   check('and it asks to be dealt with at once', S3.letterNeedsAttention(L));
   check('the reason is kept', L.stops[1].note === 'Budget breakdown missing');
@@ -398,6 +402,119 @@ console.log('\n--- routing a letter ---');
   check('every office is accounted for', S3.letterProgress(L).percent === 100);
   check('the trail kept both passes at that office',
     L.stops.filter((x) => x.officeId === osa.id).length === 2);
+
+  /* ---- the council's own routes ----
+     Copied from the FCUSR's briefing. A route that quietly loses a desk is the
+     failure mode that matters, so the templates are checked against the list as
+     the council gave it rather than against whatever the app seeded. */
+  {
+    const byName = {};
+    S3.routeTemplates().forEach((t) => { byName[t.name] = t; });
+    const codesOf = (t) => t.officeIds.map((id) => S3.office(id).code);
+
+    const money = byName['Collection of money or request for budget'];
+    check('the budget route is offered', !!money);
+    check('and it is the ten signatories, in order',
+      String(codesOf(money)) === String(['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'BUD', 'VPAA', 'VPF', 'OP']),
+      String(codesOf(money)));
+
+    const conf = byName['Permission to attend a conference or seminar'];
+    check('the conference route is offered', !!conf);
+    check('and carries its own instruction', conf.note === 'Attach the invitation letter.', conf.note);
+
+    const excuse = byName['Excusing students from their classes'];
+    check('the excusing route stops at the VP-AA',
+      String(codesOf(excuse)) === String(['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'VPAA']),
+      String(codesOf(excuse)));
+
+    check('every route the app offers goes through the President',
+      S3.routeTemplates().every((t) => t.officeIds.indexOf(S3.presidentOfficeId()) >= 0));
+    check('and the President is a real office', !!S3.presidentOfficeId() &&
+      S3.office(S3.presidentOfficeId()).name === 'FCUSR President');
+  }
+
+  /* ---- a letter kept inside the council ----
+     The only reason the President may be missing, so it is recorded rather
+     than inferred from the absence. */
+  {
+    const inside = S3.addLetter({
+      subject: 'Minutes for the executive board', unitId: S3.nationalUnitId(),
+      officeIds: [S3.officeByCode('AUTH').id], internal: true
+    });
+    check('a letter can be marked internal', inside.internal === true);
+    check('and an ordinary one is not', L.internal === false);
+    S3.updateLetter(inside.id, { internal: false });
+    check('the mark can be taken off again', S3.letter(inside.id).internal === false);
+  }
+
+  /* ---- a signatory who holds no office ----
+     Offices are preferred because an office outlives its holder, but the first
+     signatory on every one of the council's routes is "the author", and some
+     signatures simply belong to a person. */
+  {
+    const withPerson = S3.addLetter({
+      subject: 'Endorsement for the film festival', unitId: S3.nationalUnitId(),
+      route: [
+        { label: 'Sen. Kyla Villanueva' },
+        { officeId: S3.officeByCode('PRES').id },
+        { officeId: S3.officeByCode('OSA').id }
+      ]
+    });
+    check('a person can be a signatory', withPerson.stops[0].label === 'Sen. Kyla Villanueva');
+    check('and holds no office', withPerson.stops[0].officeId === '');
+    check('the trail names them', S3.stopName(withPerson.stops[0]) === 'Sen. Kyla Villanueva');
+    check('an office signatory still names the office',
+      S3.stopName(withPerson.stops[1]) === 'FCUSR President');
+    check('and the letter says it is waiting on the person',
+      /Sen\. Kyla Villanueva/.test(S3.letterWhere(withPerson)), S3.letterWhere(withPerson));
+
+    // A person is walked through exactly like an office.
+    S3.receiveStop(withPerson.id, withPerson.stops[0].id, { receivedBy: 'Kyla V.' });
+    S3.releaseStop(withPerson.id, withPerson.stops[0].id, { outcome: 'Approved' });
+    check('a person can sign and pass it on',
+      /FCUSR President/.test(S3.letterWhere(withPerson)), S3.letterWhere(withPerson));
+
+    // Sent back by a person opens a second run at that same person.
+    S3.receiveStop(withPerson.id, withPerson.stops[1].id, { receivedBy: 'Office staff' });
+    S3.releaseStop(withPerson.id, withPerson.stops[1].id,
+      { outcome: 'Returned for revision', note: 'Wrong date' });
+    check('a return still opens a fresh run at the same desk',
+      withPerson.stops[2].officeId === S3.officeByCode('PRES').id, S3.stopName(withPerson.stops[2]));
+
+    check('a signatory that is neither office nor name is refused',
+      (() => { try { S3.addLetter({ subject: 'x', route: [{}] }); return false; } catch (e) { return true; } })());
+  }
+
+  /* ---- an office that wants somebody else to sign first ---- */
+  {
+    const route = S3.addLetter({
+      subject: 'Request for the sound system', unitId: S3.nationalUnitId(),
+      officeIds: [S3.officeByCode('ADV').id, S3.officeByCode('DEAN').id, S3.officeByCode('OP').id]
+    });
+    S3.receiveStop(route.id, route.stops[0].id, { receivedBy: 'Mrs. Ferrer' });
+    S3.releaseStop(route.id, route.stops[0].id, { outcome: 'Approved' });
+
+    const osaId = S3.officeByCode('OSA').id;
+    S3.insertStop(route.id, osaId, 1);
+    check('an office can be put in ahead of the desk holding it',
+      route.stops[1].officeId === osaId, S3.officeName(route.stops[1].officeId));
+    check('the route grew by one', route.stops.length === 4);
+    check('and the letter is now waiting on the new office',
+      /OSA/.test(S3.letterWhere(route)), S3.letterWhere(route));
+    check('what was already signed is untouched',
+      route.stops[0].outcome === 'Approved' && route.stops[0].receivedBy === 'Mrs. Ferrer');
+
+    // History is not a queue you can push things in front of.
+    S3.insertStop(route.id, S3.officeByCode('REG').id, 0);
+    check('nothing can be inserted before a signature already given',
+      route.stops[0].officeId === S3.officeByCode('ADV').id,
+      S3.officeName(route.stops[0].officeId));
+    check('it lands at the first place that is still open',
+      route.stops[1].officeId === S3.officeByCode('REG').id,
+      S3.officeName(route.stops[1].officeId));
+    check('an unknown office is refused',
+      (() => { try { S3.insertStop(route.id, 'nope', 1); return false; } catch (e) { return true; } })());
+  }
 
   // ---- the deadline ----
   const late = S3.addLetter({
@@ -438,12 +555,22 @@ console.log('\n--- letters survive a hostile file ---');
         { id: '<img src=x>', subject: 'Fine letter', unitId: S4.nationalUnitId(),
           stops: [{ officeId: S4.offices()[0].id, receivedBy: 'A'.repeat(500), receivedAt: '2026-13-45' }] },
         { subject: '', stops: [] },
-        { subject: 'No route at all', stops: [{ officeId: 'nope' }] }
+        { subject: 'No route at all', stops: [{ officeId: 'nope' }] },
+        { subject: 'Nothing to go on', stops: [{ receivedBy: 'Someone' }] }
       ]
     }
   }));
   const kept = S4.letters();
-  check('a letter with no route is dropped', kept.length === 1, kept.length + ' kept');
+  /* A letter needs somewhere it went. A stop naming an office this device has
+     never heard of is kept and labelled, because on a restored backup that is
+     an office the letter really did pass through — but a stop naming neither an
+     office nor a person is nothing at all, and takes its letter with it. */
+  check('a letter with no route is dropped', kept.length === 2, kept.length + ' kept');
+  check('a stop whose office is unknown here is kept, named',
+    kept.some((l) => l.subject === 'No route at all' && l.stops[0].label === 'A former office'),
+    JSON.stringify(kept.map((l) => l.stops.map((s) => s.label || s.officeId))));
+  check('a stop naming nobody at all is dropped',
+    !kept.some((l) => l.subject === 'Nothing to go on'));
   check('a hostile id is replaced', /^[A-Za-z0-9_-]+$/.test(kept[0].id), kept[0].id);
   check('an over-long name is clamped', kept[0].stops[0].receivedBy.length <= 80);
   check('an impossible date is dropped', kept[0].stops[0].receivedAt === '');
