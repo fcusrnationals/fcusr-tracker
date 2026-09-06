@@ -697,6 +697,67 @@ function makeDevice(server, name) {
     check('and says how much came back', st.last && st.last.added > 0, st.last && st.last.added);
   }
 
+  /* ---------------- it corrects itself, without anybody pressing anything ----
+     Most officers cannot open Settings at all, so a repair that lives behind a
+     button in Settings is not a repair. A device with a wrong mark has to come
+     right on its own. */
+  console.log('\n--- a wrong mark corrects itself ---');
+  {
+    const s8 = makeServer();
+    const One = makeDevice(s8, 'One');
+    const Two = makeDevice(s8, 'Two');
+    await One.Sync.now();
+    await Two.Sync.now();
+
+    // One holds work and is convinced it has already sent it — the exact state
+    // a half-finished round leaves behind.
+    const ev = One.S.addEvent({ title: 'General Assembly', unitId: One.S.nationalUnitId() });
+    One.S.addTask({ eventId: ev.id, title: 'Reserve the gym' });
+    One.S.markSynced({ pushed: new Date(Date.now() + 60000).toISOString() });
+
+    const stuck = await One.Sync.now();
+    check('an ordinary round sends nothing, as it believes', stuck.last.sent === 0,
+      JSON.stringify(stuck.last));
+    check('and the other phone has none of it', !Two.S.event(ev.id));
+
+    /* The next time the app is opened. No button, no Settings, nobody told to
+       do anything. */
+    const Reopened = makeDevice(s8, 'One again');
+    Reopened.S.fromJSON(One.S.toJSON());
+    await Reopened.Sync.now();
+    check('opening the app sends it anyway', !!s8.tables.events[ev.id],
+      Object.keys(s8.tables.events).length + ' on the server');
+
+    await Two.Sync.now();
+    check('and the other phone finally has it', !!Two.S.event(ev.id));
+    check('with its task', !!Two.S.task(One.S.tasks({ eventId: ev.id })[0].id));
+  }
+
+  /* A full round must never put an old copy over a newer one: it pulls before
+     it pushes, so everything here has already won or lost on its own merits. */
+  console.log('\n--- a full round does not trample newer work ---');
+  {
+    const s9 = makeServer();
+    const A2 = makeDevice(s9, 'A2');
+    const B2 = makeDevice(s9, 'B2');
+    const ev = A2.S.addEvent({ title: 'Sportsfest', unitId: A2.S.nationalUnitId() });
+    await A2.Sync.now();
+    await B2.Sync.now();
+
+    // B2 makes the later edit; A2 still holds the older copy.
+    await new Promise((r) => setTimeout(r, 5));
+    B2.S.updateEvent(ev.id, { venue: 'FCU Gymnasium' });
+    await B2.Sync.now();
+
+    // A2 now does a full round, offering its stale copy.
+    await A2.Sync.now({ full: true });
+    check('the later edit survives a full send', A2.S.event(ev.id).venue === 'FCU Gymnasium',
+      A2.S.event(ev.id).venue);
+    check('and is still the one on the server',
+      s9.tables.events[ev.id].body.venue === 'FCU Gymnasium',
+      s9.tables.events[ev.id].body.venue);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

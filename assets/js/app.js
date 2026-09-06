@@ -523,7 +523,15 @@
     var st = Sync.status();
     if (!st.able) { el.hidden = true; return; }
 
-    var word = st.running ? 'Syncing' : st.error ? 'Not synced' : st.at ? 'Synced' : 'Waiting';
+    /* "Synced" on its own has been telling people everything is fine while a
+       second phone sat empty. When a round has just moved something, say so —
+       a number is the only part anybody can check against what they expected. */
+    var l = st.last;
+    var moved = l ? (l.added + l.updated + l.removed + l.sent) : 0;
+    var word = st.running ? 'Syncing'
+      : st.error ? 'Not synced'
+      : moved ? 'Synced · ' + moved
+      : st.at ? 'Synced' : 'Waiting';
     var tone = st.running ? ' is-working' : st.error ? ' is-stuck' : st.at ? ' is-ok' : '';
 
     el.hidden = false;
@@ -533,6 +541,7 @@
     el.setAttribute('title', st.error
       ? 'Not synced — ' + st.error + '. Tap for details.'
       : st.running ? 'Sending and receiving changes…'
+      : moved ? ((l.added + l.updated) + ' came in, ' + l.sent + ' went out. Tap for details.')
       : st.at ? 'Everything on this device is on the council\u2019s server'
       : 'Waiting to sync');
     el.setAttribute('aria-label', 'Syncing: ' + el.getAttribute('title'));
@@ -560,16 +569,12 @@
         (l ? '<p class="small muted">Last round: ' + (l.added + l.updated) + ' taken in, ' +
              l.sent + ' sent, ' + U.esc(U.fmtStamp(st.at)) + '.</p>' : '') +
 
-        /* Nothing in and nothing out, on a device that plainly holds work, is
-           not "up to date" — it is a device that believes it has already sent
-           what it never sent. Saying so here, where people actually tap, rather
-           than only in a settings panel they have no reason to open. */
-        (l && !l.sent && !(l.added + l.updated) && Store.events().length
-          ? '<div class="gate-note" style="margin-top:12px">' + UI.icon('alert') +
-            '<span>Nothing went either way. If something you made is missing on ' +
-            'another device, this device may believe it already sent it \u2014 ' +
-            '<strong>Send everything again</strong> below puts that right. Nothing is lost.</span></div>'
-          : '') +
+        /* What the app is doing on its own, said plainly, because otherwise the
+           only visible state is a word that has been wrong before. */
+        '<p class="small muted">It checks by itself after every change and every ' +
+        'few minutes, and goes right through everything when you open the app and ' +
+        'once an hour after that \u2014 so a device that has fallen behind catches ' +
+        'up without anybody doing anything.</p>' +
         '<p class="tiny muted">Photographs are never synced — they stay in the browser that ' +
         'took them.</p>',
       footer: '<button type="button" class="btn" data-close>Close</button>' +

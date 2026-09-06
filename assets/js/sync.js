@@ -349,17 +349,27 @@
     var since = mark.pulled || '';
     var pushedSince = mark.pushed || '';
 
-    /* A device holding nothing asks for everything.
+    /* Every so often, forget both marks and reconcile properly.
 
-       The mark means "I have already taken in everything up to here", and it
-       can be true and useless at the same time: a phone that was emptied, or
-       one whose rehearsal was ended, keeps a mark from before there was
-       anything to take in — and then sits reporting "Synced, 0 taken in" beside
-       another phone full of the council's work. An empty device has nothing to
-       lose by asking again, and everything to gain. */
-    if (since && !Store.events().length && !Store.people().length && !Store.letters().length) {
-      since = '';
-    }
+       A mark says "I have already dealt with everything up to here", and it can
+       be true and useless at the same time: a round that failed halfway, a
+       version with a bug in it, a device emptied or restored — any of them
+       leave a device certain it has nothing to do while another phone is full
+       of work nobody else can see. Both devices then report "Synced", both
+       truthfully, and the council is still looking at two different trackers.
+
+       So it does not only trust the marks. Once when the app opens, and once an
+       hour after that, it asks for everything and offers everything. That is
+       safe in either direction because the pull happens first: whatever comes
+       back has already won or lost against what is here before anything is
+       sent, so a full send can never put an old copy over a newer one.
+
+       It costs a few hundred kilobytes for a council this size, which is the
+       right price for never again needing somebody to find a button. */
+    var full = opts.full || rounds === 0 || (rounds % FULL_EVERY) === 0;
+    rounds++;
+
+    if (full) { since = ''; pushedSince = ''; }
     var startedAt = '';
     var deviceStart = new Date().toISOString();
 
@@ -407,7 +417,7 @@
         });
         state.last = {
           added: res.counts.added, updated: res.counts.updated,
-          removed: res.counts.removed, sent: sent, at: startedAt
+          removed: res.counts.removed, sent: sent, at: startedAt, full: full
         };
         /* Something arrived, so whatever is on screen is out of date. This is
            the only place a sync is allowed to announce itself — and only when
@@ -437,6 +447,9 @@
 
   var EVERY = 3 * 60 * 1000;
   var AFTER_CHANGE = 4000;
+  // Rounds between full reconciliations: 20 × 3 minutes is roughly an hour.
+  var FULL_EVERY = 20;
+  var rounds = 0;
 
   function schedule() {
     if (timer) clearInterval(timer);
