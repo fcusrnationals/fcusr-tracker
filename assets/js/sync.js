@@ -165,12 +165,21 @@
     // Deletions last: applying them after the records means a row deleted and
     // re-created within one window ends up in the state it was left in.
     chain = chain.then(function () {
-      return Backend.changed('deletions', since, 1000).then(function (rows) {
+      // `deleted_at`, not `updated_at`: a tombstone has no other clock, and
+      // asking for a column a table does not have is a refusal, not an empty list.
+      return Backend.changed('deletions', since, 1000, 'deleted_at').then(function (rows) {
         (rows || []).forEach(function (row) {
           if (Store.applyRemoteDeletion(row.entity, row.entity_id, row.deleted_at)) counts.removed++;
           if (row.deleted_at && row.deleted_at > high) high = row.deleted_at;
         });
-      }).catch(function () { /* an older server without the table */ });
+      }).catch(function (err) {
+        /* Only a server that has never had the table gets a free pass — a
+           council that has not run the sync migration yet. Anything else is a
+           real fault, and swallowing it is how a deletion that never propagates
+           looks exactly like one that did. */
+        if (err && err.status === 404) return;
+        throw err;
+      });
     });
 
     return chain.then(function () { return { counts: counts, high: high }; });

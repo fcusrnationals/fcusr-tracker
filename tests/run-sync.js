@@ -33,6 +33,17 @@ const FILES = [
    `updated_at=gt.X` ordered ascending, upsert-by-id, delete-by-id. Its clock is
    its own and deliberately ahead of both devices, because a phone with a wrong
    watch is the failure this design is meant to survive. */
+// What each table actually has, taken from backend/supabase/sync.sql.
+const COLUMNS = {
+  people:    ['id', 'unit_id', 'name', 'active', 'body', 'updated_at'],
+  events:    ['id', 'unit_id', 'title', 'status', 'body', 'updated_at'],
+  tasks:     ['id', 'event_id', 'title', 'status', 'body', 'updated_at'],
+  reports:   ['id', 'event_id', 'drive_link', 'drive_owned', 'status', 'body', 'updated_at'],
+  letters:   ['id', 'unit_id', 'subject', 'status', 'stops', 'internal', 'body', 'updated_at'],
+  offices:   ['id', 'code', 'name', 'active', 'body', 'updated_at'],
+  deletions: ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by']
+};
+
 function makeServer() {
   const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {}, offices: {}, deletions: {} };
   let tick = 0;
@@ -44,9 +55,22 @@ function makeServer() {
     tables,
     now,
     requests: [],
-    changed(table, since) {
-      this.requests.push({ op: 'changed', table, since });
-      const key = table === 'deletions' ? 'deleted_at' : 'updated_at';
+    /* Refuses what PostgREST refuses. It used to be helpful — it knew that a
+       deletion is timed by `deleted_at` and quietly used the right column
+       whatever it was asked for. The client was asking for `updated_at`, which
+       the real table does not have, so every pull of deletions failed with a
+       400 while these tests passed: a deleted task came back on every other
+       phone, for ever, and nothing anywhere said so. A stand-in that is kinder
+       than the real thing is worse than no stand-in at all. */
+    changed(table, since, limit, column) {
+      const key = column || 'updated_at';
+      this.requests.push({ op: 'changed', table, since, key });
+      const cols = COLUMNS[table] || [];
+      if (cols.indexOf(key) < 0) {
+        const e = new Error('column ' + table + '.' + key + ' does not exist');
+        e.status = 400;
+        return Promise.reject(e);
+      }
       return Promise.resolve(Object.keys(tables[table] || {})
         .map((k) => tables[table][k])
         .filter((r) => !since || String(r[key]) > String(since))
@@ -106,7 +130,7 @@ function makeDevice(server, name) {
     myUnitId: () => w.Store.nationalUnitId()
   };
   w.Backend = {
-    changed: (t, s2, l) => server.changed(t, s2, l),
+    changed: (t, s2, l, c) => server.changed(t, s2, l, c),
     upsert: (t, r) => server.upsert(t, r),
     remove: (t, i) => server.remove(t, i),
     serverNow: () => server.serverNow(),
@@ -336,6 +360,50 @@ function makeDevice(server, name) {
     await fast.Sync.now();
     check('a phone with a wrong clock still gets what it missed', !!fast.S.event(seen.id));
     fast.w.Date.now = realNow;
+  }
+
+  /* ---------------- the tombstone table is timed differently ---------------- */
+  console.log('\n--- deletions are asked for by their own clock ---');
+  {
+    const asked = server.requests.filter((r) => r.op === 'changed' && r.table === 'deletions');
+    check('the deletions pull happened', asked.length > 0);
+    check('and asked on deleted_at, which is the column it has',
+      asked.every((r) => r.key === 'deleted_at'),
+      JSON.stringify(asked.slice(-1)));
+    check('while everything else is asked on updated_at',
+      server.requests.filter((r) => r.op === 'changed' && r.table !== 'deletions')
+        .every((r) => r.key === 'updated_at'));
+  }
+
+  /* A pull that fails must be reported, not swallowed. It was swallowed, which
+     is how a deletion that never propagated looked exactly like one that did. */
+  console.log('\n--- a refused pull is not silence ---');
+  {
+    const real = A.w.Backend.changed;
+    A.w.Backend.changed = (t, s2, l, c) => {
+      if (t === 'deletions') {
+        const e = new Error('column deletions.updated_at does not exist');
+        e.status = 400;
+        return Promise.reject(e);
+      }
+      return real(t, s2, l, c);
+    };
+    const st = await A.Sync.now();
+    check('a broken deletions pull is reported', !!st.error, st.error);
+    A.w.Backend.changed = real;
+
+    // A server that has never had the table is the one honest exception.
+    A.w.Backend.changed = (t, s2, l, c) => {
+      if (t === 'deletions') {
+        const e = new Error('Not Found');
+        e.status = 404;
+        return Promise.reject(e);
+      }
+      return real(t, s2, l, c);
+    };
+    const st2 = await A.Sync.now();
+    check('but a server without the table is not an error', !st2.error, st2.error);
+    A.w.Backend.changed = real;
   }
 
   console.log('\n--- no console errors ---');

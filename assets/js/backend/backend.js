@@ -275,11 +275,16 @@
        made in sync.js and store.js, where it can be read and tested without a
        server. This part only carries things. */
 
-    // Rows changed since a moment, oldest first — so a pull interrupted halfway
-    // can be resumed from the last row it actually took in.
-    changed: function (table, since, limit) {
-      var q = '/rest/v1/' + table + '?select=*&order=updated_at.asc&limit=' + (limit || 500);
-      if (since) q += '&updated_at=gt.' + encodeURIComponent(since);
+    /* Rows changed since a moment, oldest first — so a pull interrupted halfway
+       can be resumed from the last row it actually took in.
+
+       The column is named by the caller because not every table calls it the
+       same thing: a deletion has a `deleted_at` and no `updated_at` at all, and
+       asking for one it does not have is a 400 rather than an empty list. */
+    changed: function (table, since, limit, column) {
+      var col = column || 'updated_at';
+      var q = '/rest/v1/' + table + '?select=*&order=' + col + '.asc&limit=' + (limit || 500);
+      if (since) q += '&' + col + '=gt.' + encodeURIComponent(since);
       return sbFetch(q);
     },
 
@@ -449,9 +454,9 @@
     },
     whoami: function () { return driver().whoami(); },
     units: function () { return driver().units(); },
-    changed: function (t, since, limit) {
+    changed: function (t, since, limit, column) {
       var d = driver();
-      return d.changed ? d.changed(t, since, limit) : Promise.resolve([]);
+      return d.changed ? d.changed(t, since, limit, column) : Promise.resolve([]);
     },
     upsert: function (t, rows) {
       var d = driver();
