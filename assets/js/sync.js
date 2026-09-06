@@ -445,15 +445,37 @@
      network comes back, and every few minutes regardless. The debounce is what
      stops a person typing a task title from sending nine versions of it. */
 
-  var EVERY = 3 * 60 * 1000;
+  /* Every twenty seconds while somebody is looking at it.
+
+     A change already sends itself within a few seconds, so this is for the
+     other direction: work somebody else did, appearing without anybody
+     refreshing. Twenty seconds is short enough that two officers in the same
+     meeting see the same screen.
+
+     A round asks each table what has changed since a moment and usually gets
+     an empty answer back, so the cost is small — but not nothing, so a tab
+     nobody is looking at stops entirely and catches up the moment it is
+     looked at again. That is most tabs, most of the time. */
+  var EVERY = 20 * 1000;
   var AFTER_CHANGE = 4000;
-  // Rounds between full reconciliations: 20 × 3 minutes is roughly an hour.
-  var FULL_EVERY = 20;
+  /* Rounds between full reconciliations. At twenty seconds this is about an
+     hour, which is how often a device stops trusting its own bookkeeping and
+     simply asks for everything. */
+  var FULL_EVERY = 180;
   var rounds = 0;
 
   function schedule() {
     if (timer) clearInterval(timer);
+    // Only while the tab is in front. A phone in a pocket is not waiting for
+    // an answer, and polling it every twenty seconds costs battery and data
+    // for nobody's benefit.
+    if (global.document && document.hidden) return;
     timer = setInterval(function () { now(); }, EVERY);
+  }
+
+  function stopSchedule() {
+    if (timer) clearInterval(timer);
+    timer = null;
   }
 
   function onChange() {
@@ -469,7 +491,10 @@
 
     if (global.document) {
       document.addEventListener('visibilitychange', function () {
-        if (!document.hidden) now();
+        if (document.hidden) return stopSchedule();
+        // Back in front: catch up at once, then resume the twenty seconds.
+        schedule();
+        now();
       });
     }
     global.addEventListener('online', function () { now(); });

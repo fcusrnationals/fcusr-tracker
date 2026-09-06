@@ -571,10 +571,10 @@
 
         /* What the app is doing on its own, said plainly, because otherwise the
            only visible state is a word that has been wrong before. */
-        '<p class="small muted">It checks by itself after every change and every ' +
-        'few minutes, and goes right through everything when you open the app and ' +
-        'once an hour after that \u2014 so a device that has fallen behind catches ' +
-        'up without anybody doing anything.</p>' +
+        '<p class="small muted">It checks by itself a few seconds after any change ' +
+        'and every twenty seconds while this is open, and goes right through ' +
+        'everything when you open the app and once an hour after that \u2014 so a ' +
+        'device that has fallen behind catches up without anybody doing anything.</p>' +
         '<p class="tiny muted">Photographs are never synced — they stay in the browser that ' +
         'took them.</p>',
       footer: '<button type="button" class="btn" data-close>Close</button>' +

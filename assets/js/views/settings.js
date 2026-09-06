@@ -360,8 +360,11 @@
 
     return '<div style="padding:14px">' +
       '<p class="small muted">Your activities, tasks, letters and reports are copied to the ' +
-      'council\u2019s server and picked up by everyone else signed in. It happens by itself ' +
-      'every few minutes and after every change.</p>' +
+      'council\u2019s server and picked up by everyone else signed in. It happens by itself \u2014 ' +
+      'a few seconds after any change, and every twenty seconds while the tracker is open, so two ' +
+      'officers in the same meeting see the same screen. Once an hour, and every time the app is ' +
+      'opened, it goes right through everything so a device that has fallen behind catches up ' +
+      'on its own.</p>' +
 
       '<div class="card" style="margin-top:12px">' +
         '<div class="strong" style="margin-bottom:3px">' +

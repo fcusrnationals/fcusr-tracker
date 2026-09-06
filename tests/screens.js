@@ -105,6 +105,18 @@ const SCREENS = [
   let faults = 0;
   for (const [name, hash] of SCREENS) {
     await page.goto(BASE + (hash || '#/events/' + eventId), { waitUntil: 'networkidle0' });
+    /* The header as a signed-in officer actually sees it. The audit stubs the
+       backend away, which hides the sync pill — so the header was measured
+       with a slot empty that is never empty in use, and the search and
+       settings buttons were being crushed to 26px on a narrow phone with
+       nothing here noticing. */
+    await page.evaluate(() => {
+      const el = document.getElementById('sync-state');
+      if (!el) return;
+      el.hidden = false;
+      el.className = 'sync-state is-ok';
+      el.innerHTML = '<span class="ss-dot"></span><span class="ss-word">Synced · 128</span>';
+    });
     await new Promise((r) => setTimeout(r, 250));
 
     /* Menus and dialogs are drawn on demand, so an audit that only walks screens
