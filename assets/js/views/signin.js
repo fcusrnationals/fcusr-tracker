@@ -74,6 +74,27 @@
     return '<div class="gate">' + card() + '</div>';
   }
 
+  /* The moment between opening the app and knowing who is holding it.
+
+     Not the sign-in form, because most of the time the answer is "you, still",
+     and a form that appears and vanishes reads as a glitch. Not the app either,
+     which is the whole point. The council's marks and one honest sentence. */
+  function checking() {
+    return '<div class="gate"><div class="gate-card">' +
+      '<div class="gate-top">' +
+        '<span class="gate-wash" aria-hidden="true">' +
+          '<img class="gate-hero-img" src="assets/img/campus.jpg" alt="" decoding="async">' +
+        '</span>' +
+        '<div class="gate-brand">' +
+          '<img class="gate-seal" src="assets/img/fcusr-seal.png" alt="">' +
+          '<div class="gate-name">' + U.esc(Store.trackerTitle(Store.nationalUnitId())) + '</div>' +
+          '<div class="gate-org">' + U.esc(Store.org().name) + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<p class="gate-foot" role="status">Checking your sign-in\u2026</p>' +
+      '</div></div>';
+  }
+
   /* Shown when an address is used for the first time: the password the door was
      given was not accepted, and no account has ever existed on that address, so
      the only thing left to do is set one. It cannot be dismissed by clicking
@@ -206,5 +227,5 @@
   // Called on sign-out so the next person does not land in the last one's state.
   function reset() { busy = false; problem = ''; }
 
-  global.ViewSignIn = { render: render, mount: mount, card: card, reset: reset };
+  global.ViewSignIn = { render: render, checking: checking, mount: mount, card: card, reset: reset };
 })(window);

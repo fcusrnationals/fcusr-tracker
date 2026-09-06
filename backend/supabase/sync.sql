@@ -133,3 +133,34 @@ create or replace function server_now() returns timestamptz
 language sql stable as $$ select now(); $$;
 
 grant execute on function server_now() to anon, authenticated;
+
+-- --------------------------------------------------- the clock, enforced
+-- `updated_at` is what a pull filters on: "give me everything newer than the
+-- last thing I took in". That only works if every row on the table was stamped
+-- by the same clock. The client was sending its own, which means two phones
+-- with watches a few minutes apart write timestamps that cannot be compared —
+-- and a device would silently stop seeing the other's changes, with no error
+-- and nothing on screen to suggest anything was wrong.
+--
+-- So the server stamps it, and ignores whatever arrives. The time a person
+-- actually made the edit still travels, in body.updatedAt, which is what
+-- decides whose edit wins — a different question, needing a different clock.
+
+create or replace function touch_updated_at() returns trigger
+language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+do $$
+declare t text;
+begin
+  foreach t in array array['people','events','tasks','reports','letters','offices'] loop
+    execute format('drop trigger if exists touch_%I on %I', t, t);
+    execute format(
+      'create trigger touch_%I before insert or update on %I
+       for each row execute function touch_updated_at()', t, t);
+  end loop;
+end $$;

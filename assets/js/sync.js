@@ -64,8 +64,13 @@
     return null;
   }
 
+  /* No `updated_at` here on purpose. The server stamps it with its own clock
+     and a trigger overrides anything sent, because that column is what a pull
+     filters on and a filter is meaningless across two phones' watches. When the
+     edit was made travels inside `body`, which is a different question answered
+     by a different clock. */
   function toRow(kind, rec) {
-    var row = { id: rec.id, body: rec, updated_at: rec.updatedAt || new Date().toISOString() };
+    var row = { id: rec.id, body: rec };
     var u = unitOf(kind, rec);
 
     if (kind === 'person') { row.unit_id = u; row.name = rec.name || ''; row.active = rec.active !== false; }

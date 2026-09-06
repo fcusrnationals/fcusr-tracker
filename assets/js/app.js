@@ -42,6 +42,18 @@
        to authenticate against, the data is on this device alone, and a password
        box would be theatre. That is why the app opens straight in today and will
        not once Supabase is live. */
+    /* Before the door, the doorstep. A remembered session is read from this
+       device instantly and is not evidence of anything until the backend agrees,
+       so until it has, neither the app nor the sign-in form is drawn. Skipping
+       this is what made the Republic's work flash up for a moment in front of
+       somebody who turned out not to be signed in at all. */
+    if (global.Auth && !Auth.isOffline() && !Auth.settled()) {
+      document.body.classList.add('is-gated');
+      viewEl.innerHTML = global.ViewSignIn ? ViewSignIn.checking() : '';
+      document.title = trackerTitle();
+      return;
+    }
+
     if (global.Auth && !Auth.isOffline() && !Auth.signedIn()) {
       document.body.classList.add('is-gated');
       if (global.ViewSignIn) {
@@ -59,6 +71,11 @@
       return;
     }
     document.body.classList.remove('is-gated');
+    /* Anything the app wants to say on arrival waits until there is an app to
+       say it in front of. The closing date and the rehearsal notice used to be
+       announced at boot, which meant a stranger at the sign-in screen was told
+       what the council still owes before being asked who they were. */
+    greet();
     var view = current.name === 'event-detail' ? global.ViewEventDetail
       : current.name === 'letter-detail' ? global.ViewLetterDetail
       : ROUTES[current.name];
@@ -403,31 +420,89 @@
     /* One notice at a time. The rehearsal notice already explains the closing
        date, so stacking the term reminder behind it would greet somebody with
        two dialogs on top of each other saying overlapping things. */
-    if (global.TermUI && !TermUI.dryRunNotice()) TermUI.maybeRemind();
-
     /* Syncing starts after the first screen is drawn and never before it. The
        app is local-first: everything on screen came from this device and is
        already correct; the network's job is to reconcile it afterwards. */
     if (global.Sync) {
       Sync.start();
       Sync.subscribe(function () { paintSyncState(); });
+      var ss = document.getElementById('sync-state');
+      if (ss) ss.addEventListener('click', syncDetail);
+      paintSyncState();
     }
   }
 
-  /* The one honest signal about syncing: whether this device is behind. It goes
-     in the header rather than a settings page, because "did my change reach
-     anyone" is a question people ask while looking at the change. */
+  /* Said once a visit, and only to somebody who is actually inside. */
+  var greeted = false;
+  function greet() {
+    if (greeted || !global.TermUI) return;
+    greeted = true;
+    // One notice at a time: the rehearsal notice already explains the closing
+    // date, so stacking the term reminder behind it would greet somebody with
+    // two dialogs saying overlapping things.
+    if (!TermUI.dryRunNotice()) TermUI.maybeRemind();
+  }
+
+  /* Whether this device is behind. In the header rather than a settings page,
+     because "did my change reach anyone" is a question people ask while looking
+     at the change.
+
+     It was a coloured dot, and a dot is not a sentence: it went red on a real
+     failure and said nothing about what had failed or what syncing even was.
+     So it carries the word — Synced, Syncing, Not synced — and when something is
+     wrong it is a button that opens the whole story rather than a tooltip
+     nobody hovers over on a phone. */
   function paintSyncState() {
     var el = document.getElementById('sync-state');
     if (!el || !global.Sync) return;
     var st = Sync.status();
     if (!st.able) { el.hidden = true; return; }
+
+    var word = st.running ? 'Syncing' : st.error ? 'Not synced' : st.at ? 'Synced' : 'Waiting';
+    var tone = st.running ? ' is-working' : st.error ? ' is-stuck' : st.at ? ' is-ok' : '';
+
     el.hidden = false;
-    el.className = 'sync-state' + (st.running ? ' is-working' : st.error ? ' is-stuck' : '');
-    el.setAttribute('title', st.running ? 'Syncing…'
-      : st.error ? 'Not synced: ' + st.error
-      : st.at ? 'Everything here is on the server' : 'Not synced yet');
-    el.setAttribute('aria-label', el.getAttribute('title'));
+    el.className = 'sync-state' + tone;
+    el.innerHTML = '<span class="ss-dot" aria-hidden="true"></span><span class="ss-word">' +
+      U.esc(word) + '</span>';
+    el.setAttribute('title', st.error
+      ? 'Not synced — ' + st.error + '. Tap for details.'
+      : st.running ? 'Sending and receiving changes…'
+      : st.at ? 'Everything on this device is on the council\u2019s server'
+      : 'Waiting to sync');
+    el.setAttribute('aria-label', 'Syncing: ' + el.getAttribute('title'));
+  }
+
+  /* Pressed, it explains itself. The error text is the part people need and the
+     part a coloured dot cannot carry. */
+  function syncDetail() {
+    if (!global.Sync || !global.UI) return;
+    var st = Sync.status();
+    var l = st.last;
+
+    UI.modal({
+      title: st.error ? 'This device is not synced' : st.running ? 'Syncing' : 'Synced',
+      body:
+        (st.error
+          ? '<div class="card" style="background:var(--st-overdue-bg);border-color:var(--st-overdue-bd)">' +
+            '<div class="strong" style="margin-bottom:3px">The server could not be reached</div>' +
+            '<div class="small">' + U.esc(st.error) + '</div></div>' +
+            '<p class="small" style="margin-top:12px">Nothing has been lost. Everything you have ' +
+            'done is saved on this device and will be sent as soon as the connection comes back.</p>'
+          : '<p class="small" style="margin-top:0">Your activities, tasks, letters and reports are ' +
+            'copied to the council\u2019s server and picked up by everyone else signed in. It ' +
+            'happens by itself after every change and every few minutes.</p>') +
+        (l ? '<p class="small muted">Last round: ' + (l.added + l.updated) + ' taken in, ' +
+             l.sent + ' sent, ' + U.esc(U.fmtStamp(st.at)) + '.</p>' : '') +
+        '<p class="tiny muted">Photographs are never synced — they stay in the browser that ' +
+        'took them.</p>',
+      footer: '<button type="button" class="btn" data-close>Close</button>' +
+        '<button type="button" class="btn btn-primary" data-retry data-close>Try now</button>',
+      onMount: function (root) {
+        var r = root.querySelector('[data-retry]');
+        if (r) r.addEventListener('click', function () { Sync.now({ loud: true }); });
+      }
+    });
   }
 
   global.App = { go: go, render: render, openSearch: openSearch, route: function () { return current; } };

@@ -427,6 +427,48 @@ const FILES = [
     D.querySelectorAll('.modal-backdrop').forEach((e) => e.remove());
   }
 
+  /* ---------------- the doorstep ----------------
+     A session is read out of localStorage instantly and trustingly. Confirming
+     it with the backend takes a moment, and the app used to draw the Republic
+     during that moment on the strength of a name in browser storage — so a
+     lapsed session, or a phone picked up by somebody else, got a look at the
+     council's work before being asked who they were. */
+  console.log('\n--- before the session is confirmed ---');
+  {
+    const D = window.document;
+    const view = () => D.getElementById('view');
+    const txt = () => view().textContent.replace(/\s+/g, ' ');
+
+    await Auth.signOut();
+    // A name this device remembers, of the kind a lapsed session leaves behind.
+    window.localStorage.setItem('fcusr.tracker.me', JSON.stringify({
+      id: 'ghost', email: 'someone@filamer.edu.ph', name: 'Someone', access: 'officer',
+      unitId: window.Store.nationalUnitId(), unitName: 'FCUSR Nationals', unitKind: 'national'
+    }));
+
+    const pending = Auth.resume();
+    check('the app does not yet claim to know who this is', !Auth.settled());
+    window.App.render();
+    check('so neither the Republic nor the sign-in form is drawn',
+      !/Needs attention/.test(txt()) && !D.querySelector('[data-mode]'), txt().slice(0, 70));
+    check('it says what it is doing instead', /checking your sign-in/i.test(txt()), txt().slice(0, 70));
+    check('and the navigation stays hidden', D.body.classList.contains('is-gated'));
+
+    await pending;
+    check('once the backend has answered, the app has settled', Auth.settled());
+    check('and a session it would not confirm is not honoured', !Auth.signedIn());
+    window.App.render();
+    check('now the door is shown', !!D.querySelector('.gate-card') &&
+      !/checking your sign-in/i.test(txt()));
+
+    /* Nothing the app wants to announce may be announced to a stranger. The
+       closing date and what the unit still owes were being said at boot,
+       before anyone had been asked who they were. */
+    check('and no notice was put in front of them',
+      !D.querySelector('.modal-backdrop'),
+      (D.querySelector('.modal-backdrop') || { textContent: '' }).textContent.slice(0, 60));
+  }
+
   /* ---------------- the front door ---------------- */
   console.log('\n--- the gate ---');
   {

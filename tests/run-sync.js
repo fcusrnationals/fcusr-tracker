@@ -310,6 +310,34 @@ function makeDevice(server, name) {
     check('and the round after that is quiet again', woke === 0, woke + ' wake-ups');
   }
 
+  /* ---------------- the server owns the clock ----------------
+     `updated_at` is what a pull filters on, so every row must be stamped by one
+     clock. The fake server above stamps its own — as Postgres does with the
+     trigger the migration installs — and this holds the client to never sending
+     one, because for a while it did, and two phones with watches a few minutes
+     apart would then have quietly stopped seeing each other's work. */
+  console.log('\n--- the clock belongs to the server ---');
+  {
+    const row = A.Sync.toRow('event', {
+      id: '22222222-2222-4222-8222-222222222222', title: 'X',
+      unitId: natA, updatedAt: '2099-01-01T00:00:00.000Z'
+    });
+    check('a pushed row carries no timestamp of its own',
+      !('updated_at' in row), JSON.stringify(Object.keys(row)));
+    check('but the edit time travels inside the record',
+      row.body.updatedAt === '2099-01-01T00:00:00.000Z');
+
+    // And a device whose watch is wrong still receives everything.
+    const fast = makeDevice(server, 'Fast');
+    const realNow = Date.now;
+    fast.w.Date.now = () => realNow() + 9 * 60 * 1000;   // nine minutes fast
+    const seen = A.S.addEvent({ title: 'Clock Test', unitId: natA });
+    await A.Sync.now();
+    await fast.Sync.now();
+    check('a phone with a wrong clock still gets what it missed', !!fast.S.event(seen.id));
+    fast.w.Date.now = realNow;
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

@@ -2629,6 +2629,53 @@
     seedLetter('CCS', 'Excuse letter for the Hour of Code facilitators',
       'Hour of Code — Roxas City', 'Hannah Mae Villaruel', ['OSA', 'DEAN'], 2);
 
+    /* Every letter above belongs to a college, and the person rehearsing this is
+       usually a national executive — who would open the Letters tab and find it
+       empty, which teaches them the tracker does not work rather than how it
+       does. So the National government carries its own, on the council's real
+       routes, including one that has to be chased. */
+    var n1 = seedLetter('NAT', 'Request for the General Assembly budget', 'General Assembly 2026',
+      'Althea Ramirez', ['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'BUD', 'VPAA', 'VPF', 'OP'], 12);
+    if (n1) {
+      ['Althea Ramirez', 'Arron D. Aperocho', 'Arron D. Aperocho'].forEach(function (who, i) {
+        n1.stops[i].receivedBy = who;
+        n1.stops[i].forwardedBy = 'Althea Ramirez';
+        n1.stops[i].receivedAt = d(-9 + i);
+        n1.stops[i].releasedAt = d(-8 + i);
+        n1.stops[i].outcome = 'Approved';
+      });
+      // Sitting with the adviser longer than that desk usually takes.
+      n1.stops[3].receivedBy = 'Sir Gonzales';
+      n1.stops[3].forwardedBy = 'Althea Ramirez';
+      n1.stops[3].receivedAt = d(-7);
+    }
+
+    var n2 = seedLetter('NAT', 'Permission to attend the regional student leaders\u2019 congress',
+      '', 'Miguel Fortaleza',
+      ['AUTH', 'GOV', 'PRES', 'ADV', 'DEAN', 'OSA', 'BUD', 'VPAA', 'VPF', 'OP'], 4);
+    if (n2) {
+      n2.stops[0].receivedBy = 'Miguel Fortaleza';
+      n2.stops[0].forwardedBy = 'Miguel Fortaleza';
+      n2.stops[0].receivedAt = d(-3);
+      n2.stops[0].releasedAt = d(-3);
+      n2.stops[0].outcome = 'Approved';
+      // Sent back by the President — the extra progress entry the trail shows.
+      n2.stops[1].receivedBy = 'Arron D. Aperocho';
+      n2.stops[1].forwardedBy = 'Miguel Fortaleza';
+      n2.stops[1].receivedAt = d(-2);
+      n2.stops[1].releasedAt = d(-1);
+      n2.stops[1].outcome = 'Returned for revision';
+      n2.stops[1].note = 'Attach the invitation letter before this goes any further.';
+      var retry = stopFor('GOV');
+      if (retry) n2.stops.splice(2, 0, retry);
+    }
+
+    // One kept inside the council, so the President-signs-everything rule and
+    // its one exception are both visible in the rehearsal.
+    var n3 = seedLetter('NAT', 'Minutes of the 3rd Executive Board meeting', '',
+      'Althea Ramirez', ['AUTH', 'GOV'], null);
+    if (n3) n3.internal = true;
+
     /* The rehearsal. A closing date a month out, so a council opening this for
        the first time lands in the end of term with something to look at rather
        than an empty screen and an abstract explanation. */

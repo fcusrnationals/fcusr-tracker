@@ -216,15 +216,36 @@
   /* Start-up. The device remembers who was signed in, so the first screen is not
      blank while the network is asked; then the backend confirms it. A session
      that has lapsed signs out quietly rather than leaving the app pretending. */
+  /* False until the backend has had its say about whoever this device
+     remembers. It matters because `restore()` above is instant and trusting: it
+     reads a name out of localStorage and the app would happily draw the whole
+     Republic around it. Confirming that name takes a moment, and for that moment
+     nothing of the council's may be on screen — a lapsed session, or a phone
+     picked up by somebody else, would otherwise get a good look at it first. */
+  var confirmed = false;
+  function settled() { return isOffline() || confirmed; }
+
   function resume() {
+    /* Asking again means not knowing again. The flag says "the backend has
+       answered the question being asked now", not "it answered one once". */
+    confirmed = false;
     restore();
-    if (isOffline()) return Promise.resolve(me);
+    if (isOffline()) { confirmed = true; return Promise.resolve(me); }
     return Backend.restore().then(function (profile) {
       if (profile) adopt(profile);
       else if (me) { me = null; remember(); }
-      if (global.App) App.render();
       return me;
-    }).catch(function () { return me; });
+    }).catch(function () {
+      /* The backend could not be reached. A remembered session is not proof of
+         anything, so it is not honoured — signing in again needs the network
+         anyway, and guessing in favour of access is the wrong way to guess. */
+      if (me) { me = null; remember(); }
+      return me;
+    }).then(function (out) {
+      confirmed = true;
+      if (global.App) App.render();
+      return out;
+    });
   }
 
   /* Sign in, or set a password for the first time.
@@ -311,7 +332,7 @@
     visibleEvents: visibleEvents, canSee: canSee, eventIdsFor: eventIdsFor,
     myUnitId: myUnitId,
     signIn: signIn, signUp: signUp, signOut: signOut,
-    restore: restore, resume: resume, adopt: adopt,
+    restore: restore, resume: resume, adopt: adopt, settled: settled,
     promptSignIn: promptSignIn, requireExecutive: requireExecutive,
     changePassword: changePassword, isOffline: isOffline
   };
