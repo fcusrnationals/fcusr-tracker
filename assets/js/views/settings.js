@@ -50,11 +50,13 @@
     html += section('access', 'Access and enrolment',
       mineOnly ? Store.unitName(myUnit) : 'The President',
       '<div style="padding:14px">' +
-      '<p class="small muted">This is where access to the site is created. A person&rsquo;s ' +
+      '<p class="small muted">One form for everybody. Give somebody an email address and they ' +
+      'can sign in; leave it out and they are simply somebody work can be assigned to. ' +
+      'A person&rsquo;s ' +
       '<strong>position</strong> is only a label printed on reports &mdash; what they can actually ' +
       'reach is decided by the two settings below.</p>' +
       '<div class="row" style="margin:12px 0">' +
-        '<button type="button" class="btn btn-primary" data-enrol>' + UI.icon('plus') + 'Enrol someone</button>' +
+        '<button type="button" class="btn btn-primary" data-add-person>' + UI.icon('plus') + 'Add someone</button>' +
         '<button type="button" class="btn" data-roster>' + UI.icon('users') + 'Who can sign in</button>' +
         '<button type="button" class="btn" data-change-pw>Change my password</button>' +
         '<button type="button" class="btn" data-my-handover>' + UI.icon('check') + 'Before you hand over</button>' +
@@ -482,9 +484,6 @@
         if (head && head.scrollIntoView) head.scrollIntoView({ block: 'nearest' });
       });
     });
-
-    var enrol = root.querySelector('[data-enrol]');
-    if (enrol) enrol.addEventListener('click', function () { Forms.enrolForm(); });
 
     var roster = root.querySelector('[data-roster]');
     if (roster) roster.addEventListener('click', function () { Forms.rosterList(); });

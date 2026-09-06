@@ -181,6 +181,7 @@
       positions: DEFAULT_POSITIONS.slice(),
       committees: DEFAULT_COMMITTEES.slice(),
       org: JSON.parse(JSON.stringify(DEFAULT_ORG)),
+      councilAt: '',
       seeded: false
     };
   }
@@ -552,6 +553,7 @@
      A deletion beats an edit of the same age, because a record deleted and then
      re-uploaded is the failure people actually notice. */
   var COLLECTIONS = {
+    unit:   { list: 'units',   clean: cleanUnit },
     person: { list: 'people',  clean: cleanPerson },
     event:  { list: 'events',  clean: cleanEvent },
     task:   { list: 'tasks',   clean: cleanTask },
@@ -679,12 +681,49 @@
     return state.sync;
   }
 
+  /* The council's own details as one thing: what is printed at the top of every
+     report, the Republic's letter template, and the lists a form offers. Setup
+     rather than work, which is why it was left out of the first sync — but "the
+     letterhead is on the President's laptop and nowhere else" is exactly the
+     disagreement this layer exists to prevent. */
+  function council() {
+    return {
+      org: state.org,
+      positions: state.positions,
+      committees: state.committees,
+      updatedAt: state.councilAt || ''
+    };
+  }
+
+  function touchCouncil() {
+    state.councilAt = bumpStamp(state.councilAt);
+  }
+
+  function applyRemoteCouncil(c) {
+    if (!c || typeof c !== 'object') return false;
+    if (!newer(c.updatedAt || '', state.councilAt || '')) return false;
+    if (c.org && typeof c.org === 'object') {
+      state.org.name = str(c.org.name, LIMITS.org) || state.org.name;
+      state.org.address = str(c.org.address, LIMITS.org);
+      state.org.email = str(c.org.email, LIMITS.org);
+      state.org.emblem = emblem(c.org.emblem);
+      state.org.letterhead = letterhead(c.org.letterhead);
+      state.org.letterheadBy = str(c.org.letterheadBy, LIMITS.name);
+      state.org.letterheadAt = c.org.letterheadAt ? stamp(c.org.letterheadAt) : '';
+    }
+    if (Array.isArray(c.positions)) state.positions = cleanList(c.positions, DEFAULT_POSITIONS);
+    if (Array.isArray(c.committees)) state.committees = cleanList(c.committees, DEFAULT_COMMITTEES);
+    state.councilAt = stamp(c.updatedAt) || nowISO();
+    commit();
+    return true;
+  }
+
   function markSynced(patch) {
     Object.keys(patch || {}).forEach(function (k) { state.sync[k] = patch[k]; });
     save();
   }
 
-  var DELETABLE = ['event', 'task', 'report', 'letter', 'person', 'office'];
+  var DELETABLE = ['event', 'task', 'report', 'letter', 'person', 'office', 'unit'];
 
   /* Tombstones age out. A device that has been in a drawer for three months has
      bigger problems than one resurrected task, and keeping every deletion for
@@ -821,6 +860,7 @@
       unitMap: cleanIdMap(data.sync && data.sync.unitMap),
       officeMap: cleanIdMap(data.sync && data.sync.officeMap)
     };
+    s.councilAt = data.councilAt ? stamp(data.councilAt) : '';
     s.positions = cleanList(data.positions, DEFAULT_POSITIONS);
     s.committees = cleanList(data.committees, DEFAULT_COMMITTEES);
     s.seeded = !!data.seeded;
@@ -896,6 +936,20 @@
   function commit() { save(); notify(); }
 
   var nowISO = function () { return new Date().toISOString(); };
+
+  /* A stamp that is always later than the one before it.
+
+     A phone's clock has millisecond resolution, and two changes to the same
+     thing inside one millisecond is ordinary — a form saves, a sync fires, a
+     second edit lands. Sync compares these stamps with a strict "newer than", so
+     two equal ones mean the second change is invisible: it is never sent, and
+     never taken in. Not an error anybody sees; just a letterhead that quietly
+     does not travel. */
+  function bumpStamp(previous) {
+    var now = nowISO();
+    if (!previous || now > previous) return now;
+    return new Date(Date.parse(previous) + 1).toISOString();
+  }
 
   /* ---------- people ---------- */
 
@@ -1590,12 +1644,14 @@
     if (list.some(function (x) { return x.toLowerCase() === v.toLowerCase(); })) return false;
     list.push(v);
     list.sort(function (a, b) { return a.localeCompare(b); });
+    touchCouncil();
     commit();
     return true;
   }
 
   function removeListValue(kind, value) {
     state[kind] = state[kind].filter(function (x) { return x !== value; });
+    touchCouncil();
     commit();
   }
 
@@ -2387,7 +2443,7 @@
     state.term.declaredAt = nowISO();
     state.term.declaredBy = (opts.by || '').trim();
     state.term.override = null;
-    state.term.updatedAt = nowISO();
+    state.term.updatedAt = bumpStamp(state.term.updatedAt);
     commit();
     return state.term;
   }
@@ -2402,7 +2458,7 @@
     if (link && !v) throw new Error('That needs to be a Google Drive or Docs link.');
     state.term.overallLink = v;
     state.term.overallOwned = !!owned;
-    state.term.updatedAt = nowISO();
+    state.term.updatedAt = bumpStamp(state.term.updatedAt);
     commit();
     return state.term;
   }
@@ -2411,7 +2467,7 @@
     var r = (reason || '').trim();
     if (r.length < 10) throw new Error('Write down why the outstanding units are being passed over.');
     state.term.override = { reason: r.slice(0, LIMITS.reason), by: (by || '').trim(), at: nowISO() };
-    state.term.updatedAt = nowISO();
+    state.term.updatedAt = bumpStamp(state.term.updatedAt);
     commit();
     return state.term;
   }
@@ -2594,6 +2650,7 @@
       }
       state.org.emblem = img;
     }
+    touchCouncil();
     commit();
     return state.org;
   }
@@ -3047,6 +3104,7 @@
     receiveStop: receiveStop, releaseStop: releaseStop, reopenStop: reopenStop,
     applyRemote: applyRemote, applyRemoteDeletion: applyRemoteDeletion,
     applyRemoteTerm: applyRemoteTerm,
+    council: council, applyRemoteCouncil: applyRemoteCouncil,
     outbound: outbound, deletions: deletions, isDeleted: isDeleted,
     syncState: syncState, markSynced: markSynced, remapIds: remapIds,
     resetSyncMarks: resetSyncMarks,

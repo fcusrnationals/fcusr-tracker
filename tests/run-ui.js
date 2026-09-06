@@ -316,14 +316,17 @@ const Auth = window.Auth;
 
 // Nobody signed in: Settings refuses to open.
 goto('#/settings');
-check('Settings is closed to a stranger', !$('[data-enrol]') && !!$('#ask-exec'));
+check('Settings is closed to a stranger', !$('[data-add-person]') && !!$('#ask-exec'));
 
 // Signing in offline treats you as a national executive.
 await Auth.signIn('', '');
 check('an executive is recognised', Auth.isExecutive() === true);
 goto('#/settings');
-check('Settings opens for an executive', !!$('[data-enrol]') && !!$('[data-backup]'));
-check('enrolment lives there', !!$('[data-enrol]'));
+check('Settings opens for an executive', !!$('[data-add-person]'));
+/* One form for everybody: an email makes them able to sign in, no email
+   makes them somebody work can be assigned to. Two doors to one room was
+   how a person could be added with no way to ever log in. */
+check('adding somebody lives there', !!$('[data-add-person]'));
 check('the officer list can be generated', !!$('[data-roster]'));
 check('a person can change their own password', !!$('[data-change-pw]'));
 
@@ -373,7 +376,7 @@ goto('#/settings');
 check('settings are tabs, not a stack of folds', $$('.set-tab').length > 4,
   $$('.set-tab').length + ' tabs');
 check('exactly one panel is on screen', $$('.set-panel:not([hidden])').length === 1);
-check('and it is open on arrival', !!$('.set-panel:not([hidden]) [data-enrol]'));
+check('and it is open on arrival', !!$('.set-panel:not([hidden]) [data-add-person]'));
 
 click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'people'));
 check('choosing a tab shows its panel',

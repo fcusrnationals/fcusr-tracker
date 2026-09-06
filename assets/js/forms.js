@@ -1393,130 +1393,24 @@
 
   /* The events a volunteer for this unit could be put on. Volunteers help with
      their own unit's activities, so the list follows the unit picker. */
-  function enrolForm() {
-    var unitList = Store.units({ activeOnly: true });
-    var startUnit = (global.Auth && Auth.myUnitId()) || Store.nationalUnitId();
-
-    var body =
-      field({
-        name: 'name', label: 'Full name', required: true,
-        control: '<input type="text" id="f-name" data-autofocus maxlength="80" placeholder="Juan D. Dela Cruz">'
-      }) +
-      field({
-        name: 'email', label: 'Email', required: true,
-        control: '<input type="text" id="f-email" maxlength="120" placeholder="juan@filamer.edu.ph">',
-        hint: 'This is how they sign in.'
-      }) +
-      field({
-        name: 'position', label: 'Position',
-        control: '<input type="text" id="f-position" maxlength="60" placeholder="e.g. Secretary, or Logistics Volunteer">',
-        hint: 'Free text, printed on reports. It does not affect what they can open.'
-      }) +
-      field({
-        name: 'unitId', label: 'Which unit', required: true,
-        control: '<select id="f-unitId">' + unitList.map(function (u) {
-          return '<option value="' + U.esc(u.id) + '"' + (u.id === startUnit ? ' selected' : '') + '>' +
-            U.esc(u.name) + '</option>';
-        }).join('') + '</select>',
-        hint: 'Where they belong. This, and the level below, are the only two things that decide what they can open.'
-      }) +
-      /* This form used to offer Officer or Volunteer, and then say in its own
-         small print that volunteers are not taken on here. A choice you are
-         told not to make is not a choice — and the volunteer half could not
-         work properly anyway, because a volunteer's access is the list of
-         activities they were taken on for, which you know while looking at an
-         activity and not while sitting in Settings.
-
-         So this enrols officers, and points at the one place volunteers are
-         actually added. */
-      '<div class="gate-note" style="margin-bottom:16px">' + UI.icon('users') +
-      '<span><strong>This enrols an officer</strong> \u2014 somebody who reaches every ' +
-      'activity of their unit. A <strong>volunteer</strong> is taken on from the activity ' +
-      'they are helping with: open it under <strong>Events</strong> and use ' +
-      '<strong>Add volunteer</strong>, or import a whole list at once.</span></div>' +
-
-      '<div class="hint" id="level-hint" style="margin:-8px 2px 4px"></div>';
-
+  /* What to tell somebody who has just been given an account. Shared by the
+     enrolment form and the person form, so the instruction cannot be right in
+     one and stale in the other — which is exactly what happened when the door
+     stopped having a "Set my password" button and only one of them was updated. */
+  function invitedDialog(name, addr) {
     UI.modal({
-      title: 'Enrol someone',
-      wide: true,
-      body: body,
-      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
-        '<button type="button" class="btn btn-primary" data-save>Create access</button>',
-      onMount: function (root, close) {
-        var unitPick = root.querySelector('#f-unitId');
-
-        function currentUnit() { return Store.unit(unitPick.value) || Store.nationalUnit(); }
-
-        // What this officer will actually reach, said as the unit is chosen.
-        function syncHint() {
-          var u = currentUnit();
-          root.querySelector('#level-hint').textContent = u.kind === 'national'
-            ? 'A National officer reaches the whole Republic, including this page.'
-            : 'An officer of ' + u.name + ' reaches that unit\u2019s activities and nothing else.';
-        }
-
-        unitPick.addEventListener('change', syncHint);
-        syncHint();
-
-        root.querySelector('[data-save]').addEventListener('click', function () {
-          clearErrors(root);
-          var name = root.querySelector('#f-name').value.trim();
-          var email = root.querySelector('#f-email').value.trim();
-          var position = root.querySelector('#f-position').value.trim();
-
-          if (!name) return showError(root, 'name', 'Enter their name.');
-          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-            return showError(root, 'email', 'That email address does not look right.');
-          }
-
-          /* The unit chosen on this form, not whatever addPerson would fall back
-             to. Without it every officer enrolled into a college was filed under
-             Nationals — so their own Governor could not find them in an assignee
-             list, and the national roster filled with people who were never
-             national. */
-          var person = Store.addPerson({
-            name: name, position: position, email: email,
-            unitId: unitPick.value, access: 'officer'
-          });
-
-          Backend.enrol({
-            email: email, full_name: name, position: position,
-            unit_id: unitPick.value,
-            access: 'officer', eventIds: []
-          }).then(function () {
-            close();
-            // Enrolling records the decision; the person sets their own password
-            // the first time they open the site, which is the only way the app
-            // never handles anyone else's.
-            UI.modal({
-              title: name + ' is enrolled',
-body: '<p class="small">Send them the link to the tracker and this line:</p>' +
-                '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-                '<p class="small" style="margin:0">Open the site, type <strong>' + U.esc(email) +
-                '</strong> and a password you will remember, then press <strong>Sign in</strong>. ' +
-                'It will ask you to set that password the first time.</p></div>' +
-                '<p class="small muted">Nobody else ever sees that password, and the address only ' +
-                'works because you have just enrolled it.</p>',
-              footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
-            });
-          }).catch(function (err) {
-            close();
-            // Offline there is no server to create the login on; the person is
-            // still added to the directory so work can be assigned to them.
-            UI.toast(Auth.isOffline()
-              ? name + ' added. Their login is created once Supabase is connected.'
-              : (err.message || 'That could not be enrolled.'),
-              Auth.isOffline() ? 'success' : 'error');
-          });
-          void person;
-        });
-      }
+      title: name + ' can now sign in',
+      body: '<p class="small">Send them the link to the tracker and this line:</p>' +
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+        '<p class="small" style="margin:0">Open the site, type <strong>' + U.esc(addr) +
+        '</strong> and a password you will remember, then press <strong>Sign in</strong>. ' +
+        'It will ask you to set that password the first time.</p></div>' +
+        '<p class="small muted">Nobody else ever sees that password, and the address only ' +
+        'works because you have just enrolled it.</p>',
+      footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
     });
   }
 
-  /* The roster, generated rather than typed: names, positions and the emails
-     they sign in with. */
   /* ---------- who can sign in ----------
 
      Enrolling somebody creates a row saying the address may have an account,
@@ -1816,6 +1710,19 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
         control: UI.suggestInput('f-committee', d.committee, Store.committees(), 'Optional')
       }) +
       '</div>' +
+      /* One form, because "add a person" and "enrol someone" were two doors to
+         the same room. Somebody in the directory can be given work; somebody
+         with an email can also sign in. That is one difference, and it belongs
+         on one field rather than in a choice made before the form opens. */
+      field({
+        name: 'email', label: 'Email',
+        control: '<input type="email" id="f-email" maxlength="120" autocapitalize="off" ' +
+          'spellcheck="false" value="' + U.esc(d.email || '') + '" placeholder="juan@filamer.edu.ph">',
+        hint: d.email
+          ? 'They can sign in with this address.'
+          : 'Optional. With an address they can sign in and see their own tasks; without one ' +
+            'they are simply somebody work can be assigned to.'
+      }) +
       (isNew ? '' :
         '<div class="field"><label class="checkbox"><input type="checkbox" id="f-active"' + (d.active !== false ? ' checked' : '') + '>' +
         '<span>Active officer<span class="hint">Deactivated officers keep their past tasks but no longer appear in assignee lists.</span></span></label></div>');
@@ -1835,16 +1742,39 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
           };
           var uSel = root.querySelector('#f-unit');
           if (uSel) data.unitId = uSel.value;
+          var addr = (root.querySelector('#f-email').value || '').trim();
+          if (addr && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
+            return showError(root, 'email', 'That email address does not look right.');
+          }
+          data.email = addr;
           if (!data.name) return showError(root, 'name', 'Enter the officer’s name.');
-          if (isNew) {
-            Store.addPerson(data);
-            UI.toast('Person added.');
-          } else {
+
+          if (isNew) Store.addPerson(data);
+          else {
             data.active = root.querySelector('#f-active').checked;
             Store.updatePerson(personId, data);
-            UI.toast('Person saved.');
           }
-          close();
+
+          /* An address means an account. Enrolling records the decision; the
+             person sets their own password the first time they open the site,
+             which is why the app never handles anybody else's. */
+          if (!addr || (global.Auth && Auth.isOffline())) {
+            close();
+            return UI.toast(isNew ? 'Person added.' : 'Person saved.');
+          }
+
+          Backend.enrol({
+            email: addr, full_name: data.name, position: data.position,
+            unit_id: data.unitId || Store.nationalUnitId(),
+            access: 'officer', eventIds: []
+          }).then(function () {
+            close();
+            invitedDialog(data.name, addr);
+          }).catch(function (err) {
+            close();
+            UI.toast(err.message || 'Saved here, but the account could not be created.', 'error');
+          });
+          return;
         }
         root.querySelector('[data-save]').addEventListener('click', submit);
         root.querySelector('#f-name').addEventListener('keydown', function (e) {
@@ -1863,7 +1793,7 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,
     readVolunteerCSV: readVolunteerCSV, parseCSV: parseCSV,
     eventForm: eventForm, taskForm: taskForm, personForm: personForm,
-    enrolForm: enrolForm, rosterList: rosterList,
+    rosterList: rosterList,
     groupMessage: groupMessage, personalMessage: personalMessage,
     field: field, showError: showError, clearErrors: clearErrors
   };

@@ -42,11 +42,14 @@ const COLUMNS = {
   letters:   ['id', 'unit_id', 'subject', 'status', 'stops', 'internal', 'body', 'updated_at'],
   offices:   ['id', 'code', 'name', 'active', 'body', 'updated_at'],
   deletions: ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by'],
-  term:      ['id', 'end_date', 'body', 'updated_at']
+  term:      ['id', 'end_date', 'body', 'updated_at'],
+  units:     ['id', 'name', 'code', 'kind', 'tracker_name', 'active', 'body', 'updated_at'],
+  council:   ['id', 'body', 'updated_at']
 };
 
 function makeServer() {
-  const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {}, offices: {}, deletions: {}, term: {} };
+  const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {},
+                   offices: {}, deletions: {}, term: {}, units: {}, council: {} };
   let tick = 0;
   const now = () => {
     tick += 1;
@@ -82,7 +85,11 @@ function makeServer() {
       rows.forEach((r) => {
         // The server stamps its own clock on arrival, exactly as a database does.
         const key = table === 'deletions' ? r.entity + ':' + r.entity_id : r.id;
-        const stamped = Object.assign({}, r);
+        /* A deep copy, because a real server does not share memory with the
+           client. Storing the row by reference let a later edit on the device
+           appear to have been uploaded when nothing had been sent — the test
+           agreeing with the code because they were the same object. */
+        const stamped = JSON.parse(JSON.stringify(r));
         if (table === 'deletions') stamped.deleted_at = now();
         else stamped.updated_at = now();
         tables[table][key] = stamped;
@@ -95,7 +102,11 @@ function makeServer() {
       return Promise.resolve(null);
     },
     serverNow() { return Promise.resolve(now()); },
+    /* The unit list as PostgREST would answer it: whatever has been written to
+       the table, plus the National unit every council starts with. */
     units() {
+      const rows = Object.keys(tables.units).map((k) => tables.units[k]);
+      if (rows.length) return Promise.resolve(rows);
       return Promise.resolve([
         { id: '11111111-1111-4111-8111-111111111111', code: 'NAT', name: 'FCUSR Nationals', kind: 'national' }
       ]);
@@ -526,6 +537,50 @@ function makeDevice(server, name) {
       strayIds.filter((id) => !!Y.S.event(id)).length + ' copies left');
     check('and still has its own rehearsal to end itself',
       Y.S.events().filter((e) => e.sample).length > 0);
+  }
+
+  /* ---------------- setup travels too ----------------
+     The letterhead every report is printed on, the unit list, and the posts a
+     form offers. Left out of the first sync because they change rarely — and
+     "the template the President uploaded is on the President's laptop and
+     nowhere else" is exactly the disagreement this layer exists to prevent. */
+  console.log('\n--- the setup reaches everyone ---');
+  {
+    const s4 = makeServer();
+    const P2 = makeDevice(s4, 'President');
+    const G2 = makeDevice(s4, 'Governor');
+    await P2.Sync.now();
+    await G2.Sync.now();
+
+    // A unit renamed, and one added.
+    const nat = P2.S.unit(P2.S.nationalUnitId());
+    P2.S.updateUnit(nat.id, { trackerName: 'FCUSR Nationals 2026' });
+    const fresh = P2.S.addUnit({ kind: 'province', name: 'College of Maritime Studies', code: 'CMS' });
+
+    // The Republic's own details.
+    P2.S.updateOrg({ address: 'Roxas Avenue, Roxas City, Capiz 5800', email: 'sr@filamer.edu.ph' });
+    P2.S.addListValue('positions', 'Sergeant-at-Arms');
+
+    await P2.Sync.now();
+    await G2.Sync.now();
+
+    check('a new unit reaches the other phone', !!G2.S.unit(fresh.id), G2.S.units().length + ' units');
+    check('and it is named the same', G2.S.unit(fresh.id).name === 'College of Maritime Studies');
+    check('a renamed unit travels', G2.S.unit(nat.id).trackerName === 'FCUSR Nationals 2026',
+      G2.S.unit(nat.id).trackerName);
+    check('the council\u2019s details travel', G2.S.org().email === 'sr@filamer.edu.ph',
+      G2.S.org().email);
+    check('and so do the posts a form offers',
+      G2.S.positions().indexOf('Sergeant-at-Arms') >= 0);
+
+    // A letter template is the one everybody most needs to agree on.
+    P2.S.updateOrg({ letterhead: 'data:image/png;base64,iVBORw0KGgo=', letterheadBy: 'Arron' });
+    await P2.Sync.now();
+    await G2.Sync.now();
+    check('the Republic\u2019s letter template travels',
+      G2.S.org().letterhead === 'data:image/png;base64,iVBORw0KGgo=',
+      String(G2.S.org().letterhead).slice(0, 32));
+    check('with who uploaded it', G2.S.org().letterheadBy === 'Arron');
   }
 
   console.log('\n--- no console errors ---');

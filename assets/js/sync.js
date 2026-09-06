@@ -20,6 +20,9 @@
 
   // Local list ↔ server table. Reference data first, then what depends on it.
   var TABLES = [
+    // Units first: everything else names one, and a unit this device has never
+    // heard of leaves an activity with nowhere to be filed.
+    { kind: 'unit',   table: 'units' },
     { kind: 'person', table: 'people' },
     { kind: 'event',  table: 'events' },
     { kind: 'task',   table: 'tasks' },
@@ -73,6 +76,7 @@
     var row = { id: rec.id, body: rec };
     var u = unitOf(kind, rec);
 
+    if (kind === 'unit')   { row.name = rec.name || ''; row.code = rec.code || null; row.kind = rec.kind || 'province'; row.tracker_name = rec.trackerName || ''; row.active = rec.active !== false; }
     if (kind === 'person') { row.unit_id = u; row.name = rec.name || ''; row.active = rec.active !== false; }
     if (kind === 'event')  { row.unit_id = u; row.title = rec.title || ''; row.status = rec.status || 'Upcoming'; }
     if (kind === 'task')   { row.event_id = rec.eventId || null; row.title = rec.title || ''; row.status = rec.status || 'Not Started'; }
@@ -100,6 +104,10 @@
     if (!rec.updatedAt) rec.updatedAt = row.updated_at || '';
     if (!rec.createdAt) rec.createdAt = row.created_at || row.updated_at || '';
 
+    if (kind === 'unit' && !rec.name) {
+      rec.name = row.name || ''; rec.code = row.code || '';
+      rec.kind = row.kind || 'province'; rec.trackerName = row.tracker_name || '';
+    }
     if (kind === 'person' && !rec.name) { rec.name = row.name || ''; rec.unitId = row.unit_id || ''; }
     if (kind === 'event' && !rec.title) { rec.title = row.title || ''; rec.unitId = row.unit_id || ''; }
     if (kind === 'task' && !rec.title) { rec.title = row.title || ''; rec.eventId = row.event_id || ''; }
@@ -237,6 +245,33 @@
      that way. The store has its own copy of this; the two must not disagree. */
   function newer(a, b) { return String(a || '') > String(b || ''); }
 
+  /* ---------- the council's own details ----------
+     What is printed at the top of every report, the Republic's letter template,
+     and the lists a form offers. One row, like the term. */
+  function pullCouncil() {
+    return Backend.changed('council', null, 1).then(function (rows) {
+      var row = (rows || [])[0];
+      if (!row || !row.body) return false;
+      return Store.applyRemoteCouncil(row.body);
+    }).catch(function (err) {
+      // A council that has not run the second migration yet.
+      if (err && (err.status === 404 || err.status === 400)) return false;
+      throw err;
+    });
+  }
+
+  function pushCouncil(since) {
+    var c = Store.council();
+    if (!c.updatedAt) return Promise.resolve(0);
+    if (since && !newer(c.updatedAt, since)) return Promise.resolve(0);
+    return Backend.upsert('council', [{ id: 1, body: c }])
+      .then(function () { return 1; })
+      .catch(function (err) {
+        if (err && (err.status === 404 || err.status === 400)) return 0;
+        throw err;
+      });
+  }
+
   /* ---------- the closing date ----------
      One row, and the one thing that must read the same on every phone: a term
      that ends on the 6th here and nowhere else is worse than no term at all.
@@ -299,17 +334,27 @@
       // Read before anything else: a row written while this sync runs must be
       // caught by the next one, not skipped because the mark was taken at the end.
       startedAt = t || new Date().toISOString();
-      return since ? Promise.resolve({}) : reconcileUnits().then(reconcileOffices);
+      /* Whenever anything is still on a local id, not only on the very first
+         round. A device that synced under an older version never reconciled,
+         and pushing `unit-nat` where a uuid belongs is refused by the server. */
+      var needsCodes = Store.units().some(function (u) { return !U.isUuid(u.id); }) ||
+        Store.offices().some(function (o) { return !U.isUuid(o.id); });
+      return needsCodes ? reconcileUnits().then(reconcileOffices) : Promise.resolve({});
     }).then(function () {
       return pull(since);
     }).then(function (res) {
       return pullTerm().then(function (tookTerm) {
         if (tookTerm) res.counts.updated++;
+        return pullCouncil();
+      }).then(function (tookCouncil) {
+        if (tookCouncil) res.counts.updated++;
         return res;
       });
     }).then(function (res) {
       return push(pushedSince).then(function (sent) {
-        return pushTerm(pushedSince).then(function (n) { return sent + n; });
+        return pushTerm(pushedSince).then(function (n) {
+          return pushCouncil(pushedSince).then(function (m) { return sent + n + m; });
+        });
       }).then(function (sent) {
         /* deviceStart, not "now": anything edited while this round was in flight
            has a stamp after it and is caught by the next one. Marking the end
