@@ -2407,13 +2407,14 @@
     var d = function (n) { return U.addDays(t, n); };
 
     var roster = [
+      /* Five, not a full executive board. This is a rehearsal, and every
+         invented name is one more thing to tell apart from a real officer when
+         the dry run ends. Five is enough to show work spread across people,
+         which is the only thing the sample roster is for. */
       ['Althea Ramirez', 'President', 'Executive'],
       ['Miguel Fortaleza', 'VP–Internal', 'Programs'],
-      ['Danica Bello', 'VP–External', 'Programs'],
       ['Job Sarmiento', 'Secretary', 'Documentation'],
       ['Kyla Montaño', 'Treasurer', 'Finance'],
-      ['Ronnel Espinosa', 'Auditor', 'Finance'],
-      ['Trisha Villanueva', 'PIO', 'Publicity'],
       ['Jomar Delgado', 'Business Manager', 'Logistics']
     ];
     var byPos = {};
@@ -2444,7 +2445,7 @@
         title: 'Feeding Program — Barangay Culasi',
         description: 'Outreach feeding for 150 children in partnership with the barangay council.',
         dateStart: d(17), dateEnd: '', venue: 'Barangay Culasi Covered Court',
-        headId: byPos['VP–External'], status: 'Upcoming'
+        headId: byPos['VP–Internal'], status: 'Upcoming'
       }
     ];
     var natId = nationalUnitId();
@@ -2461,26 +2462,26 @@
     // [event index, title, position, dueOffset, priority, status, remarks]
     var rows = [
       [0, 'Draft and route the activity proposal', 'Secretary', -5, 'High', 'Done', 'Signed by the Dean of Student Affairs.'],
-      [0, 'Reserve the covered court for the opening parade', 'Auditor', -4, 'Medium', 'Done', ''],
+      [0, 'Reserve the covered court for the opening parade', 'Business Manager', -4, 'Medium', 'Done', ''],
       [0, 'Secure gymnasium reservation', 'VP–Internal', -2, 'High', 'In Progress', 'Physical Plant asked for a second copy of the request letter.'],
       [0, 'Confirm the guest speaker', 'President', -3, 'High', 'On hold', ''],
       [0, 'Prepare the program budget', 'Treasurer', 2, 'High', 'In Progress', ''],
-      [0, 'Finalize sports event mechanics', 'Peace Officer', 8, 'Medium', 'For Review', 'Sent to the Sports Committee for checking.'],
-      [0, 'Design tarpaulin and poster set', 'PIO', 6, 'Medium', 'Not Started', ''],
+      [0, 'Finalize sports event mechanics', 'VP–Internal', 8, 'Medium', 'For Review', 'Sent to the Sports Committee for checking.'],
+      [0, 'Design tarpaulin and poster set', 'Secretary', 6, 'Medium', 'Not Started', ''],
       [0, 'Book sound system and lights', 'Business Manager', 13, 'Medium', 'Not Started', ''],
 
       [1, 'Book the function hall', 'Secretary', -7, 'High', 'Done', ''],
       [1, 'Send invitation letters to resource speakers', 'VP–Internal', -1, 'High', 'In Progress', 'Two of three speakers have replied.'],
-      [1, 'Post the registration form and reminder', 'PIO', 1, 'Medium', 'In Progress', ''],
+      [1, 'Post the registration form and reminder', 'Secretary', 1, 'Medium', 'In Progress', ''],
       [1, 'Prepare seminar kits and handouts', 'Treasurer', 3, 'Medium', 'Not Started', ''],
       [1, 'Arrange snacks and lunch for 60 pax', 'Business Manager', 5, 'Medium', 'Not Started', ''],
       [1, 'Prepare attendance sheets and evaluation forms', '', 7, 'Low', 'Not Started', 'Needs a volunteer from the Documentation Committee.'],
 
       [2, 'Canvass ingredients and packaging', 'Business Manager', -2, 'Medium', 'Not Started', ''],
-      [2, 'Coordinate with Barangay Culasi officials', 'VP–External', 4, 'High', 'In Progress', 'Courtesy call set with the barangay captain.'],
+      [2, 'Coordinate with Barangay Culasi officials', 'VP–Internal', 4, 'High', 'In Progress', 'Courtesy call set with the barangay captain.'],
       [2, 'Solicit donations from partner establishments', 'Treasurer', 10, 'High', 'Not Started', ''],
-      [2, 'Prepare the master list of beneficiaries', 'Auditor', 12, 'Medium', 'Not Started', ''],
-      [2, 'Draft the documentation plan', 'PIO', 14, 'Low', 'Not Started', '']
+      [2, 'Prepare the master list of beneficiaries', 'Treasurer', 12, 'Medium', 'Not Started', ''],
+      [2, 'Draft the documentation plan', 'Secretary', 14, 'Low', 'Not Started', '']
     ];
 
     rows.forEach(function (r) {

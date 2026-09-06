@@ -60,7 +60,10 @@ check('3 national events', S.events({ unitId: NAT }).length === 3,
 check('the provinces have work of their own',
   S.events().length - S.events({ unitId: NAT }).length >= 4);
 check('tasks seeded', S.tasks().length >= 12, S.tasks().length + ' tasks');
-check('8 national officers', S.people().filter((p2) => p2.unitId === NAT).length === 8,
+/* Five, not a full board. The rehearsal only has to show work spread across
+   people; every extra invented name is one more to tell from a real officer
+   when the dry run ends. */
+check('five national officers', S.people().filter((p2) => p2.unitId === NAT).length === 5,
   S.people().length + ' people in all');
 check('some overdue', S.tasks().filter(S.isOverdue).length > 0);
 check('some done', S.tasks().filter((t) => t.status === 'Done').length > 0);

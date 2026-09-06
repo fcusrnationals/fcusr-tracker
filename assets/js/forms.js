@@ -1393,26 +1393,6 @@
 
   /* The events a volunteer for this unit could be put on. Volunteers help with
      their own unit's activities, so the list follows the unit picker. */
-  function unitEvents(unitId) {
-    return Store.events({ activeOnly: true, unitId: unitId });
-  }
-
-  function eventPickList(unitId) {
-    var events = unitEvents(unitId);
-    if (!events.length) {
-      return '<p class="small muted">' + U.esc(Store.unitName(unitId)) +
-        ' has nothing running. Create an event for them first, then enrol helpers into it.</p>';
-    }
-    return '<div class="list">' + events.map(function (e) {
-      return '<label class="task" style="cursor:pointer">' +
-        '<span class="task-main" style="cursor:pointer">' +
-        '<span class="task-title">' + U.esc(e.title) + '</span>' +
-        '<span class="task-meta">' + U.esc(U.fmtRange(e.dateStart, e.dateEnd)) + '</span></span>' +
-        '<span class="task-right"><input type="checkbox" data-event="' + U.esc(e.id) + '" ' +
-        'style="width:22px;height:22px;accent-color:var(--gold-600)"></span></label>';
-    }).join('') + '</div>';
-  }
-
   function enrolForm() {
     var unitList = Store.units({ activeOnly: true });
     var startUnit = (global.Auth && Auth.myUnitId()) || Store.nationalUnitId();
@@ -1440,22 +1420,22 @@
         }).join('') + '</select>',
         hint: 'Where they belong. This, and the level below, are the only two things that decide what they can open.'
       }) +
-      '<div class="field"><span class="field-label">Level of access <span class="req">*</span></span>' +
-      '<div class="segmented" style="width:100%">' +
-        '<button type="button" data-level="officer" class="is-active" aria-pressed="true">Officer</button>' +
-        '<button type="button" data-level="volunteer" aria-pressed="false">Volunteer</button>' +
-      '</div>' +
-      '<div class="hint" id="level-hint">An officer reaches every event of the unit ' +
-      'they belong to.</div></div>' +
-      '<p class="tiny muted" style="margin:-6px 0 14px">This page is for officers. ' +
-      'Volunteers are taken on from the activity they are helping with &mdash; open the ' +
-      'event under <strong>Events</strong> and use <strong>Add volunteer</strong>, or import ' +
-      'a whole list at once.</p>' +
+      /* This form used to offer Officer or Volunteer, and then say in its own
+         small print that volunteers are not taken on here. A choice you are
+         told not to make is not a choice — and the volunteer half could not
+         work properly anyway, because a volunteer's access is the list of
+         activities they were taken on for, which you know while looking at an
+         activity and not while sitting in Settings.
 
-      '<div class="field" id="event-pick" hidden>' +
-      '<span class="field-label">Events they may work on</span>' +
-      '<div id="event-pick-list">' + eventPickList(startUnit) + '</div>' +
-      '<div class="error-text" hidden>Tick at least one event for a volunteer.</div></div>';
+         So this enrols officers, and points at the one place volunteers are
+         actually added. */
+      '<div class="gate-note" style="margin-bottom:16px">' + UI.icon('users') +
+      '<span><strong>This enrols an officer</strong> \u2014 somebody who reaches every ' +
+      'activity of their unit. A <strong>volunteer</strong> is taken on from the activity ' +
+      'they are helping with: open it under <strong>Events</strong> and use ' +
+      '<strong>Add volunteer</strong>, or import a whole list at once.</span></div>' +
+
+      '<div class="hint" id="level-hint" style="margin:-8px 2px 4px"></div>';
 
     UI.modal({
       title: 'Enrol someone',
@@ -1464,59 +1444,30 @@
       footer: '<button type="button" class="btn" data-close>Cancel</button>' +
         '<button type="button" class="btn btn-primary" data-save>Create access</button>',
       onMount: function (root, close) {
-        var level = 'officer';
         var unitPick = root.querySelector('#f-unitId');
 
         function currentUnit() { return Store.unit(unitPick.value) || Store.nationalUnit(); }
 
+        // What this officer will actually reach, said as the unit is chosen.
         function syncHint() {
           var u = currentUnit();
-          // Officers reach everything in their unit, so the per-event list is
-          // only for volunteers.
-          root.querySelector('#event-pick').hidden = level === 'officer';
-          root.querySelector('#level-hint').textContent = level === 'officer'
-            ? (u.kind === 'national'
-                ? 'A National officer reaches the whole Republic, including this page.'
-                : 'An officer of ' + u.name + ' reaches that unit\u2019s events and nothing else.')
-            : 'A volunteer reaches only the events you tick below, and only while those events are running.';
+          root.querySelector('#level-hint').textContent = u.kind === 'national'
+            ? 'A National officer reaches the whole Republic, including this page.'
+            : 'An officer of ' + u.name + ' reaches that unit\u2019s activities and nothing else.';
         }
 
-        unitPick.addEventListener('change', function () {
-          // The events on offer belong to the unit, so the list follows it.
-          root.querySelector('#event-pick-list').innerHTML = eventPickList(unitPick.value);
-          syncHint();
-        });
-
-        U.els('[data-level]', root).forEach(function (b) {
-          b.addEventListener('click', function () {
-            level = b.getAttribute('data-level');
-            U.els('[data-level]', root).forEach(function (o) {
-              var on = o === b;
-              o.classList.toggle('is-active', on);
-              o.setAttribute('aria-pressed', String(on));
-            });
-            syncHint();
-          });
-        });
+        unitPick.addEventListener('change', syncHint);
+        syncHint();
 
         root.querySelector('[data-save]').addEventListener('click', function () {
           clearErrors(root);
           var name = root.querySelector('#f-name').value.trim();
           var email = root.querySelector('#f-email').value.trim();
           var position = root.querySelector('#f-position').value.trim();
-          var picked = U.els('[data-event]:checked', root).map(function (c) {
-            return c.getAttribute('data-event');
-          });
 
           if (!name) return showError(root, 'name', 'Enter their name.');
           if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
             return showError(root, 'email', 'That email address does not look right.');
-          }
-          if (level === 'volunteer' && !picked.length) {
-            var f = root.querySelector('#event-pick');
-            f.classList.add('has-error');
-            f.querySelector('.error-text').hidden = false;
-            return;
           }
 
           var person = Store.addPerson({ name: name, position: position });
@@ -1524,7 +1475,7 @@
           Backend.enrol({
             email: email, full_name: name, position: position,
             unit_id: unitPick.value,
-            access: level, eventIds: picked
+            access: 'officer', eventIds: []
           }).then(function () {
             close();
             // Enrolling records the decision; the person sets their own password
@@ -1532,11 +1483,11 @@
             // never handles anyone else's.
             UI.modal({
               title: name + ' is enrolled',
-              body: '<p class="small">Send them the link to the tracker and this line:</p>' +
+body: '<p class="small">Send them the link to the tracker and this line:</p>' +
                 '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-                '<p class="small" style="margin:0">Open the site, press <strong>Sign in</strong>, ' +
-                'choose <strong>Set my password</strong>, and use <strong>' + U.esc(email) +
-                '</strong> with a password of your own choosing.</p></div>' +
+                '<p class="small" style="margin:0">Open the site, type <strong>' + U.esc(email) +
+                '</strong> and a password you will remember, then press <strong>Sign in</strong>. ' +
+                'It will ask you to set that password the first time.</p></div>' +
                 '<p class="small muted">Nobody else ever sees that password, and the address only ' +
                 'works because you have just enrolled it.</p>',
               footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
