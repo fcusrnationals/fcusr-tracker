@@ -1470,7 +1470,15 @@
             return showError(root, 'email', 'That email address does not look right.');
           }
 
-          var person = Store.addPerson({ name: name, position: position });
+          /* The unit chosen on this form, not whatever addPerson would fall back
+             to. Without it every officer enrolled into a college was filed under
+             Nationals — so their own Governor could not find them in an assignee
+             list, and the national roster filled with people who were never
+             national. */
+          var person = Store.addPerson({
+            name: name, position: position, email: email,
+            unitId: unitPick.value, access: 'officer'
+          });
 
           Backend.enrol({
             email: email, full_name: name, position: position,
@@ -1580,6 +1588,13 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
         function load() {
           Promise.all([Backend.pending(), Backend.roster()]).then(function (r) {
             last = { pending: r[0] || [], roster: r[1] || [] };
+            /* While we have the server's version, put the directory right. It
+               knows which unit each address was enrolled into, and until this
+               existed the local copy could disagree without anybody noticing —
+               which is how officers went missing from their own Governor's
+               assignee list. */
+            var fixed = Store.reconcileDirectory(last.roster.concat(last.pending));
+            if (fixed) UI.toast(U.plural(fixed, 'person', 'people') + ' put in the right unit.');
             paint();
           }).catch(function (err) {
             host.innerHTML = '<div class="empty" style="border-color:var(--st-overdue-bd);' +
@@ -1766,13 +1781,29 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
   function personForm(personId) {
     var p = personId ? Store.person(personId) : null;
     var isNew = !p;
-    var d = p || { name: '', position: '', committee: '', active: true };
+    var myUnit = (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId();
+    var d = p || { name: '', position: '', committee: '', active: true, unitId: myUnit };
+    // Only the President moves people between units; a Governor's people are theirs.
+    var canPickUnit = !global.Auth || Auth.isPresident() || Auth.isOffline();
 
     var body =
       field({
         name: 'name', label: 'Full name', required: true,
         control: '<input type="text" id="f-name" data-autofocus maxlength="80" value="' + U.esc(d.name) + '">'
       }) +
+      /* Which unit somebody belongs to decides where they can be given work, so
+         it cannot be left to a default. It was, and every person added this way
+         landed in FCUSR Nationals whoever added them. */
+      (canPickUnit
+        ? field({
+            name: 'unitId', label: 'Unit', required: true,
+            control: '<select id="f-unit">' + Store.units({ activeOnly: true }).map(function (u) {
+              return '<option value="' + U.esc(u.id) + '"' +
+                (u.id === (d.unitId || myUnit) ? ' selected' : '') + '>' + U.esc(u.name) + '</option>';
+            }).join('') + '</select>',
+            hint: 'They can be given work on this unit\u2019s activities.'
+          })
+        : '<input type="hidden" id="f-unit" value="' + U.esc(d.unitId || myUnit) + '">') +
       '<div class="field-row">' +
       field({
         name: 'position', label: 'Position',
@@ -1802,6 +1833,8 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
             position: root.querySelector('#f-position').value,
             committee: root.querySelector('#f-committee').value
           };
+          var uSel = root.querySelector('#f-unit');
+          if (uSel) data.unitId = uSel.value;
           if (!data.name) return showError(root, 'name', 'Enter the officer’s name.');
           if (isNew) {
             Store.addPerson(data);

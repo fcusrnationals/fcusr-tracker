@@ -41,11 +41,12 @@ const COLUMNS = {
   reports:   ['id', 'event_id', 'drive_link', 'drive_owned', 'status', 'body', 'updated_at'],
   letters:   ['id', 'unit_id', 'subject', 'status', 'stops', 'internal', 'body', 'updated_at'],
   offices:   ['id', 'code', 'name', 'active', 'body', 'updated_at'],
-  deletions: ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by']
+  deletions: ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by'],
+  term:      ['id', 'end_date', 'body', 'updated_at']
 };
 
 function makeServer() {
-  const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {}, offices: {}, deletions: {} };
+  const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {}, offices: {}, deletions: {}, term: {} };
   let tick = 0;
   const now = () => {
     tick += 1;
@@ -433,6 +434,52 @@ function makeDevice(server, name) {
     check('and one already up there is ignored',
       !A.S.people().some((p) => p.name === 'Invented Officer'));
     delete server.tables.people['ghost-sample'];
+  }
+
+  /* ---------------- the closing date ----------------
+     The one thing that must read the same on every phone. A term that ends on
+     the 6th here and nowhere else is worse than no term at all. */
+  console.log('\n--- the term reaches everyone ---');
+  {
+    /* Two phones of their own, so ending the rehearsal here disturbs nothing
+       the earlier sections built. */
+    const server2 = makeServer();
+    const P = makeDevice(server2, 'President');
+    const G = makeDevice(server2, 'Governor');
+    P.S.endDryRun();
+    G.S.endDryRun();
+    await P.Sync.now();
+    await G.Sync.now();
+
+    P.S.declareTerm('2026-10-06', { note: 'End of the 2026 term.', by: 'Arron D. Aperocho' });
+    const stP = await P.Sync.now();
+    check('the round itself did not fault', !stP.error, stP.error);
+    check('the declaration was sent', !!server2.tables.term[1],
+      JSON.stringify(Object.keys(server2.tables.term)));
+
+    await G.Sync.now();
+    check('the other phone has the date', G.S.termStatus().endDate === '2026-10-06',
+      G.S.termStatus().endDate);
+    check('and who declared it', G.S.term().declaredBy === 'Arron D. Aperocho');
+    check('and the note with it', G.S.term().note === 'End of the 2026 term.');
+
+    G.S.declareTerm('2026-10-20', { note: 'Moved by the executive board.', by: 'Bea' });
+    await G.Sync.now();
+    await P.Sync.now();
+    check('a change of date travels back', P.S.termStatus().endDate === '2026-10-20',
+      P.S.termStatus().endDate);
+
+    await P.Sync.now();
+    check('a quiet round leaves it alone', P.S.termStatus().endDate === '2026-10-20');
+
+    /* A rehearsal's date is part of the rehearsal: a council that never started
+       one should not be told its term ends next month. */
+    const R = makeDevice(server2, 'Rehearsing');
+    check('a device in a dry run has its own date', R.S.dryRun().active);
+    const before = server2.tables.term[1] && server2.tables.term[1].body.endDate;
+    await R.Sync.now();
+    check('and does not push it over the real one',
+      server2.tables.term[1].body.endDate === before, server2.tables.term[1].body.endDate);
   }
 
   console.log('\n--- no console errors ---');

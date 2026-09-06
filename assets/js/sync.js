@@ -233,6 +233,43 @@
     return chain.then(function () { return sent; });
   }
 
+  /* ISO strings compare as text, which is the whole reason the app stamps them
+     that way. The store has its own copy of this; the two must not disagree. */
+  function newer(a, b) { return String(a || '') > String(b || ''); }
+
+  /* ---------- the closing date ----------
+     One row, and the one thing that must read the same on every phone: a term
+     that ends on the 6th here and nowhere else is worse than no term at all.
+     It is not a collection, so it does not go through the record machinery —
+     last write wins on its own stamp, like everything else. */
+  function pullTerm() {
+    return Backend.changed('term', null, 1).then(function (rows) {
+      var row = (rows || [])[0];
+      if (!row || !row.body || !row.body.declaredAt) return false;
+      // Somebody's rehearsal, from a version that used to push it.
+      if (row.body.declaredBy === 'Dry run') return false;
+      var mine = Store.term();
+      if (!newer(row.body.updatedAt || row.updated_at, mine.updatedAt || '')) return false;
+      Store.applyRemoteTerm(row.body);
+      return true;
+    }).catch(function (err) {
+      if (err && (err.status === 404 || err.status === 400)) return false;
+      throw err;
+    });
+  }
+
+  function pushTerm(since) {
+    var t = Store.term();
+    if (!t.declaredAt) return Promise.resolve(0);
+    /* The rehearsal's closing date is part of the rehearsal. Everything else
+       invented stays on the device that invented it, and a date that says the
+       term ends next month has no business reaching a council that never
+       started a dry run. */
+    if (Store.dryRun().active) return Promise.resolve(0);
+    if (since && !newer(t.updatedAt || '', since)) return Promise.resolve(0);
+    return Backend.upsert('term', [{ id: 1, body: t }]).then(function () { return 1; });
+  }
+
   /* ---------- one round ---------- */
 
   function now(opts) {
@@ -266,7 +303,14 @@
     }).then(function () {
       return pull(since);
     }).then(function (res) {
+      return pullTerm().then(function (tookTerm) {
+        if (tookTerm) res.counts.updated++;
+        return res;
+      });
+    }).then(function (res) {
       return push(pushedSince).then(function (sent) {
+        return pushTerm(pushedSince).then(function (n) { return sent + n; });
+      }).then(function (sent) {
         /* deviceStart, not "now": anything edited while this round was in flight
            has a stamp after it and is caught by the next one. Marking the end
            would step over those edits and they would never be sent at all.

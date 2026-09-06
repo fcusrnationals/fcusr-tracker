@@ -594,12 +594,16 @@
     var c = COLLECTIONS[kind];
     if (!c || !rid) return false;
     var list = state[c.list];
+    /* A deletion removes the record. It used to make an exception for a record
+       edited here after the deletion happened elsewhere — which sounds kind and
+       was wrong twice over. It compared this device's clock against the server's,
+       two clocks that must never be compared, so which one won was luck; and a
+       record that comes back days later because somebody touched it is the
+       failure people actually notice and cannot explain. Deleting is an explicit
+       act by a person who could see the thing. It stands. */
     var found = false;
     for (var i = 0; i < list.length; i++) {
       if (list[i].id !== rid) continue;
-      // An edit made here after the deletion elsewhere wins: somebody was
-      // working on it, which is a better reason to keep it than to drop it.
-      if (newer(list[i].updatedAt, at)) return false;
       list.splice(i, 1);
       found = true;
       break;
@@ -647,6 +651,17 @@
      is open, on every phone, forever. Nothing here is on screen: where the sync
      got to is bookkeeping, not council work. It is written to disk and no view
      is asked to redraw. */
+  /* The closing date as another device declared it. One row, so there is no
+     merge to do — the later declaration stands, which is the same rule every
+     record follows. */
+  function applyRemoteTerm(t) {
+    var clean = cleanTerm(t);
+    if (!clean.declaredAt) return false;
+    state.term = clean;
+    commit();
+    return true;
+  }
+
   function markSynced(patch) {
     Object.keys(patch || {}).forEach(function (k) { state.sync[k] = patch[k]; });
     save();
@@ -919,7 +934,13 @@
     var p = cleanPerson({
       id: U.uid('per'),
       name: data.name, position: data.position, committee: data.committee,
-      email: data.email, unitId: data.unitId || nationalUnitId(),
+      /* Whoever is adding them, not the National government by default. That
+         default meant an officer enrolled into a college was filed as national,
+         so their own Governor could not find them and the national roster filled
+         with people who had never been national. */
+      email: data.email,
+      unitId: data.unitId ||
+        ((global.Auth && Auth.signedIn() && Auth.myUnitId()) || nationalUnitId()),
       access: data.access, eventIds: data.eventIds, claimed: data.claimed,
       active: data.active !== false,
       createdAt: nowISO(), updatedAt: nowISO()
@@ -928,6 +949,40 @@
     state.people.push(p);
     commit();
     return p;
+  }
+
+  /* Correct the directory from the server's own record of who was enrolled.
+
+     An officer enrolled into a college was filed under Nationals, because the
+     unit chosen on the form never reached addPerson. That is fixed going
+     forward, and this repairs the rows already written: the server knows which
+     unit each address was enrolled into, so where the two disagree the server
+     wins. Matched on email, which is the only thing both sides agree on. */
+  function reconcileDirectory(rows) {
+    var byCode = {};
+    state.units.forEach(function (u) { byCode[u.name] = u.id; });
+    var fixed = 0;
+
+    (rows || []).forEach(function (r) {
+      var addr = email(r.email);
+      if (!addr) return;
+      var p = personByEmail(addr);
+      if (!p) return;
+
+      var unitName = (r.units && r.units.name) || r.unit_name || '';
+      var uid = byCode[unitName] || '';
+      var changed = false;
+
+      if (uid && p.unitId !== uid) { p.unitId = uid; changed = true; }
+      if (r.position && p.position !== r.position) { p.position = r.position; changed = true; }
+      if (r.access && p.access !== r.access) { p.access = r.access; changed = true; }
+      if (!p.claimed && r.active !== undefined) { p.claimed = true; changed = true; }
+
+      if (changed) { p.updatedAt = nowISO(); fixed++; }
+    });
+
+    if (fixed) commit();
+    return fixed;
   }
 
   function personByEmail(addr) {
@@ -2232,7 +2287,11 @@
          few kilobytes — so the next administration inherits a readable record
          rather than an empty app, without keeping the working data the closing
          was meant to clear. */
-      archive: []
+      archive: [],
+      /* When this was last changed, on the device that changed it. Syncing needs
+         it: without a stamp there is nothing to compare, and every round would
+         either overwrite a declaration or refuse to carry one. */
+      updatedAt: ''
     };
   }
 
@@ -2241,6 +2300,7 @@
     var o = blankTerm();
     o.endDate = dateOnly(t.endDate);
     o.note = str(t.note, LIMITS.text);
+    o.updatedAt = t.updatedAt ? stamp(t.updatedAt) : '';
     o.declaredAt = t.declaredAt ? stamp(t.declaredAt) : '';
     o.declaredBy = str(t.declaredBy, LIMITS.name);
     o.overallLink = driveLink(t.overallLink);
@@ -2310,6 +2370,7 @@
     state.term.declaredAt = nowISO();
     state.term.declaredBy = (opts.by || '').trim();
     state.term.override = null;
+    state.term.updatedAt = nowISO();
     commit();
     return state.term;
   }
@@ -2324,6 +2385,7 @@
     if (link && !v) throw new Error('That needs to be a Google Drive or Docs link.');
     state.term.overallLink = v;
     state.term.overallOwned = !!owned;
+    state.term.updatedAt = nowISO();
     commit();
     return state.term;
   }
@@ -2332,6 +2394,7 @@
     var r = (reason || '').trim();
     if (r.length < 10) throw new Error('Write down why the outstanding units are being passed over.');
     state.term.override = { reason: r.slice(0, LIMITS.reason), by: (by || '').trim(), at: nowISO() };
+    state.term.updatedAt = nowISO();
     commit();
     return state.term;
   }
@@ -2422,6 +2485,7 @@
     /* The record of the year, taken before anything is removed. */
     var keepTerm = cleanTerm(state.term);
     keepTerm.closedAt = nowISO();
+    keepTerm.updatedAt = nowISO();
     keepTerm.archive = units({ activeOnly: true }).map(function (u) {
       var c = unitCompliance(u.id);
       return {
@@ -2718,15 +2782,16 @@
       return null;
     }
 
+    /* One Governor per college, and no more. The rehearsal only has to show
+       that other units exist and are getting on with their own work; a second
+       invented name per college shows nothing extra and is one more row to tell
+       from a real officer when the dry run ends. */
     var lguRoster = [
-      ['CN',   'Pauline Grace Alcantara', 'Governor',      'Executive'],
-      ['CN',   'Mark Ivan Tumbaga',       'Secretary',     'Documentation'],
-      ['COE',  'Rafael Guanzon',          'Governor',      'Executive'],
-      ['COE',  'Bea Nicolette Sarabia',   'Treasurer',     'Finance'],
-      ['CCS',  'Neil Patrick Oquendo',    'Governor',      'Executive'],
-      ['CCS',  'Hannah Mae Villaruel',    'PIO',           'Publicity'],
-      ['CTE',  'Joyce Ann Palmares',      'Governor',      'Executive'],
-      ['CBA',  'Dexter Lim',              'Governor',      'Executive']
+      ['CN',   'Pauline Grace Alcantara', 'Governor', 'Executive'],
+      ['COE',  'Rafael Guanzon',          'Governor', 'Executive'],
+      ['CCS',  'Neil Patrick Oquendo',    'Governor', 'Executive'],
+      ['CTE',  'Joyce Ann Palmares',      'Governor', 'Executive'],
+      ['CBA',  'Dexter Lim',              'Governor', 'Executive']
     ];
     var lguPeople = {};
     lguRoster.forEach(function (r) {
@@ -2773,24 +2838,24 @@
 
     // [event title, task, code:position of assignee, dueOffset, priority, status]
     var lguTasks = [
-      ['Nurses Week 2026', 'Draft and route the activity proposal', 'CN:Secretary', -3, 'High', 'Done'],
+      ['Nurses Week 2026', 'Draft and route the activity proposal', 'CN:Governor', -3, 'High', 'Done'],
       ['Nurses Week 2026', 'Reserve the amphitheatre', 'CN:Governor', -1, 'High', 'In Progress'],
       ['Nurses Week 2026', 'Order caps and pins for 84 graduates', 'CN:Governor', 5, 'High', 'Not Started'],
-      ['Nurses Week 2026', 'Invite the clinical instructors', 'CN:Secretary', 7, 'Medium', 'Not Started'],
+      ['Nurses Week 2026', 'Invite the clinical instructors', 'CN:Governor', 7, 'Medium', 'Not Started'],
       ['Nurses Week 2026', 'Prepare the skills competition mechanics', '', 9, 'Medium', 'Not Started'],
 
-      ['Community Blood-Letting Drive', 'Coordinate with the Red Cross chapter', 'CN:Secretary', -12, 'High', 'Done'],
+      ['Community Blood-Letting Drive', 'Coordinate with the Red Cross chapter', 'CN:Governor', -12, 'High', 'Done'],
       ['Community Blood-Letting Drive', 'Secure the barangay permit', 'CN:Governor', -10, 'High', 'Done'],
-      ['Community Blood-Letting Drive', 'Prepare the donor master list', 'CN:Secretary', -7, 'Medium', 'Done'],
+      ['Community Blood-Letting Drive', 'Prepare the donor master list', 'CN:Governor', -7, 'Medium', 'Done'],
 
       ['Engineering Week 2026', 'Draft the activity proposal', 'COE:Governor', -2, 'High', 'For Review'],
-      ['Engineering Week 2026', 'Canvass materials for the bridge contest', 'COE:Treasurer', 4, 'Medium', 'In Progress'],
+      ['Engineering Week 2026', 'Canvass materials for the bridge contest', 'COE:Governor', 4, 'Medium', 'In Progress'],
       ['Engineering Week 2026', 'Book the quadrangle and sound system', 'COE:Governor', 8, 'Medium', 'Not Started'],
       ['Engineering Week 2026', 'Prepare the quiz bowl questions', '', 12, 'Low', 'Not Started'],
 
       ['Hour of Code — Roxas City', 'Letter to the two partner high schools', 'CCS:Governor', -4, 'High', 'Done'],
-      ['Hour of Code — Roxas City', 'Reserve Computer Laboratory 2', 'CCS:PIO', -2, 'Medium', 'Done'],
-      ['Hour of Code — Roxas City', 'Prepare the workshop handouts', 'CCS:PIO', 1, 'High', 'In Progress'],
+      ['Hour of Code — Roxas City', 'Reserve Computer Laboratory 2', 'CCS:Governor', -2, 'Medium', 'Done'],
+      ['Hour of Code — Roxas City', 'Prepare the workshop handouts', 'CCS:Governor', 1, 'High', 'In Progress'],
       ['Hour of Code — Roxas City', 'Arrange snacks for 60 participants', 'CCS:Governor', 2, 'Medium', 'On hold'],
 
       ['Teachers Day Tribute', 'Programme and script', 'CTE:Governor', -1, 'High', 'In Progress'],
@@ -2847,16 +2912,16 @@
     }
 
     var l1 = seedLetter('CN', 'Activity proposal — Nurses Week 2026', 'Nurses Week 2026',
-      'Mark Ivan Tumbaga', ['ADV', 'DEAN', 'OSA', 'VPAA', 'OP'], 8);
+      'Pauline Grace Alcantara', ['ADV', 'DEAN', 'OSA', 'VPAA', 'OP'], 8);
     if (l1) {
       l1.stops[0].receivedBy = 'Ms. Delos Reyes';
-      l1.stops[0].forwardedBy = 'Mark Ivan Tumbaga';
+      l1.stops[0].forwardedBy = 'Pauline Grace Alcantara';
       l1.stops[0].receivedAt = d(-11);
       l1.stops[0].releasedAt = d(-10);
       l1.stops[0].outcome = 'Approved';
       // Sitting at the Dean's office well past its usual turnaround.
       l1.stops[1].receivedBy = 'Mrs. Ferrer';
-      l1.stops[1].forwardedBy = 'Mark Ivan Tumbaga';
+      l1.stops[1].forwardedBy = 'Pauline Grace Alcantara';
       l1.stops[1].receivedAt = d(-9);
     }
 
@@ -2875,7 +2940,7 @@
     }
 
     seedLetter('CCS', 'Excuse letter for the Hour of Code facilitators',
-      'Hour of Code — Roxas City', 'Hannah Mae Villaruel', ['OSA', 'DEAN'], 2);
+      'Hour of Code — Roxas City', 'Neil Patrick Oquendo', ['OSA', 'DEAN'], 2);
 
     /* Every letter above belongs to a college, and the person rehearsing this is
        usually a national executive — who would open the Letters tab and find it
@@ -2932,6 +2997,7 @@
     state.term.note = 'Dry run — the system is being rehearsed before it is used for real.';
     state.term.declaredAt = nowISO();
     state.term.declaredBy = 'Dry run';
+    state.term.updatedAt = nowISO();
     state.dryRun = { active: true, startedAt: nowISO() };
 
     state.seeded = true;
@@ -2963,6 +3029,7 @@
     letterWhere: letterWhere, letterProgress: letterProgress, letterStats: letterStats,
     receiveStop: receiveStop, releaseStop: releaseStop, reopenStop: reopenStop,
     applyRemote: applyRemote, applyRemoteDeletion: applyRemoteDeletion,
+    applyRemoteTerm: applyRemoteTerm,
     outbound: outbound, deletions: deletions, isDeleted: isDeleted,
     syncState: syncState, markSynced: markSynced, remapIds: remapIds,
     commit: commit,
@@ -2982,6 +3049,7 @@
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
     addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
     deletePerson: deletePerson, personHolds: personHolds,
+    reconcileDirectory: reconcileDirectory,
     duplicatePeopleCount: duplicatePeopleCount, mergeDuplicatePeople: mergeDuplicatePeople,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
     needsFeedback: needsFeedback, setFeedbackLink: setFeedbackLink,
