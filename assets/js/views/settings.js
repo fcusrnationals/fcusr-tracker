@@ -282,6 +282,61 @@
 
   function syncOn() { return !!(global.Sync && Sync.able()); }
 
+  /* The two numbers a person actually needs when syncing looks wrong: how much
+     is on this device, and how much is on the server. Everything else is a
+     guess dressed up as a status. */
+  function showDiagnosis(d) {
+    if (!d.able) return UI.toast(d.error, 'error');
+
+    var body = '<p class="small" style="margin-top:0">What this device holds, and what the ' +
+      'council\u2019s server holds. They should match, except where this device is still ' +
+      'running its own rehearsal \u2014 that is never uploaded.</p>';
+
+    body += '<div class="list">' + d.rows.map(function (r) {
+      var same = r.there !== null && r.here === r.there;
+      var missing = r.there !== null && r.there > r.here;
+      var unsent = r.there !== null && r.here > r.there;
+      return '<div class="task"><span class="task-main" style="cursor:default">' +
+        '<span class="task-title">' + U.esc(r.table) +
+          (r.there === null ? ' <span class="chip st-overdue"><span class="dot"></span>refused</span>'
+           : same ? ' <span class="chip st-done"><span class="dot"></span>agreed</span>'
+           : missing ? ' <span class="chip st-overdue"><span class="dot"></span>not here yet</span>'
+           : unsent ? ' <span class="chip st-on-hold"><span class="dot"></span>not sent</span>' : '') +
+        '</span>' +
+        '<span class="task-meta">here ' + r.here +
+          (r.real !== null && r.real !== r.here ? ' (' + r.real + ' real)' : '') +
+          '<span class="sep">·</span>server ' +
+          (r.there === null ? '—' : r.there) + '</span>' +
+        '</span></div>';
+    }).join('') + '</div>';
+
+    if (d.error) {
+      body += '<div class="gate-note" style="margin-top:14px">' + UI.icon('alert') +
+        '<span><strong>The last round reported:</strong> ' + U.esc(d.error) + '</span></div>';
+    }
+
+    body += '<p class="tiny muted" style="margin-top:12px">' +
+      '<strong>not sent</strong> means this device is holding work the server has not got \u2014 ' +
+      'press <em>Send everything again</em>. <strong>not here yet</strong> means the server has ' +
+      'work this device has not taken in \u2014 press <em>Sync now</em>. ' +
+      '<strong>refused</strong> means the server would not answer, and the message above says why.</p>';
+
+    UI.modal({
+      title: 'What is where',
+      wide: true,
+      body: body,
+      footer: '<button type="button" class="btn" data-close>Close</button>' +
+        '<button type="button" class="btn btn-primary" data-fix data-close>Send everything again</button>',
+      onMount: function (root) {
+        var f = root.querySelector('[data-fix]');
+        if (f) f.addEventListener('click', function () {
+          Store.resetSyncMarks();
+          Sync.now({ loud: true }).then(function () { App.render(); });
+        });
+      }
+    });
+  }
+
   function syncNote() {
     if (!syncOn()) return 'Off';
     var st = Sync.status();
@@ -320,6 +375,7 @@
       '<div class="row" style="margin-top:12px">' +
         '<button type="button" class="btn btn-primary" data-sync-now>Sync now</button>' +
         '<button type="button" class="btn" data-resync>Send everything again</button>' +
+        '<button type="button" class="btn" data-diagnose>What is where?</button>' +
       '</div>' +
       '<p class="tiny muted" style="margin:8px 2px 0">Use <strong>Send everything again</strong> ' +
       'if something you made is not showing up for anyone else. It forgets where syncing got to ' +
@@ -500,6 +556,17 @@
             ? 'Synced \u2014 ' + (l.added + l.updated) + ' in, ' + l.sent + ' out.'
             : 'Everything was already up to date.');
         }
+      });
+    });
+
+    var dg = root.querySelector('[data-diagnose]');
+    if (dg) dg.addEventListener('click', function () {
+      dg.disabled = true;
+      dg.textContent = 'Asking\u2026';
+      Sync.diagnose().then(function (d) {
+        dg.disabled = false;
+        dg.textContent = 'What is where?';
+        showDiagnosis(d);
       });
     });
 

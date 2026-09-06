@@ -454,8 +454,70 @@
     setTimeout(function () { now(); }, 1200);
   }
 
+  /* ---------- what is actually where ----------
+
+     "The sync is broken" is not something anybody can act on, and neither is a
+     green dot. This asks the server what it holds, counts what this device
+     holds, and puts the two side by side — so the answer is "the server has
+     nine activities and this phone has none" rather than a guess.
+
+     Read-only: it applies nothing. Diagnosing a problem must not change the
+     thing being diagnosed. */
+  function diagnose() {
+    if (!able()) {
+      return Promise.resolve({ able: false, rows: [], error: 'Not signed in, or no server connected.' });
+    }
+
+    var local = {
+      unit: Store.units().length,
+      person: Store.people().length,
+      event: Store.events().length,
+      task: Store.tasks().length,
+      report: Store.reports().length,
+      letter: Store.letters().length,
+      office: Store.offices().length
+    };
+    var mine = {
+      event: Store.events().filter(function (e) { return !e.sample; }).length,
+      task: Store.tasks().filter(function (t) { return !t.sample; }).length,
+      person: Store.people().filter(function (p) { return !p.sample; }).length
+    };
+
+    var rows = [];
+    var chain = Promise.resolve();
+    var trouble = '';
+
+    TABLES.forEach(function (t) {
+      chain = chain.then(function () {
+        return Backend.changed(t.table, null, 1000).then(function (server) {
+          rows.push({
+            kind: t.kind,
+            table: t.table,
+            here: local[t.kind] || 0,
+            real: mine[t.kind] === undefined ? null : mine[t.kind],
+            there: (server || []).length
+          });
+        }).catch(function (err) {
+          trouble = trouble || (t.table + ': ' + (err && err.message ? err.message : 'refused'));
+          rows.push({ kind: t.kind, table: t.table, here: local[t.kind] || 0,
+                      real: null, there: null });
+        });
+      });
+    });
+
+    return chain.then(function () {
+      return {
+        able: true,
+        rows: rows,
+        error: trouble || state.error,
+        marks: Store.syncState(),
+        last: state.last
+      };
+    });
+  }
+
   global.Sync = {
-    now: now, start: start, status: status, subscribe: subscribe,
+    now: now, start: start, status: status, subscribe: subscribe, diagnose: diagnose,
     able: able, toRow: toRow, fromRow: fromRow
   };
 })(window);

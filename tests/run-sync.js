@@ -624,6 +624,44 @@ function makeDevice(server, name) {
     check('and takes nothing in', L.S.events().length - before === 1200);
   }
 
+  /* ---------------- saying where things are ----------------
+     "The sync is broken" is not something anybody can act on. */
+  console.log('\n--- what is where ---');
+  {
+    const s6 = makeServer();
+    const D = makeDevice(s6, 'Device');
+    D.S.addEvent({ title: 'Held here only', unitId: D.S.nationalUnitId() });
+
+    const before = await D.Sync.diagnose();
+    const ev = before.rows.filter((r) => r.kind === 'event')[0];
+    check('it counts what this device holds', ev.here > 0, JSON.stringify(ev));
+    check('and that the server has none of it', ev.there === 0, JSON.stringify(ev));
+    check('the rehearsal is counted apart from real work', ev.real !== null && ev.real < ev.here,
+      JSON.stringify(ev));
+
+    await D.Sync.now();
+    const after = await D.Sync.diagnose();
+    const ev2 = after.rows.filter((r) => r.kind === 'event')[0];
+    check('after a sync the server has the real work', ev2.there === ev2.real,
+      JSON.stringify(ev2));
+
+    // It must never change what it is looking at.
+    const counts = D.S.events().length;
+    await D.Sync.diagnose();
+    check('asking does not alter anything', D.S.events().length === counts);
+
+    // A refused table is reported, not hidden.
+    const real = D.w.Backend.changed;
+    D.w.Backend.changed = (t, s7, l, c) => (t === 'letters'
+      ? Promise.reject(Object.assign(new Error('permission denied for table letters'), { status: 403 }))
+      : real(t, s7, l, c));
+    const bad = await D.Sync.diagnose();
+    const lt = bad.rows.filter((r) => r.kind === 'letter')[0];
+    check('a refused table shows as refused', lt.there === null, JSON.stringify(lt));
+    check('and says what the server said', /permission denied/.test(bad.error || ''), bad.error);
+    D.w.Backend.changed = real;
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));
