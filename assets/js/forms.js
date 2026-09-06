@@ -1765,11 +1765,13 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
       '<div class="field-row">' +
       field({
         name: 'position', label: 'Position',
-        control: '<select id="f-position">' + UI.selectOptions(Store.positions(), d.position, 'No position') + '</select>'
+        control: UI.suggestInput('f-position', d.position, Store.positions(), 'Start typing, or pick one'),
+        hint: 'The posts in the FCUSR Constitution are offered as you type. Anything else is fine too — ' +
+          'a position is a label printed on reports, and it grants nobody anything.'
       }) +
       field({
         name: 'committee', label: 'Committee',
-        control: '<select id="f-committee">' + UI.selectOptions(Store.committees(), d.committee, 'No committee') + '</select>'
+        control: UI.suggestInput('f-committee', d.committee, Store.committees(), 'Optional')
       }) +
       '</div>' +
       (isNew ? '' :

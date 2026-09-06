@@ -1,19 +1,33 @@
-/* Settings — directory, letterhead, backup.
-   Everything except the directory and backup starts collapsed, so the page opens
-   short instead of as one long wall. */
+/* Settings — one row of tabs, one panel at a time.
+
+   Who gets in is not a matter of being an officer. The President holds the
+   Republic's settings: the letterhead every report is printed on, the closing
+   date, the unit list, deleting everything. A Governor gets their own college's
+   roster and nothing else. Everybody else gets nothing at all — the door is
+   shut in app.js, and every panel below is chosen again here so a route typed
+   by hand cannot reach one. */
 (function (global) {
   'use strict';
 
-  var open = { access: true, term: false, units: false, offices: false, people: false, roles: false,
-               letterhead: false, backup: true, data: false };
+  var tab = '';
+
+  function president() { return !global.Auth || Auth.isPresident() || Auth.isOffline(); }
 
   function render() {
     var org = Store.org();
-    var people = Store.people();
     var counts = Store.raw();
+    var mineOnly = !president();
+    var myUnit = (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId();
+    var people = mineOnly ? Store.people({ unitId: myUnit }) : Store.people();
+
+    tabs = [];
+    chooseTab(mineOnly);
 
     var html = '<div class="page-head"><div><h1>Settings</h1>' +
-      '<div class="sub">Directory, letterhead and backup.</div></div></div>';
+      '<div class="sub">' + (mineOnly
+        ? U.esc(Store.unitName(myUnit)) + ' — your own unit'
+        : 'The Republic\u2019s settings.') + '</div></div></div>' +
+      '<!--TABS-->';
 
     if (Store.dryRun().active) {
       var invented = Store.events().filter(function (e) { return e.sample; }).length;
@@ -33,7 +47,8 @@
     }
 
     /* ---- access and enrolment ---- */
-    html += section('access', 'Access and enrolment', 'Executives only',
+    html += section('access', 'Access and enrolment',
+      mineOnly ? Store.unitName(myUnit) : 'The President',
       '<div style="padding:14px">' +
       '<p class="small muted">This is where access to the site is created. A person&rsquo;s ' +
       '<strong>position</strong> is only a label printed on reports &mdash; what they can actually ' +
@@ -58,7 +73,7 @@
 
     /* ---- the term ---- */
     var st = Store.termStatus();
-    html += section('term', 'The term',
+    if (!mineOnly) html += section('term', 'The term',
       st.closed ? 'Closed'
         : st.declared ? (st.passed ? 'Ended ' + U.fmtDateShort(st.endDate)
                                    : U.plural(st.daysLeft, 'day') + ' left')
@@ -93,7 +108,7 @@
 
     /* ---- units ---- */
     var units = Store.units();
-    html += section('units', 'Units', U.plural(units.length, 'unit'),
+    if (!mineOnly) html += section('units', 'Units', U.plural(units.length, 'unit'),
       '<div style="padding:14px 14px 4px">' +
       '<p class="small muted">The Republic&rsquo;s units: the National government, the provinces ' +
       '&mdash; the colleges and school levels &mdash; the Commission on Elections, and the Supreme Court. ' +
@@ -106,7 +121,7 @@
 
     /* ---- offices letters pass through ---- */
     var offs = Store.offices();
-    html += section('offices', 'Offices', U.plural(offs.length, 'office'),
+    if (!mineOnly) html += section('offices', 'Offices', U.plural(offs.length, 'office'),
       '<div style="padding:14px 14px 4px">' +
       '<p class="small muted">The desks a letter has to pass through. ' +
       '<strong>Usually takes</strong> is what turns the tracker into something useful: ' +
@@ -128,7 +143,7 @@
       '<p class="tiny muted" style="margin:10px 0 0">People are deactivated, never deleted, so past tasks keep their assignee.</p></div>');
 
     /* ---- positions & committees ---- */
-    html += section('roles', 'Positions and committees',
+    if (!mineOnly) html += section('roles', 'Positions and committees',
       Store.positions().length + ' · ' + Store.committees().length,
       '<div style="padding:14px">' +
       listEditor('positions', 'Positions', Store.positions()) +
@@ -137,7 +152,7 @@
       '</div>');
 
     /* ---- letterhead ---- */
-    html += section('letterhead', 'Report letterhead', org.emblem ? 'Custom emblem' : 'Council seal',
+    if (!mineOnly) html += section('letterhead', 'Report letterhead', org.emblem ? 'Custom emblem' : 'Council seal',
       '<div style="padding:14px">' +
       '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:14px">' +
       '<div class="strong" style="margin-bottom:4px">What this changes, and what it does not</div>' +
@@ -225,7 +240,7 @@
         U.plural(counts.tasks.length, 'task') + '.</p></div>');
 
     /* ---- data ---- */
-    html += section('data', 'Data', '',
+    if (!mineOnly) html += section('data', 'Data', '',
       '<div style="padding:14px" class="stack">' +
       (Store.hasSampleData()
         ? '<button type="button" class="btn btn-block" data-clear-sample>' + UI.icon('trash') + 'Clear sample data</button>'
@@ -233,7 +248,7 @@
       '<button type="button" class="btn btn-danger btn-block" data-reset>' + UI.icon('trash') + 'Delete all data</button>' +
       '</div>');
 
-    return html;
+    return html.replace('<!--TABS-->', tabBar());
   }
 
   function syncOn() { return !!(global.Sync && Sync.able()); }
@@ -288,16 +303,51 @@
       '</div>';
   }
 
+  /* Settings used to be ten collapsed rows, all stacked, each one hiding what
+     was inside it. Finding the letterhead meant remembering which of ten
+     headings it lived under and opening them until it appeared. They are tabs
+     now: one row across the top, one panel at a time, and the panel is open
+     the moment you arrive at it. */
+  var tabs = [];
+
   function section(key, title, meta, body) {
-    var collapsed = !open[key];
-    return '<div class="group" data-collapsed="' + collapsed + '" data-group="' + key + '" style="margin-bottom:10px">' +
-      '<button type="button" class="group-head" data-toggle="' + key + '" aria-expanded="' + !collapsed + '">' +
-        UI.icon('chevronDown', 'caret') +
-        '<span class="group-title">' + U.esc(title) + '</span>' +
-        (meta ? '<span class="group-meta">' + U.esc(meta) + '</span>' : '') +
-      '</button>' +
-      '<div class="group-body">' + body + '</div></div>';
+    tabs.push({ key: key, title: title, meta: meta });
+    var on = key === activeTab();
+    return '<div class="set-panel" data-panel="' + key + '"' + (on ? '' : ' hidden') + '>' +
+      '<div class="set-panel-head"><h2>' + U.esc(title) + '</h2>' +
+      (meta ? '<span class="set-panel-meta">' + U.esc(meta) + '</span>' : '') + '</div>' +
+      body + '</div>';
   }
+
+  function tabBar() {
+    return '<div class="set-tabs" role="tablist" aria-label="Settings">' +
+      tabs.map(function (t) {
+        var on = t.key === activeTab();
+        return '<button type="button" role="tab" class="set-tab' + (on ? ' is-active' : '') +
+          '" data-set-tab="' + U.esc(t.key) + '" aria-selected="' + on + '">' +
+          U.esc(t.title) + '</button>';
+      }).join('') + '</div>';
+  }
+
+  /* Every panel there is, in the order they are shown, and which of them a
+     unit head may open. Decided before any panel is built, because the active
+     tab cannot be worked out from a list that is still being filled in — the
+     first panel would always find itself the only candidate and mark itself
+     active, whatever had been chosen. */
+  var ALL_TABS = ['access', 'term', 'units', 'offices', 'people', 'roles',
+                  'letterhead', 'sync', 'backup', 'data'];
+  var UNIT_HEAD_TABS = ['access', 'people', 'sync', 'backup'];
+
+  var active = '';
+
+  function chooseTab(mineOnly) {
+    var allowed = mineOnly ? UNIT_HEAD_TABS : ALL_TABS;
+    /* A Governor has fewer tabs than the President. One remembered from a
+       session as somebody else would leave the screen blank. */
+    active = (tab && allowed.indexOf(tab) >= 0) ? tab : allowed[0];
+  }
+
+  function activeTab() { return active; }
 
   function unitRow(u) {
     var s = Store.unitStats(u.id);
@@ -373,13 +423,13 @@
   }
 
   function mount(root) {
-    U.els('[data-toggle]', root).forEach(function (b) {
+    U.els('[data-set-tab]', root).forEach(function (b) {
       b.addEventListener('click', function () {
-        var key = b.getAttribute('data-toggle');
-        open[key] = !open[key];
-        var g = root.querySelector('[data-group="' + key + '"]');
-        g.setAttribute('data-collapsed', String(!open[key]));
-        b.setAttribute('aria-expanded', String(open[key]));
+        tab = b.getAttribute('data-set-tab');
+        App.render();
+        // Back to the top of the panel, not wherever the last one was scrolled to.
+        var head = document.querySelector('.set-tabs');
+        if (head && head.scrollIntoView) head.scrollIntoView({ block: 'nearest' });
       });
     });
 

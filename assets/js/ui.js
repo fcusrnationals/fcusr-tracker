@@ -501,6 +501,23 @@
     });
   }
 
+  /* A field that suggests without insisting.
+
+     A dropdown of positions was the wrong control: a council invents working
+     titles its constitution never named, and a closed list makes somebody pick
+     the nearest wrong one. A datalist offers the same suggestions, filters as
+     you type, and still accepts anything — and where a browser does not support
+     it, it degrades to a plain text box, which was always the honest fallback. */
+  function suggestInput(id, value, options, placeholder) {
+    var listId = id + '-options';
+    return '<input type="text" id="' + U.esc(id) + '" list="' + U.esc(listId) + '" ' +
+      'maxlength="60" autocomplete="off" value="' + U.esc(value || '') + '"' +
+      (placeholder ? ' placeholder="' + U.esc(placeholder) + '"' : '') + '>' +
+      '<datalist id="' + U.esc(listId) + '">' +
+      (options || []).map(function (o) { return '<option value="' + U.esc(o) + '"></option>'; }).join('') +
+      '</datalist>';
+  }
+
   function downloadFile(filename, content, mime) {
     var blob = content instanceof Blob ? content : new Blob([content], { type: mime || 'application/json' });
     var url = URL.createObjectURL(blob);
@@ -521,6 +538,7 @@
     toast: toast, modal: modal, confirm: confirm,
     openMenu: openMenu, openStatusMenu: openStatusMenu, applyStatus: applyStatus, closeMenu: closeMenu,
     selectOptions: selectOptions, peopleOptions: peopleOptions, downloadFile: downloadFile,
+    suggestInput: suggestInput,
     copyText: copyText
   };
 })(window);

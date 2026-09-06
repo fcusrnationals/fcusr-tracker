@@ -80,12 +80,45 @@
     ['branch',    'DUAG',    'DUAG Film Festival',                           'FCUSR DUAG Film Festival']
   ];
 
+  /* The posts the 2022 Revised FCUSR Constitution and By-Laws actually creates,
+     in the order the document sets them out: the Executive and its cabinet
+     (Art. VI), the two houses of Congress (Art. V), the Supreme Court (Art.
+     VII), and the local governments (Art. VIII).
+
+     A position is a label printed on reports and nothing more — no line here
+     grants anybody anything, which is decided by unit and access. It is a list
+     of suggestions, not a closed set: the field takes a typed answer too,
+     because a council invents working titles the constitution never named and
+     an officer should not have to pick the nearest wrong one. */
   var DEFAULT_POSITIONS = [
-    'President', 'VP–Internal', 'VP–External', 'Secretary', 'Treasurer',
-    'Auditor', 'PIO', 'Business Manager', 'Peace Officer', 'Representative'
+    // Executive
+    'President', 'Vice President', 'Executive Secretary',
+    'Secretary, Budget', 'Secretary, Peace and Order',
+    'Secretary, Press and Public Relations', 'Secretary, General Services',
+    'Secretary, Sports', 'Secretary, Health', 'Secretary, Students\u2019 Rights',
+    'Secretary, Religious Affairs', 'Secretary, Socio-Cultural',
+    // Congress — Senate
+    'Senate President', 'Senator', 'Senate Secretary',
+    'Majority Floor Leader', 'Minority Floor Leader',
+    // Congress — House of Representatives
+    'Speaker of the House', 'Deputy Speaker', 'House Representative',
+    'Secretary General',
+    // Judiciary
+    'Chief Justice', 'Associate Justice', 'State Prosecutor', 'State Defender',
+    'Clerk of Court',
+    // Local government — province
+    'Governor', 'Vice Governor', 'Provincial Board Member', 'Provincial Administrator',
+    // Local government — municipality
+    'Mayor', 'Vice Mayor', 'Councilor', 'Municipal Administrator'
   ];
+
+  /* The legislative committees named in Art. V Sec. 9, plus the departments a
+     Provincial Board may create under Art. VIII Sec. 7(f). */
   var DEFAULT_COMMITTEES = [
-    'Executive', 'Publicity', 'Finance', 'Documentation', 'Logistics', 'Programs'
+    'Discipline', 'Socio-Cultural', 'Budget and Finance', 'Religious',
+    'Sports and Recreational Activities', 'Health',
+    'Media Technology and Documentation', 'Justice', 'Local Government Unit',
+    'Education', 'Secretariat', 'Finance', 'Creatives', 'Internal Affairs'
   ];
 
   // Letterhead details, printed at the top of every report. `emblem` is a data URL

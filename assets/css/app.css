@@ -149,6 +149,44 @@ a { color: var(--gold-700); }
 }
 .appbar-spacer { flex: 1; }
 
+/* ---------- Settings, as tabs ----------
+   It was ten collapsed rows stacked down the page, each hiding what was inside
+   it, so finding the letterhead meant remembering which heading it lived under
+   and opening them until it appeared. One row across the top, one panel at a
+   time, already open. On a phone the row scrolls sideways rather than wrapping
+   into three lines that push the panel off the screen. */
+.set-tabs {
+  display: flex; gap: 4px; margin: 0 0 18px; padding: 4px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+  overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.set-tabs::-webkit-scrollbar { display: none; }
+.set-tab {
+  flex: 0 0 auto; min-height: 38px; padding: 6px 14px;
+  font: inherit; font-size: 13px; font-weight: 600; white-space: nowrap;
+  background: transparent; border: 0; border-radius: 8px;
+  color: var(--muted); cursor: pointer;
+}
+.set-tab:hover { color: var(--ink); }
+.set-tab.is-active {
+  background: var(--surface); color: var(--gold-700);
+  box-shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+.set-panel {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); overflow: hidden;
+}
+.set-panel-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 14px 16px 0;
+}
+.set-panel-head h2 { font-size: 16px; margin: 0; letter-spacing: -0.01em; }
+.set-panel-meta { font-size: 12px; color: var(--muted); }
+
+@media (max-width: 700px) {
+  .set-tab { min-height: 44px; }
+}
+
 /* An icon's size no longer depends on somebody having written a rule for the
    thing that contains it. Every place that wants a different size still says
    so; every place that forgets gets something sensible instead of an SVG at

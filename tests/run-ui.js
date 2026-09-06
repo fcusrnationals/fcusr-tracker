@@ -367,12 +367,26 @@ await Auth.signIn('', '');
 
 console.log('\n--- settings ---');
 goto('#/settings');
+
+/* One row of tabs, one panel. It was ten collapsed rows stacked down the page,
+   which meant remembering which heading the letterhead lived under. */
+check('settings are tabs, not a stack of folds', $$('.set-tab').length > 4,
+  $$('.set-tab').length + ' tabs');
+check('exactly one panel is on screen', $$('.set-panel:not([hidden])').length === 1);
+check('and it is open on arrival', !!$('.set-panel:not([hidden]) [data-enrol]'));
+
+click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'people'));
+check('choosing a tab shows its panel',
+  !!$('[data-panel="people"]') && !$('[data-panel="people"]').hidden);
+check('and hides the one before it', $('[data-panel="access"]').hidden);
 check('directory lists officers', text().includes('Althea Ramirez'));
-check('deactivate, never delete', text().includes('Deactivate'));
+check('deactivate is offered', text().includes('Deactivate'));
+check('and so is removing somebody outright', !!$('[data-remove-person]'));
+
+click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'backup'));
 check('backup offered', !!$('[data-backup]') && !!$('#restore-file'));
+click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'letterhead'));
 check('emblem slot offered', !!$('#emblem-file'));
-click($$('[data-toggle]').find((b) => b.getAttribute('data-toggle') === 'roles'));
-check('collapsed sections open', $('[data-group="roles"]').getAttribute('data-collapsed') === 'false');
 
 console.log('\n--- export and search ---');
 goto('#/events/' + foundation.id);

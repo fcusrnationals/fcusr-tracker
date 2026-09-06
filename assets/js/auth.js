@@ -35,8 +35,34 @@
     return !!me && me.access === 'officer' && me.unitKind === 'national';
   }
 
-  // The executives: the only people who may enrol anyone or open Settings.
-  function isExecutive() { return isNational(); }
+  /* The President of the Republic. Settings is theirs: the letterhead every
+     report is printed on, the closing date, the unit list, and deleting
+     everything. None of that is a national officer's to change simply for being
+     national. */
+  function isPresident() {
+    return !!me && me.access === 'officer' && me.unitKind === 'national' && me.isHead;
+  }
+
+  /* A Governor, or the head of one of the independent bodies. They run their
+     own college's roster and nothing else. */
+  function isUnitHead() {
+    return !!me && me.access === 'officer' && me.unitKind !== 'national' && me.isHead;
+  }
+
+  /* Who may open Settings at all.
+
+     Signed in, never a volunteer, and then: the President, or a unit head for
+     their own unit. Offline there is no council and no server — one device, one
+     person, and no is_head to read from anywhere — so it falls back to the rule
+     that held before accounts existed. */
+  function canOpenSettings() {
+    if (!signedIn() || isVolunteer()) return false;
+    if (isOffline()) return isNational();
+    return isPresident() || isUnitHead();
+  }
+
+  // Kept as the name the rest of the app already asks by.
+  function isExecutive() { return canOpenSettings(); }
 
   function isVolunteer() { return !!me && me.access === 'volunteer'; }
 
@@ -149,6 +175,11 @@
       unitName: profile.unit_name || 'FCUSR Nationals',
       unitKind: profile.unit_kind || 'national',
       access: profile.access === 'volunteer' ? 'volunteer' : 'officer',
+      /* Whether they hold the post rather than merely belong to the unit: the
+         FCUSR President nationally, a Governor in a college. It was on the
+         server all along and never carried across, which is why every national
+         officer could open Settings — the app had no way to tell them apart. */
+      isHead: !!(profile.is_head || profile.isHead),
       eventIds: profile.eventIds || []
     };
     remember();
@@ -327,6 +358,7 @@
   global.Auth = {
     current: current, signedIn: signedIn, isNational: isNational,
     isExecutive: isExecutive, isVolunteer: isVolunteer,
+    isPresident: isPresident, isUnitHead: isUnitHead, canOpenSettings: canOpenSettings,
     canEnrolVolunteers: canEnrolVolunteers, canSeeLetter: canSeeLetter,
     canEditUnit: canEditUnit, canEditEvent: canEditEvent, canEditTask: canEditTask,
     visibleEvents: visibleEvents, canSee: canSee, eventIdsFor: eventIdsFor,

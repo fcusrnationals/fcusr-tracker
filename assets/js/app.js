@@ -112,10 +112,17 @@
       return;
     }
 
-    if (current.name === 'settings' && global.Auth && !Auth.isExecutive()) {
-      viewEl.innerHTML = UI.empty('Executives only',
-        'Enrolment and access are handled by the national executives.',
-        '<button type="button" class="btn btn-primary" id="ask-exec">Sign in</button>');
+    if (current.name === 'settings' && global.Auth && !Auth.canOpenSettings()) {
+      /* Not "executives only" any more. Settings holds the letterhead every
+         report is printed on, the closing date and the unit list, and none of
+         that is a national officer's to change simply for being national. */
+      viewEl.innerHTML = UI.empty('The President\u2019s settings',
+        Auth.signedIn()
+          ? 'Only the FCUSR President opens this. A Governor has their own unit\u2019s ' +
+            'settings; everything else here belongs to the Republic.'
+          : 'Sign in to continue.',
+        '<button type="button" class="btn btn-primary" id="ask-exec">' +
+        (Auth.signedIn() ? 'Sign in as someone else' : 'Sign in') + '</button>');
       var ask = viewEl.querySelector('#ask-exec');
       if (ask) ask.addEventListener('click', function () {
         Auth.requireExecutive(function () { render(); });
