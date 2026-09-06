@@ -134,13 +134,28 @@
       'through is set inactive rather than removed, so old trails still read correctly.</p></div>');
 
     /* ---- directory ---- */
+    var dupes = Store.duplicatePeopleCount();
     html += section('people', 'People', U.plural(people.length, 'officer'),
+      /* Offered only when there is something to clear. A council that synced
+         before the dry run was kept off the server is holding the same invented
+         officer once per device, and removing sixty rows by hand is not a task
+         anybody should be given. */
+      (dupes
+        ? '<div class="gate-note" style="margin:14px 16px 0">' + UI.icon('alert') +
+          '<span><strong>' + U.plural(dupes, 'duplicate') + ' on this list.</strong> ' +
+          'The same person recorded more than once \u2014 usually the rehearsal, copied ' +
+          'by each device that seeded its own. Merging keeps the first of each and moves ' +
+          'their tasks across; nothing is lost.<br>' +
+          '<button type="button" class="btn btn-sm" style="margin-top:10px" data-merge-dupes>' +
+          'Merge ' + U.plural(dupes, 'duplicate') + '</button></span></div>'
+        : '') +
       (people.length
         ? '<div class="list">' + people.map(personRow).join('') + '</div>'
         : UI.empty('No one yet', 'Add your officers so tasks can be assigned.')) +
       '<div style="padding:12px"><button type="button" class="btn btn-block" data-add-person>' +
       UI.icon('plus') + 'Add person</button>' +
-      '<p class="tiny muted" style="margin:10px 0 0">People are deactivated, never deleted, so past tasks keep their assignee.</p></div>');
+      '<p class="tiny muted" style="margin:10px 0 0">Deactivating keeps their name on the work ' +
+      'they did. Removing takes them off the list and leaves that work unassigned.</p></div>');
 
     /* ---- positions & committees ---- */
     if (!mineOnly) html += section('roles', 'Positions and committees',
@@ -152,7 +167,9 @@
       '</div>');
 
     /* ---- letterhead ---- */
-    if (!mineOnly) html += section('letterhead', 'Report letterhead', org.emblem ? 'Custom emblem' : 'Council seal',
+    if (!mineOnly) html += section('letterhead', 'Letter templates',
+      U.plural(Store.units({ activeOnly: true }).filter(function (u) { return !!u.letterhead; }).length,
+        'unit with its own'),
       '<div style="padding:14px">' +
       '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:14px">' +
       '<div class="strong" style="margin-bottom:4px">What this changes, and what it does not</div>' +
@@ -212,12 +229,22 @@
       '<li>PNG or JPG, under 3 MB.</li></ul></div></div>' +
 
       '<div class="row" style="gap:6px">' +
-      '<label class="btn">' + UI.icon('upload') + 'Upload a letterhead' +
+      '<label class="btn">' + UI.icon('upload') + 'Upload a template' +
       '<input type="file" id="letterhead-file" accept="image/png,image/jpeg" hidden></label>' +
       (org.letterhead
         ? '<button type="button" class="btn btn-ghost" data-clear-letterhead>Back to the default</button>'
         : '') +
       '</div>' +
+
+      /* A college with its own letterhead prints its own reports on it. The
+         Republic's is the fallback, so a unit with nothing here needs nothing
+         here — and only the President may set any of them, which is why the
+         whole panel is inside `if (!mineOnly)`. */
+      '<div class="divider"></div>' +
+      '<div class="field-label" style="margin-bottom:6px">A unit\u2019s own template</div>' +
+      '<p class="small muted" style="margin:0 0 12px">Every unit prints on the Republic\u2019s ' +
+      'template unless it has one of its own. The same measurements apply.</p>' +
+      '<div class="list">' + Store.units({ activeOnly: true }).map(unitTemplateRow).join('') + '</div>' +
       '</div>');
 
     /* ---- syncing ---- */
@@ -309,6 +336,25 @@
      now: one row across the top, one panel at a time, and the panel is open
      the moment you arrive at it. */
   var tabs = [];
+
+  function unitTemplateRow(u) {
+    return '<div class="task"><span class="task-main" style="cursor:default">' +
+      '<span class="task-title">' + U.esc(u.name) +
+        (u.letterhead ? ' <span class="chip st-done">own template</span>' : '') + '</span>' +
+      '<span class="task-meta">' + U.esc(u.letterhead
+        ? 'Uploaded' + (u.letterheadBy ? ' by ' + u.letterheadBy : '') +
+          (u.letterheadAt ? ' on ' + U.fmtDate(u.letterheadAt.slice(0, 10)) : '')
+        : 'Uses the Republic\u2019s template') + '</span></span>' +
+      '<span class="task-right" style="display:flex;gap:6px">' +
+        '<label class="btn btn-sm">Upload' +
+        '<input type="file" data-unit-template="' + U.esc(u.id) + '" ' +
+        'accept="image/png,image/jpeg" hidden></label>' +
+        (u.letterhead
+          ? '<button type="button" class="btn btn-sm btn-ghost" data-clear-unit-template="' +
+            U.esc(u.id) + '">Clear</button>'
+          : '') +
+      '</span></div>';
+  }
 
   function section(key, title, meta, body) {
     tabs.push({ key: key, title: title, meta: meta });
@@ -521,6 +567,25 @@
     U.els('[data-edit-person]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.personForm(b.getAttribute('data-edit-person')); });
     });
+    var md = root.querySelector('[data-merge-dupes]');
+    if (md) md.addEventListener('click', function () {
+      var n = Store.duplicatePeopleCount();
+      UI.confirm({
+        title: 'Merge ' + U.plural(n, 'duplicate') + '?',
+        message: 'Where the same name appears more than once in the same unit, the first ' +
+          'one recorded is kept and the rest are folded into it.',
+        detail: 'Their tasks, activities and letters move across rather than being deleted. ' +
+          'The merge is recorded, so the duplicates do not come back on the next sync.',
+        tone: 'primary',
+        cancelLabel: 'Leave them',
+        confirmLabel: 'Merge them'
+      }).then(function (ok) {
+        if (!ok) return;
+        var done = Store.mergeDuplicatePeople();
+        UI.toast(done ? U.plural(done, 'duplicate') + ' merged.' : 'Nothing to merge.');
+      });
+    });
+
     U.els('[data-remove-person]', root).forEach(function (b) {
       b.addEventListener('click', function () {
         var p = Store.person(b.getAttribute('data-remove-person'));
@@ -592,27 +657,27 @@
       reader.readAsDataURL(f);
     });
 
-    var lhFile = root.querySelector('#letterhead-file');
-    if (lhFile) lhFile.addEventListener('change', function () {
-      var f = lhFile.files && lhFile.files[0];
-      lhFile.value = '';
+    /* One template reader for the Republic's and for every unit's, because the
+       checks that matter — the size, and the A4 proportions that stop artwork
+       stretching across the sheet — are the same wherever the template lands.
+       `apply` is the only part that differs. */
+    function readTemplate(input, apply) {
+      var f = input.files && input.files[0];
+      input.value = '';
       if (!f) return;
       if (f.size > 3 * 1024 * 1024) {
-        return UI.toast('Too large — keep the letterhead under 3 MB.', 'error');
+        return UI.toast('Too large — keep the template under 3 MB.', 'error');
       }
       var reader = new FileReader();
       reader.onerror = function () { UI.toast('That image could not be read.', 'error'); };
       reader.onload = function () {
         var src = String(reader.result);
-        // The proportions are checked, not just described. A landscape or
-        // square image would stretch across the sheet and ruin every report.
         var img = new Image();
         img.onerror = function () { UI.toast('That image could not be read.', 'error'); };
         img.onload = function () {
           var ratio = img.width / img.height;
-          var a4 = 210 / 297;                       // 0.707
-          var off = Math.abs(ratio - a4) / a4;
-          if (off > 0.02) {
+          var a4 = 210 / 297;
+          if (Math.abs(ratio - a4) / a4 > 0.02) {
             return UI.confirm({
               title: 'That is not A4 portrait',
               message: 'The image is ' + img.width + ' × ' + img.height + ' pixels, which is ' +
@@ -620,15 +685,37 @@
                 'page, so the artwork will look distorted on every report.',
               detail: 'A4 portrait is 210 × 297 mm — 1240 × 1754 pixels is the right size.',
               confirmLabel: 'Use it anyway'
-            }).then(function (ok) {
-              if (ok) applyLetterhead(src);
-            });
+            }).then(function (ok) { if (ok) apply(src); });
           }
-          applyLetterhead(src);
+          apply(src);
         };
         img.src = src;
       };
       reader.readAsDataURL(f);
+    }
+
+    U.els('[data-unit-template]', root).forEach(function (input) {
+      input.addEventListener('change', function () {
+        var uid = input.getAttribute('data-unit-template');
+        readTemplate(input, function (src) {
+          var who = (global.Auth && Auth.current() && Auth.current().name) || '';
+          Store.setUnitTemplate(uid, { letterhead: src, letterheadBy: who });
+          UI.toast(Store.unitName(uid) + ' now prints on its own template.');
+        });
+      });
+    });
+
+    U.els('[data-clear-unit-template]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var uid = b.getAttribute('data-clear-unit-template');
+        Store.setUnitTemplate(uid, { letterhead: '' });
+        UI.toast(Store.unitName(uid) + ' is back on the Republic\u2019s template.');
+      });
+    });
+
+    var lhFile = root.querySelector('#letterhead-file');
+    if (lhFile) lhFile.addEventListener('change', function () {
+      readTemplate(lhFile, applyLetterhead);
     });
 
     function applyLetterhead(src) {

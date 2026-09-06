@@ -32,7 +32,7 @@
     if (!l) throw new Error('That letter no longer exists.');
 
     return A.loadPdfFonts().then(function () {
-      return A.loadLetterhead();
+      return A.loadLetterhead(l.unitId);
     }).then(function (letterhead) {
       var jsPDF = global.jspdf && global.jspdf.jsPDF;
       if (!jsPDF) throw new Error('The PDF library did not load.');

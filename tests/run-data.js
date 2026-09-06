@@ -439,6 +439,42 @@ console.log('\n--- routing a letter ---');
     check('removing somebody who is not there is harmless', S3.deletePerson('nobody') === false);
   }
 
+  /* ---- duplicates, and clearing them without sixty clicks ----
+     Syncing the dry run put the same invented officer on the roster once per
+     device that had ever seeded one. Prevention came first; this is the part
+     that clears what a council already synced. */
+  {
+    const unit = S3.nationalUnitId();
+    const first = S3.addPerson({ name: 'Twinned Officer', position: 'Secretary', unitId: unit });
+    const ev3 = S3.addEvent({ title: 'Twin Test', unitId: unit });
+    const tk = S3.addTask({ eventId: ev3.id, title: 'A task', assigneeId: first.id });
+
+    // The same person as another device recorded them.
+    const second = S3.addPerson({ name: 'Twinned Officer', position: 'Secretary', unitId: unit });
+    const third = S3.addPerson({ name: 'twinned officer ', position: 'Secretary', unitId: unit });
+    S3.setPersonActive(second.id, false);
+    const tk2 = S3.addTask({ eventId: ev3.id, title: 'Another task', assigneeId: third.id });
+
+    check('the duplicates are counted', S3.duplicatePeopleCount() === 2, S3.duplicatePeopleCount());
+    check('and matched regardless of case or stray spaces',
+      S3.people({ unitId: unit }).filter((p) => /twinned/i.test(p.name)).length === 3);
+
+    const merged = S3.mergeDuplicatePeople();
+    check('merging reports what it folded away', merged === 2, merged);
+    check('one of them is left',
+      S3.people({ unitId: unit }).filter((p) => /twinned/i.test(p.name)).length === 1);
+    check('and it is the one recorded first', !!S3.person(first.id));
+    check('no task was lost with them',
+      !!S3.task(tk.id) && !!S3.task(tk2.id));
+    check('the other row\u2019s work moved across, it was not deleted',
+      S3.task(tk2.id).assigneeId === first.id, S3.task(tk2.id).assigneeId);
+    check('a duplicate somebody had deactivated does not deactivate the survivor',
+      S3.person(first.id).active !== false);
+    check('the merge is recorded so it does not come back on the next sync',
+      !!S3.deletions().person[second.id] && !!S3.deletions().person[third.id]);
+    check('and running it again finds nothing', S3.mergeDuplicatePeople() === 0);
+  }
+
   /* ---- the council's own routes ----
      Copied from the FCUSR's briefing. A route that quietly loses a desk is the
      failure mode that matters, so the templates are checked against the list as

@@ -59,7 +59,7 @@
     if (!report) throw new Error('There is no report for this event yet.');
 
     var ids = A._allAssetIds(report);
-    return Promise.all([A.loadLetterhead(), AssetDB.getMany(ids)]).then(function (res) {
+    return Promise.all([A.loadLetterhead(e.unitId), AssetDB.getMany(ids)]).then(function (res) {
       var letterhead = res[0];
       var images = {};
       res[1].forEach(function (r) { if (r.dataUrl) images[r.id] = r.dataUrl; });

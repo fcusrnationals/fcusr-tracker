@@ -308,6 +308,12 @@
       // What the header calls this tracker. Blank falls back to a sensible
       // reading of the unit, so data saved before this existed still shows a name.
       trackerName: str(u.trackerName, LIMITS.org),
+      /* A unit's own letter template. Blank means it uses the Republic's, which
+         is what almost every unit does — a college that has its own letterhead
+         puts it here and its reports are printed on that instead. */
+      letterhead: letterhead(u.letterhead),
+      letterheadBy: str(u.letterheadBy, LIMITS.name),
+      letterheadAt: u.letterheadAt ? stamp(u.letterheadAt) : '',
       active: u.active !== false,
       createdAt: stamp(u.createdAt),
       updatedAt: stamp(u.updatedAt)
@@ -998,6 +1004,81 @@
      Whatever they held is released rather than deleted with them. A task
      survives losing its assignee; deleting the task because the person left
      would destroy the council's own record of the work. */
+  /* Duplicates, and getting rid of them without anybody clicking Remove sixty
+     times.
+
+     They came from syncing the dry run. Each device seeds its own rehearsal with
+     its own ids, so a second phone pulled the first one's thirteen invented
+     officers, kept its own thirteen, and pushed them back — and every device
+     after that made it worse. That no longer happens, but a council that has
+     already synced is left holding the mess, and telling them to tidy it by hand
+     is not an answer.
+
+     Two people are the same person when the name and the unit match. Whoever was
+     recorded first is kept, because that is the row other devices are most
+     likely to agree on, and everything pointing at the others is moved onto it
+     rather than deleted with them. */
+  function duplicatePeople() {
+    var groups = {};
+    state.people.forEach(function (p) {
+      var key = String(p.name || '').trim().toLowerCase() + '|' + (p.unitId || '');
+      (groups[key] = groups[key] || []).push(p);
+    });
+    var dupes = [];
+    Object.keys(groups).forEach(function (k) {
+      if (groups[k].length > 1) dupes.push(groups[k]);
+    });
+    return dupes;
+  }
+
+  function duplicatePeopleCount() {
+    return duplicatePeople().reduce(function (n, g) { return n + g.length - 1; }, 0);
+  }
+
+  function mergeDuplicatePeople() {
+    var removed = 0;
+    var dropped = {};
+
+    duplicatePeople().forEach(function (group) {
+      // Oldest first; the one the rest are folded into.
+      group.sort(function (a, b) { return String(a.createdAt).localeCompare(String(b.createdAt)); });
+      var keep = group[0];
+
+      group.slice(1).forEach(function (drop) {
+        state.tasks.forEach(function (t) {
+          if (t.assigneeId === drop.id) { t.assigneeId = keep.id; t.updatedAt = nowISO(); }
+        });
+        state.events.forEach(function (e) {
+          if (e.headId === drop.id) { e.headId = keep.id; e.updatedAt = nowISO(); }
+        });
+        state.letters.forEach(function (l) {
+          if (l.inChargeId === drop.id) { l.inChargeId = keep.id; l.updatedAt = nowISO(); }
+        });
+        // The activities they were taken on for belong to the person, not the row.
+        (drop.eventIds || []).forEach(function (evId) {
+          if ((keep.eventIds || []).indexOf(evId) < 0) keep.eventIds.push(evId);
+        });
+        // A duplicate that somebody had deactivated should not deactivate the keeper.
+        if (drop.active !== false) keep.active = true;
+        if (!keep.email && drop.email) keep.email = drop.email;
+
+        tombstone('person', drop.id);
+        dropped[drop.id] = true;
+        removed++;
+      });
+
+      keep.updatedAt = nowISO();
+    });
+
+    if (removed) {
+      /* Only the rows this merge folded away. Reading the tombstone list instead
+         would also take out anybody removed earlier for an unrelated reason. */
+      state.people = state.people.filter(function (p) { return !dropped[p.id]; });
+      commit();
+    }
+    return removed;
+  }
+
   function deletePerson(id) {
     var p = person(id);
     if (!p) return false;
@@ -2374,9 +2455,37 @@
     return keepTerm;
   }
 
-  /* ---------- letterhead ---------- */
+  /* ---------- letter templates ---------- */
 
   function org() { return state.org; }
+
+  /* The template a unit's reports are printed on: its own where it has one, the
+     Republic's otherwise. Everything that prints asks this rather than reading
+     org.letterhead directly, so adding a college's own template needed no
+     change anywhere a report is made. */
+  function templateFor(unitId) {
+    var u = unit(unitId);
+    if (u && u.letterhead) return u.letterhead;
+    return state.org.letterhead || '';
+  }
+
+  function setUnitTemplate(unitId, data) {
+    var u = unit(unitId);
+    if (!u) return null;
+    var lh = letterhead(data.letterhead);
+    if (data.letterhead && !lh) {
+      if (global.UI) {
+        global.UI.toast('That template could not be used — PNG or JPG, under 3 MB.', 'error');
+      }
+      return u;
+    }
+    u.letterhead = lh;
+    u.letterheadBy = lh ? str(data.letterheadBy, LIMITS.name) : '';
+    u.letterheadAt = lh ? nowISO() : '';
+    u.updatedAt = nowISO();
+    commit();
+    return u;
+  }
 
   function updateOrg(data) {
     ['name', 'address', 'email'].forEach(function (k) {
@@ -2862,6 +2971,7 @@
     isPresidentOffice: isPresidentOffice, officeByCode: officeByCode,
     setLetterStatus: setLetterStatus, byLetterUrgency: byLetterUrgency,
     org: org, updateOrg: updateOrg,
+    templateFor: templateFor, setUnitTemplate: setUnitTemplate,
     term: term, termStatus: termStatus, declareTerm: declareTerm, withdrawTerm: withdrawTerm,
     dryRun: dryRun, endDryRun: endDryRun,
     compliance: compliance, unitCompliance: unitCompliance,
@@ -2872,6 +2982,7 @@
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
     addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
     deletePerson: deletePerson, personHolds: personHolds,
+    duplicatePeopleCount: duplicatePeopleCount, mergeDuplicatePeople: mergeDuplicatePeople,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
     needsFeedback: needsFeedback, setFeedbackLink: setFeedbackLink,
     waiveFeedback: waiveFeedback, restoreFeedback: restoreFeedback,

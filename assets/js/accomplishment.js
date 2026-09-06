@@ -42,11 +42,12 @@
 
   var wiz = null;          // { eventId, step, draft, cache }
 
-  function loadLetterhead() {
-    /* A letterhead uploaded by the National executives replaces the one that
-       ships with the app. Checked every time rather than cached, because it can
+  function loadLetterhead(unitId) {
+    /* The template this unit's papers are printed on: its own where a college
+       has uploaded one, the Republic's otherwise, and the one that ships with
+       the app if neither. Checked every time rather than cached, because it can
        change between two exports in the same sitting. */
-    var own = (global.Store && Store.org && Store.org().letterhead) || '';
+    var own = (global.Store && Store.templateFor) ? Store.templateFor(unitId) : '';
     if (own) return Promise.resolve(own);
 
     if (letterheadData) return Promise.resolve(letterheadData);
