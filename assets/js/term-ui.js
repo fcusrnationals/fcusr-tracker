@@ -235,7 +235,7 @@
     var mine = Store.unitCompliance(myUnitId());
     var unitName = Store.unitName(myUnitId());
 
-    if (!mine.complies) return myHandoverForm({ auto: true });
+    if (!mine.complies) return myHandoverForm();
 
     UI.modal({
       title: st.passed ? 'The term has ended' : 'The term closes ' + U.fmtDate(st.endDate),
@@ -464,9 +464,7 @@
     };
   }
 
-  function myHandoverForm(opts) {
-    // Guard against being handed a click event by an addEventListener.
-    var auto = !!(opts && opts.auto === true);
+  function myHandoverForm() {
     var unitId = myUnitId();
     var unit = Store.unit(unitId);
     var owed = myOwed(unitId);
@@ -491,14 +489,6 @@
 
     var body = '';
 
-    /* Opened by itself, it has to say why it is in the way. Opened by pressing
-       the button, that is already obvious and the line would be noise. */
-    if (auto) {
-      body += '<p class="small" style="margin-top:0">This opened by itself because ' +
-        U.esc(unit ? unit.name : 'this unit') + ' is still holding ' +
-        U.plural(owed.total, 'thing') + ' and the term is closing.</p>';
-    }
-
     if (st.declared) {
       body += '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:16px">' +
         '<div class="strong">Everything below must be finished and filed before ' +
@@ -517,11 +507,9 @@
         '<p>Every activity is finished, every report is filed on a drive the council owns, ' +
         'and no letter is still out. Nothing is owed.</p></div>';
     } else {
-      if (!auto) {
-        body += '<p class="small" style="margin-top:0">' +
-          U.plural(owed.total, 'thing') + ' still owed before ' +
-          U.esc(unit ? unit.name : 'this unit') + ' can hand over.</p>';
-      }
+      body += '<p class="small" style="margin-top:0">' +
+        U.plural(owed.total, 'thing') + ' still owed before ' +
+        U.esc(unit ? unit.name : 'this unit') + ' can hand over.</p>';
 
       body += block('Activities not finished',
         'Mark the activity complete once its tasks are done.',
