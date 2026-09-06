@@ -10,7 +10,7 @@ window.FCU_BACKEND = {
 
   supabase: {
     // Supabase → Project Settings → API
-    url: '',        // e.g. https://abcdefghijkl.supabase.co
+    url: 'https://wjpsztvvuplppzswnrdx.supabase.co',
     anonKey: ''     // the long "anon public" key — safe to put in a web page
   },
 

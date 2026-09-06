@@ -516,9 +516,12 @@ create table if not exists offices (
 -- one that sent it back. A child table would buy normalisation and cost an
 -- ordering column that nothing else needs.
 --
--- Each stop: { id, officeId, forwardedBy, receivedBy, receivedAt, releasedAt,
---              outcome, note }
--- "receivedBy" is a typed name. The clerk at that office will never sign in
+-- Each stop: { id, officeId, label, forwardedBy, receivedBy, receivedAt,
+--              releasedAt, outcome, note }
+-- A stop is an office wherever there is one, because an office outlives whoever
+-- is sitting in it; where the signature belongs to no office, "label" carries a
+-- typed name instead. Never both empty.
+-- "receivedBy" is a typed name too. The clerk at that office will never sign in
 -- here, so this is a logbook kept honestly, not a signature.
 
 create table if not exists letters (
@@ -532,6 +535,9 @@ create table if not exists letters (
   deadline      date,
   status        text not null default 'Routing'
                 check (status in ('Routing','Approved','Declined','Withdrawn')),
+  -- Set only when somebody answered, in as many words, that this letter never
+  -- leaves the council — the one reason the President's signature may be absent.
+  internal      boolean not null default false,
   stops         jsonb not null default '[]'::jsonb,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -539,6 +545,11 @@ create table if not exists letters (
 
 create index if not exists letters_unit_idx on letters(unit_id);
 create index if not exists letters_event_idx on letters(event_id);
+
+-- "create table if not exists" leaves an existing table alone, so a column
+-- added after the first run has to be asked for separately. This is what keeps
+-- the promise at the top of the file that running it again is safe.
+alter table letters add column if not exists internal boolean not null default false;
 
 -- ------------------------------------------------------------------- term
 -- One row, ever. The administration's closing date and what it leaves behind.
@@ -604,21 +615,32 @@ create policy term_write on term for all
   using (is_national()) with check (is_national());
 
 -- ------------------------------------------------------- seed the offices
--- A starting list. Edit it in Settings once the app is running; the names and
--- turnarounds here are a plausible guess, not gospel.
+-- The council's own signatories, in the order they sign, taken from the FCUSR's
+-- briefing on the three letters it sends most often. Keep this list and
+-- DEFAULT_OFFICES in assets/js/store.js in step — the app seeds the same desks
+-- offline, and the route templates match on these codes.
+--
+-- PRES is not one office among the others: the FCUSR President signs every
+-- letter the council sends out, and the app asks for a reason when a letter
+-- goes without them.
 
 insert into offices (code, name, turnaround_days) values
-  ('ADV',  'Adviser',                            2),
-  ('DEAN', 'Dean of the College',                3),
-  ('OSA',  'Office of Student Affairs',          3),
-  ('GUID', 'Guidance Office',                    3),
+  ('AUTH', 'The author / Senator / Governor',    1),
+  ('GOV',  'Governor / FCUSR President',         2),
+  ('PRES', 'FCUSR President',                    2),
+  ('ADV',  'Adviser (JHS, SHS, National)',       2),
+  ('DEAN', 'Dean/Principal',                     3),
+  ('OSA',  'OSA, Director',                      3),
+  ('BUD',  'Budget Officer / Accountant / Business Manager', 3),
   ('VPAA', 'VP for Academic Affairs',            5),
   ('VPF',  'VP for Finance',                     5),
+  ('OP',   'University President',               7),
+  -- Not on any of the three standard routes, but real desks a letter reaches.
+  ('GUID', 'Guidance Office',                    3),
   ('PPO',  'Physical Plant Office',              3),
   ('REG',  'Office of the Registrar',            3),
   ('CM',   'Campus Ministry',                    3),
-  ('SEC',  'Security Office',                    2),
-  ('OP',   'Office of the University President', 7)
+  ('SEC',  'Security Office',                    2)
 on conflict (code) do nothing;
 
 -- ----------------------------------------------------------- seed units
