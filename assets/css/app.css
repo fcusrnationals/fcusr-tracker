@@ -542,6 +542,12 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
 .pht-mark { width: 17px; height: 17px; flex: 0 0 17px; color: var(--gold-300); }
 .ph-term.is-urgent .pht-mark { color: #FFC9C0; }
 .pht-text { flex: 1; min-width: 0; }
+.pht-kicker {
+  display: block; font-size: 10px; font-weight: 800;
+  letter-spacing: .11em; text-transform: uppercase;
+  color: var(--gold-300); margin-bottom: 3px;
+}
+.ph-term.is-urgent .pht-kicker { color: #FFC9C0; }
 .pht-head {
   display: block; font-size: 13.5px; font-weight: 700;
   letter-spacing: -0.01em; line-height: 1.35;

@@ -41,6 +41,11 @@
        The whole band is the way in. A white button beside the words pushed the
        band onto three rows on a phone and turned the foot of the photograph
        into a poster; a row you press is smaller, and there is nothing to miss. */
+    /* A name for the phase, above the instruction. "Finish and file everything
+       before Oct 6" says what to do without saying what is going on; an officer
+       who has been told the term is closing recognises the band on sight and
+       reads the date underneath as the deadline it is. */
+    var kicker = st.passed ? 'The term has ended' : 'End-of-term phase';
     var head, sub;
 
     if (st.passed) {
@@ -61,6 +66,7 @@
       '" data-my-handover>' +
       UI.icon('alert', 'pht-mark') +
       '<span class="pht-text">' +
+        '<span class="pht-kicker">' + U.esc(kicker) + '</span>' +
         '<span class="pht-head">' + U.esc(head) + '</span>' +
         '<span class="pht-sub">' + U.esc(sub) + '</span>' +
       '</span>' +
