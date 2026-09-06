@@ -20,8 +20,11 @@
   form-action 'none'">
 <meta name="description" content="Task tracker for the Filamer Christian University Student Republic — events, assignments, deadlines, and printable event task reports.">
 <title>FCUSR Task Tracker</title>
-<!-- ASSET VERSION: bump ?v=N on every asset when you change CSS or JS, so
-     browsers fetch the new file instead of reusing a cached copy. -->
+<!-- ASSET VERSION: run `node tools/bump.js` after changing any CSS or JS.
+     It moves every ?v= here and version.json together, so browsers fetch the
+     new files and any tab still open is told a newer version exists. Editing
+     one by hand and not the other is silent: everything looks right and half
+     the council keeps running yesterday's app. -->
 <link rel="stylesheet" href="assets/css/app.css?v=55">
 <link rel="stylesheet" href="assets/css/print.css?v=55" media="print">
 <link rel="icon" href="assets/img/fcusr-seal-small.png?v=55">
