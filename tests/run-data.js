@@ -447,6 +447,61 @@ console.log('\n--- routing a letter ---');
     check('the mark can be taken off again', S3.letter(inside.id).internal === false);
   }
 
+  /* ---- an office the seeded list never had ----
+     Typed from the letters screen. It has to become a real office, with a code
+     of its own: the route templates match on codes, and two offices sharing an
+     empty one would put the wrong desk on somebody's letter. */
+  {
+    const before = S3.offices().length;
+    const chap = S3.addOffice({ name: 'Office of the Chaplain' });
+    check('an office can be added with only a name', !!chap && chap.name === 'Office of the Chaplain');
+    check('it is on the list', S3.offices().length === before + 1);
+    check('it was given a code', !!chap.code, chap.code);
+    check('and that code is unique',
+      S3.offices().filter((o) => o.code === chap.code).length === 1);
+
+    const twin = S3.addOffice({ name: 'Office of the Chaplaincy' });
+    check('a second office with the same first letters still gets its own code',
+      twin.code !== chap.code, chap.code + ' vs ' + twin.code);
+
+    check('an office still needs a name',
+      (() => { try { S3.addOffice({ name: '  ' }); return false; } catch (e) { return true; } })());
+
+    // It works as a signatory like any other.
+    const l2 = S3.addLetter({
+      subject: 'Request for the invocation', unitId: S3.nationalUnitId(),
+      route: [{ officeId: chap.id }]
+    });
+    check('and it can carry a letter', S3.stopName(l2.stops[0]) === 'Office of the Chaplain');
+  }
+
+  /* ---- the council's wording, corrected in place ----
+     The name of a seeded office has changed more than once. A device that
+     seeded the old wording should catch up — unless somebody has renamed it,
+     in which case their name is theirs. */
+  {
+    const S5 = sb.Store;
+    const old = S5.offices().map((o) => Object.assign({}, o));
+    const dean = old.find((o) => o.code === 'DEAN');
+    const osa = old.find((o) => o.code === 'OSA');
+    dean.name = 'Dean of the College';
+    dean.seededName = 'Dean of the College';       // untouched since seeding
+    osa.name = 'The OSA, Roxas campus';
+    osa.seededName = 'OSA, Director';              // renamed by hand
+
+    S5.fromJSON(JSON.stringify({
+      data: {
+        units: S5.units(), offices: old, officesSeed: 1,
+        people: [], events: [], tasks: [], reports: [], letters: []
+      }
+    }));
+    const now = (code) => S5.offices().find((o) => o.code === code);
+    check('a seeded name nobody touched is brought up to date',
+      now('DEAN').name === 'Dean/Principal', now('DEAN').name);
+    check('a name somebody chose is left alone',
+      now('OSA').name === 'The OSA, Roxas campus', now('OSA').name);
+  }
+
   /* ---- a signatory who holds no office ----
      Offices are preferred because an office outlives its holder, but the first
      signatory on every one of the council's routes is "the author", and some

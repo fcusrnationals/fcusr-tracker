@@ -743,10 +743,37 @@ console.log('\n--- signatories ---');
     /Sen\. Kyla Villanueva/.test(form.textContent) &&
     /person/i.test(formAll('.route-pick li')[10].textContent));
 
+  // An office the council uses that the seeded list has never heard of.
+  setValue(inForm('#f-laddoffice'), '__office');
+  check('a new office can be typed', !inForm('#f-lnamerow').hidden);
+  check('and it says the office will be kept',
+    /list of offices/i.test(inForm('#f-lnamehint').textContent),
+    inForm('#f-lnamehint').textContent.slice(0, 60));
+  setValue(inForm('#f-laddname'), 'Office of the Chaplain');
+  click(inForm('[data-addname]'));
+  check('the new office joins the signatories', formAll('.route-pick li').length === 12);
+  check('it is an office, not a one-off name',
+    !/person/i.test(formAll('.route-pick li')[11].textContent),
+    formAll('.route-pick li')[11].textContent);
+  const chap = S.offices().find((o) => o.name === 'Office of the Chaplain');
+  check('and it is on the council list for next time', !!chap);
+  check('with a code of its own, so templates cannot mismatch',
+    !!chap.code && S.offices().filter((o) => o.code === chap.code).length === 1, chap.code);
+  check('the dropdown learns it without a redraw',
+    !!inForm('#f-laddoffice option[value="' + chap.id + '"]'));
+
+  // Typing it a second time must not make a duplicate office.
+  setValue(inForm('#f-laddoffice'), '__office');
+  setValue(inForm('#f-laddname'), 'office of the chaplain');
+  click(inForm('[data-addname]'));
+  check('typing the same office again does not duplicate it',
+    S.offices().filter((o) => /chaplain/i.test(o.name)).length === 1);
+  check('and it is not added to the route twice', formAll('.route-pick li').length === 12);
+
   click(inForm('[data-save]'));
   await settle();
   const made = S.letters().find((x) => x.subject === 'Request for the foundation week budget');
-  check('the letter saves with every signatory', !!made && made.stops.length === 11, made && made.stops.length);
+  check('the letter saves with every signatory', !!made && made.stops.length === 12, made && made.stops.length);
   check('the President is on it', made.stops.some((x) => x.officeId === presId));
   check('it is not marked internal', made.internal === false);
   check('and the person was kept by name',
@@ -767,7 +794,7 @@ console.log('\n--- signatories ---');
   const after = S.letter(made.id);
   check('the office goes in ahead of the one holding it',
     after.stops[0].officeId === S.officeByCode('REG').id, S.stopName(after.stops[0]));
-  check('and nothing else was disturbed', after.stops.length === 12);
+  check('and nothing else was disturbed', after.stops.length === 13);
   check('the screen now waits on the new office',
     /Office of the Registrar/.test(text()), text().slice(0, 120));
 

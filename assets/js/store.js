@@ -476,8 +476,21 @@
       });
     if (!s.offices.length) s.offices = seedOffices();
     else if ((typeof data.officesSeed === 'number' ? data.officesSeed : 0) < OFFICE_SEED_VERSION) {
+      var byId = {};
+      s.offices.forEach(function (o) { byId[o.id] = o; });
       seedOffices().forEach(function (o) {
-        if (!seenOffice[o.id]) { s.offices.push(o); seenOffice[o.id] = true; }
+        if (!seenOffice[o.id]) { s.offices.push(o); seenOffice[o.id] = true; return; }
+        /* Already here. The council's wording for its own desks has been
+           corrected more than once, and a device that seeded the old wording
+           should not be stuck with it — but only where nobody has since made
+           the name their own. */
+        var have = byId[o.id];
+        if (have && have.seededName && have.seededName === have.name && have.name !== o.name) {
+          have.name = o.name;
+          have.seededName = o.name;
+        } else if (have && !have.seededName) {
+          have.seededName = have.name;
+        }
       });
     }
     s.officesSeed = OFFICE_SEED_VERSION;
@@ -1130,7 +1143,7 @@
      logbook kept honestly, not a signature, and it is worth saying plainly so
      nobody mistakes one for the other. */
 
-  var OFFICE_SEED_VERSION = 2;
+  var OFFICE_SEED_VERSION = 3;
 
   /* A starting list, editable in Settings. Turnaround is how long that office
      usually takes; a letter sitting longer than that is called stuck, which is
@@ -1143,7 +1156,7 @@
     ['GOV',  'Governor / FCUSR President',         2],
     ['PRES', 'FCUSR President',                    2],
     ['ADV',  'Adviser (JHS, SHS, National)',       2],
-    ['DEAN', 'Principal / Dean',                   3],
+    ['DEAN', 'Dean/Principal',                     3],
     ['OSA',  'OSA, Director',                      3],
     ['BUD',  'Budget Officer / Accountant / Business Manager', 3],
     ['VPAA', 'VP for Academic Affairs',            5],
@@ -1197,6 +1210,11 @@
       return {
         id: 'office-' + o[0].toLowerCase(),
         code: o[0], name: o[1], turnaroundDays: o[2], active: true,
+        /* The name this office was seeded with. If it still matches, nobody has
+           renamed it and a correction to the council's own wording can be
+           applied; if it does not, the name on screen is somebody's decision
+           and is left alone. */
+        seededName: o[1],
         createdAt: nowISO(), updatedAt: nowISO()
       };
     });
@@ -1211,6 +1229,7 @@
       id: id(o.id, 'off'),
       code: str(o.code, 16).toUpperCase().replace(/[^A-Z0-9-]/g, ''),
       name: name,
+      seededName: str(o.seededName, LIMITS.org),
       turnaroundDays: isFinite(days) && days > 0 && days < 400 ? Math.round(days) : 3,
       active: o.active !== false,
       createdAt: stamp(o.createdAt),
@@ -1292,9 +1311,25 @@
     return o ? o.name : 'Unknown office';
   }
 
+  /* A code is what the route templates match on, so one is derived when the
+     caller has not given one — otherwise every office added from the letters
+     screen would share the empty code and the templates would match the wrong
+     desk. Uniqueness matters more than prettiness here. */
+  function deriveCode(name) {
+    var base = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (!base) base = 'OFF';
+    var code = base, n = 2;
+    while (state.offices.some(function (o) { return o.code === code; })) {
+      code = base.slice(0, 5) + n;
+      n++;
+      if (n > 99) return '';
+    }
+    return code;
+  }
+
   function addOffice(data) {
     var o = cleanOffice({
-      id: U.uid('off'), code: data.code, name: data.name,
+      id: U.uid('off'), code: data.code || deriveCode(data.name), name: data.name,
       turnaroundDays: data.turnaroundDays, active: true,
       createdAt: nowISO(), updatedAt: nowISO()
     });

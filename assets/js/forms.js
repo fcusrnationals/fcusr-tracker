@@ -543,12 +543,13 @@
       Store.offices({ activeOnly: true }).map(function (o) {
         return '<option value="' + U.esc(o.id) + '">' + U.esc(o.name) + '</option>';
       }).join('') +
+      '<option value="__office">An office that is not listed…</option>' +
       '<option value="__typed">Somebody with no office…</option>' +
       '</select></div>' +
       '<div class="row" style="gap:6px;flex-wrap:nowrap;margin-top:6px" id="f-lnamerow" hidden>' +
-      '<input type="text" id="f-laddname" maxlength="80" style="flex:1" ' +
-      'placeholder="Who has to sign — name or title">' +
+      '<input type="text" id="f-laddname" maxlength="80" style="flex:1">' +
       '<button type="button" class="btn" data-addname>Add</button></div>' +
+      '<p class="hint" id="f-lnamehint" hidden style="margin:6px 2px 0"></p>' +
       '<div class="error-text" hidden>Choose at least one office or person.</div></div>';
 
     UI.modal({
@@ -669,11 +670,23 @@
         var add = root.querySelector('#f-laddoffice');
         var nameRow = root.querySelector('#f-lnamerow');
         var nameIn = root.querySelector('#f-laddname');
+        var nameHint = root.querySelector('#f-lnamehint');
+        var typedMode = 'person';   // 'person' = this letter only · 'office' = added to the list
 
         add.addEventListener('change', function () {
           if (!add.value) return;
-          if (add.value === '__typed') {
+          if (add.value === '__typed' || add.value === '__office') {
+            typedMode = add.value === '__office' ? 'office' : 'person';
             nameRow.hidden = false;
+            nameHint.hidden = false;
+            nameIn.placeholder = typedMode === 'office'
+              ? 'Name of the office' : 'Who has to sign — name or title';
+            nameHint.textContent = typedMode === 'office'
+              ? 'Added to the council\u2019s list of offices, so the next letter can pick it ' +
+                'straight from the dropdown. Edit or remove it later in Settings.'
+              : 'Kept on this letter only. Use an office instead wherever there is one \u2014 ' +
+                'an office outlasts whoever is sitting in it.';
+            nameIn.value = '';
             nameIn.focus();
             add.value = '';
             return;
@@ -689,9 +702,36 @@
         function addTypedName() {
           var name = nameIn.value.trim();
           if (!name) return nameIn.focus();
-          route.push({ officeId: '', label: name });
+
+          if (typedMode === 'office') {
+            var existing = Store.offices().filter(function (o) {
+              return o.name.toLowerCase() === name.toLowerCase();
+            })[0];
+            var made;
+            try {
+              made = existing || Store.addOffice({ name: name });
+            } catch (err) {
+              return UI.toast(err.message || 'That office could not be added.', 'error');
+            }
+            if (existing && existing.active === false) Store.setOfficeActive(existing.id, true);
+            if (!route.some(function (e) { return e.officeId === made.id; })) {
+              route.push({ officeId: made.id, label: '' });
+            }
+            // The dropdown has to learn the new office without redrawing the form.
+            if (!add.querySelector('option[value="' + made.id + '"]')) {
+              var opt = document.createElement('option');
+              opt.value = made.id;
+              opt.textContent = made.name;
+              add.insertBefore(opt, add.querySelector('option[value="__office"]'));
+            }
+            UI.toast(existing ? made.name + ' was already on the list.' : made.name + ' added to the offices.');
+          } else {
+            route.push({ officeId: '', label: name });
+          }
+
           nameIn.value = '';
           nameRow.hidden = true;
+          nameHint.hidden = true;
           drawRoute();
         }
         root.querySelector('[data-addname]').addEventListener('click', addTypedName);
@@ -791,10 +831,10 @@
           choices.map(function (o) {
             return '<option value="' + U.esc(o.id) + '">' + U.esc(o.name) + '</option>';
           }).join('') +
+          '<option value="__office">An office that is not listed…</option>' +
           '<option value="__typed">Somebody with no office…</option>' +
           '</select>' +
-          '<input type="text" id="f-isname" maxlength="80" style="margin-top:8px" hidden ' +
-          'placeholder="Their name or title">',
+          '<input type="text" id="f-isname" maxlength="80" style="margin-top:8px" hidden>',
         hint: 'An office wherever there is one — it outlasts whoever is sitting in it. ' +
           'Type a name only when the signature belongs to no office.'
       }) +
@@ -815,17 +855,37 @@
         var pick = root.querySelector('#f-isoffice');
         var typed = root.querySelector('#f-isname');
         pick.addEventListener('change', function () {
-          typed.hidden = pick.value !== '__typed';
+          typed.hidden = pick.value !== '__typed' && pick.value !== '__office';
+          typed.placeholder = pick.value === '__office'
+            ? 'Name of the office — added to the list'
+            : 'Their name or title — this letter only';
           if (!typed.hidden) typed.focus();
         });
 
         root.querySelector('[data-save]').addEventListener('click', function () {
           clearErrors(root);
           var entry;
-          if (pick.value === '__typed') {
+          if (pick.value === '__typed' || pick.value === '__office') {
             var name = typed.value.trim();
-            if (!name) return showError(root, 'office', 'Who has to sign it?');
-            entry = { officeId: '', label: name };
+            if (!name) {
+              return showError(root, 'office', pick.value === '__office'
+                ? 'What is the office called?' : 'Who has to sign it?');
+            }
+            if (pick.value === '__office') {
+              var existing = Store.offices().filter(function (o) {
+                return o.name.toLowerCase() === name.toLowerCase();
+              })[0];
+              var made;
+              try {
+                made = existing || Store.addOffice({ name: name });
+              } catch (err) {
+                return showError(root, 'office', err.message);
+              }
+              if (existing && existing.active === false) Store.setOfficeActive(existing.id, true);
+              entry = { officeId: made.id, label: '' };
+            } else {
+              entry = { officeId: '', label: name };
+            }
           } else if (pick.value) {
             entry = { officeId: pick.value, label: '' };
           } else {
