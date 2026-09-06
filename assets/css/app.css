@@ -149,6 +149,28 @@ a { color: var(--gold-700); }
 }
 .appbar-spacer { flex: 1; }
 
+/* A new version is out and this tab is not it.
+
+   Above the bottom navigation on a phone, so it does not sit under the thumb
+   bar; never a dialog, because somebody may be halfway through a report and
+   the app is not entitled to interrupt that. */
+.update-bar {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 190; width: min(520px, calc(100% - 24px));
+  display: flex; align-items: center; gap: 12px; justify-content: space-between;
+  padding: 10px 12px 10px 14px; border-radius: 12px;
+  background: var(--ink); color: #FFF; box-shadow: var(--sh-2);
+  font-size: 13px; line-height: 1.4;
+}
+.update-bar .muted { color: rgb(255 255 255 / .62); }
+.update-bar .btn {
+  flex: 0 0 auto; background: #FFF; border-color: #FFF; color: var(--ink);
+}
+@media (max-width: 700px) {
+  .update-bar { bottom: calc(70px + env(safe-area-inset-bottom)); }
+}
+
 /* ---------- Settings, as tabs ----------
    It was ten collapsed rows stacked down the page, each hiding what was inside
    it, so finding the letterhead meant remembering which heading it lived under

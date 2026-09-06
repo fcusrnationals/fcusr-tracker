@@ -35,6 +35,7 @@ const SCREENS = [
   const browser = await puppeteer.launch({
     executablePath: CHROME, headless: 'new', args: ['--hide-scrollbars']
   });
+  let faultsTotal = 0;
   const page = await browser.newPage();
 
   /* Without this the deployed config.js applies, the front door stands, and
@@ -59,6 +60,47 @@ const SCREENS = [
     Store.setLastPerson(Store.people()[0].id);
     return Store.events().find((e) => e.title.startsWith('Foundation')).id;
   });
+
+  /* ---------------- running the current version ----------------
+     GitHub Pages lets a browser keep index.html for ten minutes, and a tab left
+     open keeps it indefinitely — so a council can be running three versions of
+     the app against one database with nobody aware. The page has to notice. */
+  {
+    const v = await page.evaluate(() => {
+      const el = document.querySelector('script[src*="app.js?v="]');
+      const m = el && el.getAttribute('src').match(/\?v=(\d+)/);
+      return m ? Number(m[1]) : 0;
+    });
+    console.log('  running v' + v);
+
+    const served = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'version.json'), 'utf8'));
+    if (v !== served.version) {
+      console.log('  FAULT  index.html is v' + v + ' but version.json says v' + served.version +
+        ' — every open tab would be told to reload, for ever');
+      faultsTotal++;
+    }
+
+    // Pretend the server moved on, and check the page says so.
+    await page.evaluate(() => {
+      const real = window.fetch;
+      window.fetch = (u, o) => (String(u).indexOf('version.json') >= 0
+        ? Promise.resolve({ ok: true, json: () => Promise.resolve({ version: 99999 }) })
+        : real(u, o));
+    });
+    await page.evaluate(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await new Promise((r) => setTimeout(r, 300));
+    const bar = await page.evaluate(() => {
+      const b = document.getElementById('update-bar');
+      return b ? { text: b.textContent.replace(/\s+/g, ' '), reload: !!b.querySelector('[data-reload]') } : null;
+    });
+    if (!bar || !bar.reload) {
+      console.log('  FAULT  a stale tab is never told a newer version exists');
+      faultsTotal++;
+    } else {
+      console.log('  ok  stale tab notices: "' + bar.text.slice(0, 60) + '"');
+    }
+    await page.reload({ waitUntil: 'networkidle0' });
+  }
 
   let faults = 0;
   for (const [name, hash] of SCREENS) {
@@ -143,6 +185,7 @@ const SCREENS = [
   }
 
   await browser.close();
-  console.log(faults ? '\n' + faults + ' screen(s) with faults' : '\nAll screens clean.');
-  process.exit(faults ? 1 : 0);
+  var all = faults + faultsTotal;
+  console.log(all ? '\n' + all + ' fault(s)' : '\nAll screens clean.');
+  process.exit(all ? 1 : 0);
 })();

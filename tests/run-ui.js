@@ -875,4 +875,9 @@ if (failed.length) {
   failed.forEach((f) => console.log('  FAILED: ' + f.name + (f.extra ? '  — ' + f.extra : '')));
   process.exit(1);
 }
+/* Explicitly, like every other suite. The app runs timers — syncing, the
+   version check — and a browser is right to let them run. A harness that exits
+   only when nothing is left scheduled is really asserting that the app holds no
+   timers, which is neither true nor anything worth asserting. */
+process.exit(0);
 })();

@@ -430,6 +430,16 @@
     /* Syncing starts after the first screen is drawn and never before it. The
        app is local-first: everything on screen came from this device and is
        already correct; the network's job is to reconcile it afterwards. */
+    /* Only where there is a version to compare against: a page assembled some
+       other way — a test harness, an embedded copy — has nothing to poll for. */
+    if (runningVersion) {
+      checkVersion();
+      setInterval(checkVersion, 10 * 60 * 1000);
+      document.addEventListener('visibilitychange', function () {
+        if (!document.hidden) checkVersion();
+      });
+    }
+
     if (global.Sync) {
       Sync.start();
       Sync.subscribe(function () { paintSyncState(); });
@@ -437,6 +447,54 @@
       if (ss) ss.addEventListener('click', syncDetail);
       paintSyncState();
     }
+  }
+
+  /* ---------- is this still the current version? ----------
+
+     GitHub Pages tells a browser it may keep index.html for ten minutes, and a
+     tab left open keeps it for as long as it stays open. So a council can be
+     running three different versions of the app against one database without
+     anybody knowing — which is how "it works on mine" starts, and why a fixed
+     bug keeps being reported.
+
+     The running version is read off this page's own script tags rather than
+     written down a second time; version.json is what the server currently
+     serves. When they differ, the person is told, once, and can reload. Never
+     reloaded from under them: they may be halfway through a report. */
+  var runningVersion = (function () {
+    var el = document.querySelector('script[src*="app.js?v="]');
+    var m = el && el.getAttribute('src').match(/\?v=(\d+)/);
+    return m ? Number(m[1]) : 0;
+  })();
+
+  var updateOffered = false;
+
+  function checkVersion() {
+    if (updateOffered || !runningVersion || typeof fetch !== 'function') return;
+    // Cache-busted, or the answer would come from the same cache being asked about.
+    fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (!j || !j.version || j.version <= runningVersion) return;
+        updateOffered = true;
+        showUpdateBar(j.version);
+      })
+      .catch(function () { /* offline, or the file is not deployed yet */ });
+  }
+
+  function showUpdateBar(version) {
+    if (document.getElementById('update-bar')) return;
+    var bar = document.createElement('div');
+    bar.id = 'update-bar';
+    bar.className = 'update-bar';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = '<span>A newer version of the tracker is ready' +
+      ' <span class="muted">(v' + version + ' — you are on v' + runningVersion + ')</span></span>' +
+      '<button type="button" class="btn btn-sm" data-reload>Reload</button>';
+    document.body.appendChild(bar);
+    bar.querySelector('[data-reload]').addEventListener('click', function () {
+      location.reload(true);
+    });
   }
 
   /* Said once a visit, and only to somebody who is actually inside. */

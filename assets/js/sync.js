@@ -156,18 +156,39 @@
     var counts = { added: 0, updated: 0, removed: 0 };
     var high = since || '';
 
+    var PAGE = 500;
+
+    /* One table, however many pages it takes.
+
+       A single page per round looked fine because the mark advances and the
+       next round picks up the rest — but a council coming back after a term,
+       or a device restored from a backup, would take a dozen rounds to catch
+       up while showing "Synced" throughout. And a page that ends exactly on a
+       shared timestamp would leave the rows sharing it behind for good, because
+       the next ask is strictly newer than the last one seen.
+
+       Bounded, because a loop that trusts a server to stop is not a loop. */
+    function page(t, from, guard) {
+      return Backend.changed(t.table, from, PAGE).then(function (rows) {
+        rows = rows || [];
+        var last = from;
+        rows.forEach(function (row) {
+          var what = Store.applyRemote(t.kind, fromRow(t.kind, row));
+          if (what === 'added') counts.added++;
+          else if (what === 'updated') counts.updated++;
+          if (row.updated_at && row.updated_at > high) high = row.updated_at;
+          if (row.updated_at) last = row.updated_at;
+        });
+        // A short page is the end of the table; an unmoved mark means the rest
+        // share one timestamp and asking again would fetch the same rows for ever.
+        if (rows.length < PAGE || last === from || guard <= 0) return null;
+        return page(t, last, guard - 1);
+      });
+    }
+
     var chain = Promise.resolve();
     TABLES.forEach(function (t) {
-      chain = chain.then(function () {
-        return Backend.changed(t.table, since, 500).then(function (rows) {
-          (rows || []).forEach(function (row) {
-            var what = Store.applyRemote(t.kind, fromRow(t.kind, row));
-            if (what === 'added') counts.added++;
-            else if (what === 'updated') counts.updated++;
-            if (row.updated_at && row.updated_at > high) high = row.updated_at;
-          });
-        });
-      });
+      chain = chain.then(function () { return page(t, since, 40); });
     });
 
     // Deletions last: applying them after the records means a row deleted and

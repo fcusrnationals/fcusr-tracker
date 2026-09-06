@@ -583,6 +583,47 @@ function makeDevice(server, name) {
     check('with who uploaded it', G2.S.org().letterheadBy === 'Arron');
   }
 
+  /* ---------------- catching up after a long time away ----------------
+     A pull used to take one page a round. The mark advanced, so the next round
+     collected the rest — but a device coming back after a term would need a
+     dozen rounds to catch up while showing "Synced" the whole way. */
+  console.log('\n--- a big catch-up finishes in one round ---');
+  {
+    const s5 = makeServer();
+    const M = makeDevice(s5, 'Maker');
+    const L = makeDevice(s5, 'Latecomer');
+    await M.Sync.now();
+    await L.Sync.now();
+
+    const unit = M.S.nationalUnitId();
+    for (let i = 0; i < 1200; i++) {
+      s5.tables.events['e' + i] = {
+        id: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'),
+        unit_id: unit, title: 'Activity ' + i, status: 'Upcoming',
+        body: { id: '00000000-0000-4000-8000-' + String(i).padStart(12, '0'),
+                unitId: unit, title: 'Activity ' + i, status: 'Upcoming',
+                updatedAt: '2026-05-01T00:00:00.000Z', createdAt: '2026-05-01T00:00:00.000Z' },
+        // After this device's mark, or they would rightly be filtered out.
+        updated_at: new Date(Date.UTC(2027, 0, 1, 0, 0, i)).toISOString()
+      };
+    }
+
+    const before = L.S.events().length;
+    const st = await L.Sync.now();
+    const gained = L.S.events().length - before;
+    check('a thousand activities arrive in one round', gained === 1200, gained + ' arrived');
+    check('and the round says how many it took in',
+      st.last && st.last.added === 1200, st.last && st.last.added);
+
+    // Nothing is fetched twice on the next round.
+    const reqs = s5.requests.filter((r) => r.op === 'changed' && r.table === 'events').length;
+    await L.Sync.now();
+    const after = s5.requests.filter((r) => r.op === 'changed' && r.table === 'events').length;
+    check('a quiet round afterwards asks once, not again for everything',
+      after - reqs === 1, (after - reqs) + ' asks');
+    check('and takes nothing in', L.S.events().length - before === 1200);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));
