@@ -662,6 +662,41 @@ function makeDevice(server, name) {
     D.w.Backend.changed = real;
   }
 
+  /* ---------------- an empty device asks for everything ----------------
+     The mark can be true and useless together: a device that was emptied keeps
+     a mark from before there was anything to take in, and then sits reporting
+     "Synced, 0 taken in" beside another phone full of the council's work. */
+  console.log('\n--- an empty device does not stay empty ---');
+  {
+    const s7 = makeServer();
+    const Full = makeDevice(s7, 'Full');
+    const Empty = makeDevice(s7, 'Empty');
+
+    // Both have synced once, so both carry a mark.
+    await Full.Sync.now();
+    await Empty.Sync.now();
+
+    /* One is emptied but keeps its mark — which is what ending a rehearsal
+       does, and what a browser restored from a backup does. resetAll clears
+       the mark as well, so the mark is put back to model the real case. */
+    const markBefore = Empty.S.syncState().pulled;
+    Empty.S.resetAll();
+    Empty.S.markSynced({ pulled: markBefore, pushed: markBefore });
+    check('it really is empty', Empty.S.events().length === 0 && Empty.S.people().length === 0);
+    check('and it still carries a mark from before', Empty.S.syncState().pulled === markBefore,
+      Empty.S.syncState().pulled);
+
+    // Meanwhile the other does some real work.
+    const ev = Full.S.addEvent({ title: 'Foundation Week', unitId: Full.S.nationalUnitId() });
+    Full.S.addTask({ eventId: ev.id, title: 'Book the gym' });
+    await Full.Sync.now();
+
+    const st = await Empty.Sync.now();
+    check('the empty one takes it in rather than reporting nothing',
+      !!Empty.S.event(ev.id), JSON.stringify(st.last));
+    check('and says how much came back', st.last && st.last.added > 0, st.last && st.last.added);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

@@ -348,6 +348,18 @@
        one field once, and both faults were in it. */
     var since = mark.pulled || '';
     var pushedSince = mark.pushed || '';
+
+    /* A device holding nothing asks for everything.
+
+       The mark means "I have already taken in everything up to here", and it
+       can be true and useless at the same time: a phone that was emptied, or
+       one whose rehearsal was ended, keeps a mark from before there was
+       anything to take in — and then sits reporting "Synced, 0 taken in" beside
+       another phone full of the council's work. An empty device has nothing to
+       lose by asking again, and everything to gain. */
+    if (since && !Store.events().length && !Store.people().length && !Store.letters().length) {
+      since = '';
+    }
     var startedAt = '';
     var deviceStart = new Date().toISOString();
 
