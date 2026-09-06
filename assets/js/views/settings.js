@@ -40,7 +40,7 @@
       'reach is decided by the two settings below.</p>' +
       '<div class="row" style="margin:12px 0">' +
         '<button type="button" class="btn btn-primary" data-enrol>' + UI.icon('plus') + 'Enrol someone</button>' +
-        '<button type="button" class="btn" data-roster>' + UI.icon('users') + 'Officer list</button>' +
+        '<button type="button" class="btn" data-roster>' + UI.icon('users') + 'Who can sign in</button>' +
         '<button type="button" class="btn" data-change-pw>Change my password</button>' +
         '<button type="button" class="btn" data-my-handover>' + UI.icon('check') + 'Before you hand over</button>' +
       '</div>' +

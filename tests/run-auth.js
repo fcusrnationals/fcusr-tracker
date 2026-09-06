@@ -172,6 +172,17 @@ window.fetch = function (url, opts) {
     };
     return reply(200, body.p_email);
   }
+  if (u.indexOf('/rest/v1/rpc/withdraw_member') === 0) {
+    const actor = SB.profiles[who];
+    if (!actor || actor.access !== 'officer') return reply(403, { message: 'You may not withdraw anyone.' });
+    const email = String(body.p_email || '').toLowerCase().trim();
+    if (actor.email === email) return reply(400, { message: 'You cannot withdraw your own access.' });
+    delete SB.enrolments[email];
+    Object.keys(SB.profiles).forEach((k) => {
+      if (SB.profiles[k].email === email) SB.profiles[k].active = false;
+    });
+    return reply(200, true);
+  }
   if (u.indexOf('/rest/v1/audit_log') === 0) return reply(200, []);
 
   return reply(404, { message: 'no route: ' + u });
@@ -340,6 +351,54 @@ const FILES = [
   await Auth.signOut();
   check('nothing is left in storage', !window.localStorage.getItem('fcusr.tracker.sb'));
   check('and the app knows nobody is signed in', !Auth.signedIn() && !Backend.session());
+
+  /* ---------------- who can sign in ----------------
+     Enrolling somebody is not the same as their having an account, and until
+     this screen existed nothing said which of the two a name was. */
+  console.log('\n--- who can sign in ---');
+  {
+    const D = window.document;
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+
+    // Somebody enrolled who has never turned up.
+    SB.enrolments['waiting.one@filamer.edu.ph'] = {
+      full_name: 'Waiting One', position: 'Auditor',
+      unit_id: CN, access: 'officer', event_ids: []
+    };
+
+    window.Forms.rosterList();
+    await new Promise((r) => setTimeout(r, 80));
+    const acc = D.querySelector('[data-acc]');
+    const txt = () => acc.textContent.replace(/\s+/g, ' ');
+
+    check('the list opens', !!acc, txt().slice(0, 70));
+    check('it names the person who has not signed in', /Waiting One/.test(txt()));
+    check('and says they are waiting', /Waiting to sign in/i.test(txt()));
+    check('the ones with accounts are listed apart', /Signed in/.test(txt()));
+    check('somebody who claimed theirs is on the signed-in side', /Rhea/.test(txt()));
+    check('a waiting enrolment offers an invitation to send',
+      !!acc.querySelector('[data-copy-one="waiting.one@filamer.edu.ph"]'));
+    check('and the invitation carries the address, not a password', (() => {
+      const msg = window.Forms.personalMessage('Waiting One', 'waiting.one@filamer.edu.ph');
+      return /waiting\.one@filamer\.edu\.ph/.test(msg) && !/password[^.]*:/i.test(msg);
+    })());
+    check('you cannot withdraw yourself',
+      !acc.querySelector('[data-withdraw="president@filamer.edu.ph"]'));
+
+    // Withdrawing a waiting enrolment removes it so nobody can claim it.
+    const before = SB.requests.length;
+    acc.querySelector('[data-withdraw="waiting.one@filamer.edu.ph"]')
+      .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    D.querySelector('.modal-backdrop [data-ok]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 80));
+    check('withdrawing calls the server', SB.requests.length > before &&
+      SB.requests.some((r) => /withdraw_member/.test(r.url)));
+    check('the enrolment is gone', !SB.enrolments['waiting.one@filamer.edu.ph']);
+    check('and the list refreshed without it', !/Waiting One/.test(txt()), txt().slice(0, 90));
+
+    D.querySelectorAll('.modal-backdrop').forEach((e) => e.remove());
+  }
 
   /* ---------------- the front door ---------------- */
   console.log('\n--- the gate ---');

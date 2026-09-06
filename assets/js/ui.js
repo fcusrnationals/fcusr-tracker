@@ -445,6 +445,35 @@
     return selectOptions(list, selectedId || '', includeUnassigned ? null : 'Select a person');
   }
 
+  /* Copying to the clipboard.
+
+     navigator.clipboard needs a secure context, so it is missing on a plain
+     http:// page and refuses in some in-app browsers. The old textarea trick
+     still works everywhere, and copying a line into a group chat is the whole
+     point of the button — so it falls back rather than failing. */
+  function copyText(text) {
+    if (global.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).catch(function () { return legacyCopy(text); });
+    }
+    return legacyCopy(text);
+  }
+
+  function legacyCopy(text) {
+    return new Promise(function (resolve, reject) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      ok ? resolve() : reject(new Error('This browser would not let the app copy.'));
+    });
+  }
+
   function downloadFile(filename, content, mime) {
     var blob = content instanceof Blob ? content : new Blob([content], { type: mime || 'application/json' });
     var url = URL.createObjectURL(blob);
@@ -464,6 +493,7 @@
     who: who, whoIndex: whoIndex, ring: ring, flashRow: flashRow, applyFlash: applyFlash,
     toast: toast, modal: modal, confirm: confirm,
     openMenu: openMenu, openStatusMenu: openStatusMenu, applyStatus: applyStatus, closeMenu: closeMenu,
-    selectOptions: selectOptions, peopleOptions: peopleOptions, downloadFile: downloadFile
+    selectOptions: selectOptions, peopleOptions: peopleOptions, downloadFile: downloadFile,
+    copyText: copyText
   };
 })(window);

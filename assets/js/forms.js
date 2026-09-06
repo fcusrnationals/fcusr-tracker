@@ -1284,36 +1284,245 @@
 
   /* The roster, generated rather than typed: names, positions and the emails
      they sign in with. */
+  /* ---------- who can sign in ----------
+
+     Enrolling somebody creates a row saying the address may have an account,
+     not an account. Until that person turns up and sets a password there is
+     nothing to sign in with — and with sixteen officers spread across nine
+     colleges, the question that decides whether a term starts on time is
+     simply "who still has not". Nothing showed it, so nobody could chase it.
+
+     Two lists, then: waiting, and in. Both come from the server, filtered by
+     the same rules that decide what anyone may see, so an LGU head gets their
+     own college and the nationals get the Republic. */
+
+  function inviteLink() {
+    var l = global.location;
+    return l ? (l.origin + l.pathname) : '';
+  }
+
+  function groupMessage() {
+    return 'FCUSR Task Tracker — your account is ready.\n\n' +
+      'Open: ' + inviteLink() + '\n' +
+      'Type your Filamer email and a password you will remember, then press Sign in.\n\n' +
+      'The first time, it will ask you to set that password. Choose it yourself — ' +
+      'nobody in the council can see it, so do not send it to anyone.';
+  }
+
+  function personalMessage(name, email) {
+    return 'Hi ' + (name || 'there') + ' — your FCUSR Task Tracker account is ready.\n\n' +
+      'Open: ' + inviteLink() + '\n' +
+      'Email: ' + email + '\n' +
+      'Then type a password you will remember and press Sign in.\n\n' +
+      'It will ask you to set that password the first time. Choose it yourself — ' +
+      'nobody in the council can see it.';
+  }
+
   function rosterList() {
-    var people = Store.people();
+    var offline = !global.Auth || Auth.isOffline();
+
     UI.modal({
-      title: 'Officer list',
+      title: 'Who can sign in',
       wide: true,
-      body: people.length
-        ? '<div class="list">' + people.map(function (p) {
-            var s = Store.stats(Store.tasks({ assigneeId: p.id }));
-            return '<div class="task"><span class="task-main" style="cursor:default">' +
-              '<span class="task-title">' + U.esc(p.name) + '</span>' +
-              '<span class="task-meta">' + U.esc(p.position || 'No position') +
-              '<span class="sep">·</span>' + s.total + ' assigned</span></span>' +
-              '<span class="task-right">' +
-              (p.active === false ? '<span class="chip st-not-started">Inactive</span>' : '') +
-              '</span></div>';
-          }).join('') + '</div>'
-        : '<p class="small muted">Nobody is enrolled yet.</p>',
+      body: '<div data-acc>' + (offline ? offlineBody() :
+        '<p class="small muted" style="margin:0">Asking the server…</p>') + '</div>',
       footer: '<button type="button" class="btn" data-close>Close</button>' +
-        '<button type="button" class="btn btn-primary" data-copy>Copy as a list</button>',
-      onMount: function (root, close) {
-        root.querySelector('[data-copy]').addEventListener('click', function () {
-          var text = Store.people().map(function (p) {
-            return [p.name, p.position || '—'].join('  —  ');
-          }).join('\n');
-          UI.downloadFile('FCUSR-Officers-' + U.today() + '.txt', text, 'text/plain');
-          UI.toast('Officer list downloaded.');
-          void close;
+        '<button type="button" class="btn btn-primary" data-download>' +
+        UI.icon('download') + 'Download the list</button>',
+      onMount: function (root) {
+        var host = root.querySelector('[data-acc]');
+        var last = { pending: [], roster: [] };
+
+        root.querySelector('[data-download]').addEventListener('click', function () {
+          UI.downloadFile('FCUSR-Accounts-' + U.today() + '.txt', asText(last), 'text/plain');
+          UI.toast('List downloaded.');
         });
+
+        if (offline) return;
+        load();
+
+        function load() {
+          Promise.all([Backend.pending(), Backend.roster()]).then(function (r) {
+            last = { pending: r[0] || [], roster: r[1] || [] };
+            paint();
+          }).catch(function (err) {
+            host.innerHTML = '<div class="empty" style="border-color:var(--st-overdue-bd);' +
+              'background:var(--st-overdue-bg)"><strong>The list could not be read.</strong>' +
+              '<p>' + U.esc(err.message || 'The server did not answer.') + '</p></div>';
+          });
+        }
+
+        function paint() {
+          host.innerHTML = view(last.pending, last.roster);
+          wire();
+        }
+
+        function wire() {
+          var g = host.querySelector('[data-copy-group]');
+          if (g) g.addEventListener('click', function () {
+            UI.copyText(groupMessage())
+              .then(function () { UI.toast('Message copied — paste it into the group chat.'); })
+              .catch(function (e) { UI.toast(e.message, 'error'); });
+          });
+
+          U.els('[data-copy-one]', host).forEach(function (b) {
+            b.addEventListener('click', function () {
+              UI.copyText(personalMessage(b.getAttribute('data-name'), b.getAttribute('data-copy-one')))
+                .then(function () { UI.toast('Copied — send it to ' + b.getAttribute('data-name') + '.'); })
+                .catch(function (e) { UI.toast(e.message, 'error'); });
+            });
+          });
+
+          U.els('[data-withdraw]', host).forEach(function (b) {
+            b.addEventListener('click', function () {
+              var email = b.getAttribute('data-withdraw');
+              var name = b.getAttribute('data-name');
+              var waiting = b.getAttribute('data-waiting') === '1';
+              UI.confirm({
+                title: 'Withdraw ' + name + '?',
+                message: waiting
+                  ? 'The enrolment for ' + email + ' is removed, so nobody can claim it. ' +
+                    'Use this when an address was wrong or the person is no longer coming in.'
+                  : email + ' will not be able to sign in again. Their tasks and everything ' +
+                    'they filed stay exactly where they are.',
+                detail: 'You can enrol the address again afterwards.',
+                confirmLabel: 'Withdraw'
+              }).then(function (ok) {
+                if (!ok) return;
+                b.disabled = true;
+                Backend.withdraw(email).then(function () {
+                  UI.toast(name + ' withdrawn.');
+                  load();
+                }).catch(function (err) {
+                  b.disabled = false;
+                  UI.toast(err.message || 'That could not be done.', 'error');
+                });
+              });
+            });
+          });
+        }
       }
     });
+  }
+
+  function offlineBody() {
+    var people = Store.people();
+    return '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+      '<div class="strong" style="margin-bottom:3px">No accounts yet</div>' +
+      '<div class="small">The Supabase project has not been connected, so nobody signs in and ' +
+      'everything stays on this device. The people below are names on tasks, not logins.</div></div>' +
+      (people.length
+        ? '<div class="list" style="margin-top:14px">' + people.map(function (p) {
+            return '<div class="task"><span class="task-main" style="cursor:default">' +
+              '<span class="task-title">' + U.esc(p.name) + '</span>' +
+              '<span class="task-meta">' + U.esc(p.position || 'No position') + '</span>' +
+              '</span></div>';
+          }).join('') + '</div>'
+        : '<p class="small muted">Nobody has been added yet.</p>');
+  }
+
+  function view(pending, roster) {
+    var active = roster.filter(function (p) { return p.active !== false; });
+    var gone = roster.filter(function (p) { return p.active === false; });
+    var mine = (global.Auth && Auth.current()) ? Auth.current().email : '';
+
+    /* Not styled as an alarm. On the first day of a term everybody is waiting,
+       and a screen that is red the moment it is doing its job teaches people to
+       stop reading it. The count on the section below carries the urgency. */
+    var html = '<div class="where-now" style="margin-bottom:16px">' +
+      '<span class="wn-label">Where things stand</span>' +
+      '<span class="wn-line">' + U.plural(active.length, 'person', 'people') + ' can sign in' +
+      (pending.length ? ' · ' + pending.length + ' still to set a password' : '') + '</span>' +
+      (pending.length
+        ? '<span class="wn-note">Nobody can be chased into a system they have not opened. ' +
+          'Send them the link.</span>'
+        : '') +
+      '</div>';
+
+    if (pending.length) {
+      html += '<div class="section" style="margin-bottom:18px">' +
+        '<div class="section-head"><h2>Waiting to sign in ' +
+        '<span class="chip st-overdue"><span class="dot"></span>' + pending.length + '</span></h2></div>' +
+        '<p class="small muted" style="margin:0 2px 10px">Enrolled, but they have not opened the site ' +
+        'and set a password yet. Until they do there is no account — only your enrolment.</p>' +
+        '<button type="button" class="btn btn-sm" style="margin-bottom:10px" data-copy-group>' +
+        'Copy the message for the group chat</button>' +
+        '<div class="list">' + pending.map(function (e) { return row(e, true, mine); }).join('') +
+        '</div></div>';
+    }
+
+    html += '<div class="section"' + (gone.length ? ' style="margin-bottom:18px"' : '') + '>' +
+      '<div class="section-head"><h2>Signed in' +
+      (active.length ? ' <span class="chip chip-plain">' + active.length + '</span>' : '') +
+      '</h2></div>';
+    html += active.length
+      ? '<div class="list">' + active.map(function (p) { return row(p, false, mine); }).join('') + '</div>'
+      : '<p class="small muted" style="margin:0 2px">Nobody has set a password yet.</p>';
+    html += '</div>';
+
+    if (gone.length) {
+      html += '<div class="section"><div class="section-head"><h2>Withdrawn ' +
+        '<span class="chip chip-plain">' + gone.length + '</span></h2></div>' +
+        '<p class="small muted" style="margin:0 2px 10px">They cannot sign in. Their work is ' +
+        'untouched, and enrolling the address again lets them back.</p>' +
+        '<div class="list">' + gone.map(function (p) { return row(p, false, mine); }).join('') +
+        '</div></div>';
+    }
+
+    return html;
+  }
+
+  function row(p, waiting, mine) {
+    var email = p.email || '';
+    var name = p.full_name || email || 'Somebody';
+    var isMe = mine && email && mine.toLowerCase() === email.toLowerCase();
+    var withdrawn = !waiting && p.active === false;
+
+    var meta = [p.position || 'No position'];
+    if (p.units && p.units.name) meta.push(p.units.name);
+
+    return '<div class="task"><span class="task-main" style="cursor:default">' +
+      '<span class="task-title">' + U.esc(name) +
+        (isMe ? ' <span class="chip chip-plain">you</span>' : '') +
+        (withdrawn ? ' <span class="chip st-not-started">Withdrawn</span>' : '') + '</span>' +
+      '<span class="task-meta">' + meta.map(U.esc).join('<span class="sep">·</span>') + '</span>' +
+      '<span class="task-meta">' + U.esc(email) + '</span>' +
+      '</span>' +
+      (isMe || withdrawn ? '' :
+        '<span class="task-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
+        (waiting
+          ? '<button type="button" class="btn btn-sm" data-copy-one="' + U.esc(email) +
+            '" data-name="' + U.esc(name) + '">Copy invite</button>'
+          : '') +
+        '<button type="button" class="btn btn-sm btn-ghost" data-withdraw="' + U.esc(email) +
+        '" data-name="' + U.esc(name) + '" data-waiting="' + (waiting ? '1' : '0') +
+        '">Withdraw</button></span>') +
+      '</div>';
+  }
+
+  function asText(last) {
+    var lines = ['FCUSR Task Tracker — who can sign in', U.fmtDate(U.today()), ''];
+    if (last.pending.length) {
+      lines.push('WAITING TO SIGN IN (' + last.pending.length + ')');
+      last.pending.forEach(function (e) {
+        lines.push('  ' + (e.full_name || '—') + '  —  ' + (e.position || 'No position') +
+          '  —  ' + (e.email || ''));
+      });
+      lines.push('');
+    }
+    var active = last.roster.filter(function (p) { return p.active !== false; });
+    lines.push('SIGNED IN (' + active.length + ')');
+    if (!active.length) lines.push('  nobody yet');
+    active.forEach(function (p) {
+      lines.push('  ' + (p.full_name || '—') + '  —  ' + (p.position || 'No position') +
+        '  —  ' + (p.email || ''));
+    });
+    var gone = last.roster.filter(function (p) { return p.active === false; });
+    if (gone.length) {
+      lines.push('', 'WITHDRAWN (' + gone.length + ')');
+      gone.forEach(function (p) { lines.push('  ' + (p.full_name || '—') + '  —  ' + (p.email || '')); });
+    }
+    return lines.join('\n') + '\n';
   }
 
   /* ---------- person ---------- */
@@ -1383,6 +1592,7 @@
     readVolunteerCSV: readVolunteerCSV, parseCSV: parseCSV,
     eventForm: eventForm, taskForm: taskForm, personForm: personForm,
     enrolForm: enrolForm, rosterList: rosterList,
+    groupMessage: groupMessage, personalMessage: personalMessage,
     field: field, showError: showError, clearErrors: clearErrors
   };
 })(window);
