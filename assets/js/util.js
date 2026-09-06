@@ -176,9 +176,38 @@
       .replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'Event';
   }
 
+  /* Identity has to survive the trip to the server and back, and be agreed on by
+     two phones that have never met — so a record is a uuid, made here rather
+     than by the database. A council works offline half the time; an id that only
+     exists once a server has seen it is no id at all.
+
+     The prefix argument is kept because forty call sites pass one, and reading
+     `U.uid('tsk')` still says what is being made. It no longer appears in the
+     value: Postgres wants a uuid, not a label. */
   function uid(prefix) {
-    return (prefix || 'id') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    void prefix;
+    var c = global.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+
+    var b = new Array(16);
+    if (c && typeof c.getRandomValues === 'function') {
+      var arr = new Uint8Array(16);
+      c.getRandomValues(arr);
+      for (var i = 0; i < 16; i++) b[i] = arr[i];
+    } else {
+      // No crypto at all — an old in-app browser, or a test sandbox.
+      for (var j = 0; j < 16; j++) b[j] = Math.floor(Math.random() * 256);
+    }
+    b[6] = (b[6] & 0x0f) | 0x40;      // version 4
+    b[8] = (b[8] & 0x3f) | 0x80;      // variant 1
+    var h = b.map(function (n) { return (n + 0x100).toString(16).slice(1); });
+    return h.slice(0, 4).join('') + '-' + h.slice(4, 6).join('') + '-' +
+           h.slice(6, 8).join('') + '-' + h.slice(8, 10).join('') + '-' +
+           h.slice(10, 16).join('');
   }
+
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function isUuid(v) { return typeof v === 'string' && UUID_RE.test(v); }
 
   /* ---------- tiny DOM helpers ---------- */
 
@@ -209,7 +238,7 @@
     daysBetween: daysBetween, daysLeft: daysLeft, daysLeftLabel: daysLeftLabel, daysLeftPrint: daysLeftPrint,
     addDays: addDays, endOfWeek: endOfWeek, startOfMonth: startOfMonth, isWithin: isWithin,
     fmtRange: fmtRange, countdown: countdown,
-    esc: esc, plural: plural, initials: initials, pct: pct, slug: slug, uid: uid,
+    esc: esc, plural: plural, initials: initials, pct: pct, slug: slug, uid: uid, isUuid: isUuid,
     el: el, els: els, on: on, debounce: debounce
   };
 })(window);

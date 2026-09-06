@@ -137,6 +137,14 @@
          ending the dry run able to keep the real work and drop the rest. */
       dryRun: { active: false, startedAt: '' },
       people: [], events: [], tasks: [], reports: [], letters: [],
+      /* What has been deleted, and when. A row removed on one phone has to stay
+         removed: without this the next device to sync sees it missing from the
+         server, decides the server is behind, and puts it back. */
+      deleted: {},
+      /* Where syncing got to. `pulled` is the server clock of the newest change
+         this device has taken in; asking for anything newer than that is the
+         whole of the pull. */
+      sync: { pulled: '', pushed: '', at: '', unitMap: {}, officeMap: {} },
       positions: DEFAULT_POSITIONS.slice(),
       committees: DEFAULT_COMMITTEES.slice(),
       org: JSON.parse(JSON.stringify(DEFAULT_ORG)),
@@ -421,6 +429,230 @@
     };
   }
 
+  /* ---------- one identity per record, everywhere ----------
+
+     Ids used to be `tsk_mtpg8fm9`: unique on this device and meaningless on any
+     other. Sync needs two phones to agree that a task is the same task, and
+     Postgres wants a uuid, so ids are uuids now.
+
+     Data saved before that carries the old shape. Rewriting an id means
+     rewriting everything that points at it in the same pass — a task's event, a
+     report's event, a letter's stops — so it is done here, over the whole state
+     at once, where nothing can be missed.
+
+     Units and offices are left alone deliberately. They are reference data
+     seeded identically on every device from a fixed code list, and their ids
+     (`unit-nat`, `office-dean`) are the same everywhere because of it. They are
+     reconciled with the server by code at the first sync instead. */
+  function normaliseIds(s) {
+    var map = {};
+    function keep(rec) {
+      if (!rec || U.isUuid(rec.id)) return;
+      var fresh = U.uid();
+      map[rec.id] = fresh;
+      rec.id = fresh;
+    }
+    s.people.forEach(keep);
+    s.events.forEach(keep);
+    s.tasks.forEach(keep);
+    s.reports.forEach(keep);
+    s.letters.forEach(keep);
+    s.letters.forEach(function (l) { l.stops.forEach(keep); });
+
+    if (!Object.keys(map).length) return s;
+    var to = function (v) { return (v && map[v]) || v; };
+
+    s.events.forEach(function (e) { e.headId = to(e.headId); });
+    s.tasks.forEach(function (t) { t.eventId = to(t.eventId); t.assigneeId = to(t.assigneeId); });
+    s.reports.forEach(function (r) { r.eventId = to(r.eventId); });
+    s.people.forEach(function (p) {
+      p.eventIds = (p.eventIds || []).map(to);
+    });
+    s.letters.forEach(function (l) { l.eventId = to(l.eventId); l.inChargeId = to(l.inChargeId); });
+
+    // Tombstones name records too, and a resurrection is exactly what they exist
+    // to prevent — so they are carried across with everything else.
+    Object.keys(s.deleted || {}).forEach(function (kind) {
+      var moved = {};
+      Object.keys(s.deleted[kind]).forEach(function (k) { moved[to(k)] = s.deleted[kind][k]; });
+      s.deleted[kind] = moved;
+    });
+    return s;
+  }
+
+  /* Called by the sync layer once it has learnt what the server calls a unit or
+     an office. Same job as above, for the two kinds that are keyed by code. */
+  function remapIds(map) {
+    var to = function (v) { return (v && map[v]) || v; };
+    var touched = false;
+    Object.keys(map).forEach(function (k) { if (map[k] !== k) touched = true; });
+    if (!touched) return false;
+
+    state.units.forEach(function (u) { u.id = to(u.id); });
+    state.offices.forEach(function (o) { o.id = to(o.id); });
+    state.events.forEach(function (e) { e.unitId = to(e.unitId); });
+    state.letters.forEach(function (l) {
+      l.unitId = to(l.unitId);
+      l.stops.forEach(function (st) { st.officeId = to(st.officeId); });
+    });
+    state.people.forEach(function (p) { p.unitId = to(p.unitId); });
+    commit();
+    return true;
+  }
+
+  /* ---------- taking in what other devices did ----------
+
+     The rule is last-write-wins, per record, on updatedAt. It is the right rule
+     for a council: two officers almost never hold the same task at the same
+     minute, and when they do, the later edit is the one that was made knowing
+     more. It is not free, and it is worth being plain about the cost — if two
+     people do edit one task within the same sync window, the earlier edit is
+     replaced rather than merged. Nothing is lost that was not overwritten by a
+     person who could see the same screen.
+
+     A deletion beats an edit of the same age, because a record deleted and then
+     re-uploaded is the failure people actually notice. */
+  var COLLECTIONS = {
+    person: { list: 'people',  clean: cleanPerson },
+    event:  { list: 'events',  clean: cleanEvent },
+    task:   { list: 'tasks',   clean: cleanTask },
+    report: { list: 'reports', clean: cleanReport },
+    letter: { list: 'letters', clean: cleanLetter },
+    office: { list: 'offices', clean: cleanOffice }
+  };
+
+  function newer(a, b) {
+    return String(a || '') > String(b || '');
+  }
+
+  /* One record from the server. Returns what happened, which is what lets the
+     sync layer report "12 in, 3 out" rather than a spinner that means nothing. */
+  function applyRemote(kind, rec) {
+    var c = COLLECTIONS[kind];
+    if (!c) return 'skipped';
+    var clean = c.clean(rec);
+    if (!clean || !U.isUuid(clean.id)) return 'skipped';
+
+    // Deleted here since: the server has not heard yet, and will on the push.
+    var gone = state.deleted[kind] && state.deleted[kind][clean.id];
+    if (gone && !newer(clean.updatedAt, gone)) return 'skipped';
+
+    var list = state[c.list];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id !== clean.id) continue;
+      if (!newer(clean.updatedAt, list[i].updatedAt)) return 'kept';
+      list[i] = clean;
+      return 'updated';
+    }
+    list.push(clean);
+    return 'added';
+  }
+
+  /* A deletion from another device. */
+  function applyRemoteDeletion(kind, rid, at) {
+    var c = COLLECTIONS[kind];
+    if (!c || !rid) return false;
+    var list = state[c.list];
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id !== rid) continue;
+      // An edit made here after the deletion elsewhere wins: somebody was
+      // working on it, which is a better reason to keep it than to drop it.
+      if (newer(list[i].updatedAt, at)) return false;
+      list.splice(i, 1);
+      found = true;
+      break;
+    }
+    if (kind === 'event') {
+      state.tasks = state.tasks.filter(function (t) { return t.eventId !== rid; });
+      state.reports = state.reports.filter(function (r) { return r.eventId !== rid; });
+    }
+    if (!state.deleted[kind]) state.deleted[kind] = {};
+    state.deleted[kind][rid] = at || nowISO();
+    return found;
+  }
+
+  /* Everything this device has that the server may not. Sent whole rather than
+     as a diff: a record is small, and a diff is a second source of truth. */
+  function outbound(since) {
+    var out = { records: {}, deletions: [] };
+    Object.keys(COLLECTIONS).forEach(function (kind) {
+      out.records[kind] = state[COLLECTIONS[kind].list].filter(function (r) {
+        return U.isUuid(r.id) && (!since || newer(r.updatedAt, since));
+      });
+    });
+    Object.keys(state.deleted).forEach(function (kind) {
+      Object.keys(state.deleted[kind]).forEach(function (rid) {
+        var at = state.deleted[kind][rid];
+        if (!since || newer(at, since)) out.deletions.push({ kind: kind, id: rid, at: at });
+      });
+    });
+    return out;
+  }
+
+  function syncState() { return state.sync; }
+
+  /* Saved, deliberately without telling anyone.
+
+     `commit()` notifies, the sync layer listens for changes so it can send them,
+     and so a sync that ended by committing would schedule the next sync — which
+     would end by committing, and so on every few seconds for as long as the app
+     is open, on every phone, forever. Nothing here is on screen: where the sync
+     got to is bookkeeping, not council work. It is written to disk and no view
+     is asked to redraw. */
+  function markSynced(patch) {
+    Object.keys(patch || {}).forEach(function (k) { state.sync[k] = patch[k]; });
+    save();
+  }
+
+  var DELETABLE = ['event', 'task', 'report', 'letter', 'person', 'office'];
+
+  /* Tombstones age out. A device that has been in a drawer for three months has
+     bigger problems than one resurrected task, and keeping every deletion for
+     the life of the council would grow without bound. */
+  var TOMBSTONE_DAYS = 120;
+
+  function cleanDeleted(d) {
+    var out = {};
+    if (!d || typeof d !== 'object') return out;
+    var cut = U.addDays(U.today(), -TOMBSTONE_DAYS);
+    DELETABLE.forEach(function (kind) {
+      var src = d[kind];
+      if (!src || typeof src !== 'object') return;
+      var keep = {};
+      Object.keys(src).slice(0, 5000).forEach(function (k) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(k)) return;
+        var at = stamp(src[k]);
+        if (at && at.slice(0, 10) >= cut) keep[k] = at;
+      });
+      if (Object.keys(keep).length) out[kind] = keep;
+    });
+    return out;
+  }
+
+  function cleanIdMap(m) {
+    var out = {};
+    if (!m || typeof m !== 'object') return out;
+    Object.keys(m).slice(0, 500).forEach(function (k) {
+      if (/^[A-Za-z0-9_-]{1,64}$/.test(k) && U.isUuid(m[k])) out[k] = m[k];
+    });
+    return out;
+  }
+
+  /* Recorded at the moment of deletion, so the next sync can say "this was
+     removed" rather than the server saying "you are missing one". */
+  function tombstone(kind, rid) {
+    if (!rid) return;
+    if (!state.deleted[kind]) state.deleted[kind] = {};
+    state.deleted[kind][rid] = nowISO();
+  }
+
+  function deletions() { return state.deleted; }
+
+  function isDeleted(kind, rid) {
+    return !!(state.deleted[kind] && state.deleted[kind][rid]);
+  }
+
   function cleanList(arr, fallback, max) {
     if (!Array.isArray(arr)) return fallback.slice();
     var seen = {};
@@ -502,6 +734,14 @@
       active: !!(data.dryRun && data.dryRun.active),
       startedAt: data.dryRun && data.dryRun.startedAt ? stamp(data.dryRun.startedAt) : ''
     };
+    s.deleted = cleanDeleted(data.deleted);
+    s.sync = {
+      pulled: data.sync && typeof data.sync.pulled === 'string' ? stamp(data.sync.pulled) : '',
+      pushed: data.sync && typeof data.sync.pushed === 'string' ? stamp(data.sync.pushed) : '',
+      at: data.sync && typeof data.sync.at === 'string' ? stamp(data.sync.at) : '',
+      unitMap: cleanIdMap(data.sync && data.sync.unitMap),
+      officeMap: cleanIdMap(data.sync && data.sync.officeMap)
+    };
     s.positions = cleanList(data.positions, DEFAULT_POSITIONS);
     s.committees = cleanList(data.committees, DEFAULT_COMMITTEES);
     s.seeded = !!data.seeded;
@@ -557,7 +797,7 @@
     });
     s.letters = s.letters.filter(function (l) { return l.stops.length > 0; });
     s.tasks.forEach(function (t) { if (!personIds[t.assigneeId]) t.assigneeId = ''; });
-    return s;
+    return normaliseIds(s);
   }
 
   function save() {
@@ -892,7 +1132,10 @@
   }
 
   function deleteEvent(id) {
+    state.tasks.forEach(function (t) { if (t.eventId === id) tombstone('task', t.id); });
+    state.reports.forEach(function (r) { if (r.eventId === id) tombstone('report', r.id); });
     state.tasks = state.tasks.filter(function (t) { return t.eventId !== id; });
+    tombstone('event', id);
     state.events = state.events.filter(function (e) { return e.id !== id; });
     commit();
   }
@@ -991,6 +1234,7 @@
   }
 
   function deleteTask(id) {
+    tombstone('task', id);
     state.tasks = state.tasks.filter(function (t) { return t.id !== id; });
     commit();
   }
@@ -1125,6 +1369,7 @@
 
   function deleteReport(eventId) {
     var r = report(eventId);
+    if (r) tombstone('report', r.id);
     state.reports = state.reports.filter(function (x) { return x.eventId !== eventId; });
     commit();
     if (r && global.AssetDB) global.AssetDB.delPrefix(r.id + ':');
@@ -1369,6 +1614,7 @@
       throw new Error('Letters have passed through that office. Set it inactive instead, ' +
         'so their trail still reads correctly.');
     }
+    tombstone('office', oid);
     state.offices = state.offices.filter(function (o) { return o.id !== oid; });
     commit();
     return true;
@@ -1570,6 +1816,7 @@
   }
 
   function deleteLetter(lid) {
+    tombstone('letter', lid);
     state.letters = state.letters.filter(function (l) { return l.id !== lid; });
     commit();
   }
@@ -2420,6 +2667,10 @@
     isStuck: isStuck, isLetterOverdue: isLetterOverdue, letterNeedsAttention: letterNeedsAttention,
     letterWhere: letterWhere, letterProgress: letterProgress, letterStats: letterStats,
     receiveStop: receiveStop, releaseStop: releaseStop, reopenStop: reopenStop,
+    applyRemote: applyRemote, applyRemoteDeletion: applyRemoteDeletion,
+    outbound: outbound, deletions: deletions, isDeleted: isDeleted,
+    syncState: syncState, markSynced: markSynced, remapIds: remapIds,
+    commit: commit,
     insertStop: insertStop, presidentOfficeId: presidentOfficeId,
     stopName: stopName, stopTurnaround: stopTurnaround, sameDesk: sameDesk,
     isPresidentOffice: isPresidentOffice, officeByCode: officeByCode,

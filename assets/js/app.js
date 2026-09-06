@@ -404,6 +404,30 @@
        date, so stacking the term reminder behind it would greet somebody with
        two dialogs on top of each other saying overlapping things. */
     if (global.TermUI && !TermUI.dryRunNotice()) TermUI.maybeRemind();
+
+    /* Syncing starts after the first screen is drawn and never before it. The
+       app is local-first: everything on screen came from this device and is
+       already correct; the network's job is to reconcile it afterwards. */
+    if (global.Sync) {
+      Sync.start();
+      Sync.subscribe(function () { paintSyncState(); });
+    }
+  }
+
+  /* The one honest signal about syncing: whether this device is behind. It goes
+     in the header rather than a settings page, because "did my change reach
+     anyone" is a question people ask while looking at the change. */
+  function paintSyncState() {
+    var el = document.getElementById('sync-state');
+    if (!el || !global.Sync) return;
+    var st = Sync.status();
+    if (!st.able) { el.hidden = true; return; }
+    el.hidden = false;
+    el.className = 'sync-state' + (st.running ? ' is-working' : st.error ? ' is-stuck' : '');
+    el.setAttribute('title', st.running ? 'Syncing…'
+      : st.error ? 'Not synced: ' + st.error
+      : st.at ? 'Everything here is on the server' : 'Not synced yet');
+    el.setAttribute('aria-label', el.getAttribute('title'));
   }
 
   global.App = { go: go, render: render, openSearch: openSearch, route: function () { return current; } };

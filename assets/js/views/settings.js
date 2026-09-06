@@ -205,10 +205,15 @@
       '</div>' +
       '</div>');
 
+    /* ---- syncing ---- */
+    html += section('sync', 'Syncing', syncNote(), syncBody());
+
     /* ---- backup ---- */
     html += section('backup', 'Backup', 'Important',
       '<div style="padding:14px">' +
-      '<p class="small muted">Everything lives in this browser only. A backup file is the only way to move the tracker to another device, or to get it back if the browser is cleared. Download one after every meeting.</p>' +
+      '<p class="small muted">' + (syncOn()
+        ? 'Your work is copied to the council\u2019s server, but a backup file is still the only thing that survives the server being emptied or the account being lost \u2014 and it is the only copy of your photographs, which are never uploaded. Download one after every meeting.'
+        : 'Everything lives in this browser only. A backup file is the only way to move the tracker to another device, or to get it back if the browser is cleared. Download one after every meeting.') + '</p>' +
       '<div class="row" style="margin-top:12px">' +
         '<button type="button" class="btn btn-primary" data-backup>' + UI.icon('download') + 'Download backup</button>' +
         '<label class="btn">' + UI.icon('upload') + 'Restore backup' +
@@ -229,6 +234,58 @@
       '</div>');
 
     return html;
+  }
+
+  function syncOn() { return !!(global.Sync && Sync.able()); }
+
+  function syncNote() {
+    if (!syncOn()) return 'Off';
+    var st = Sync.status();
+    return st.error ? 'Not syncing' : st.at ? 'On' : 'Starting';
+  }
+
+  /* What syncing does and does not do, said where somebody can act on it. The
+     part that matters most is the part people assume is handled: photographs
+     stay on the phone that took them. */
+  function syncBody() {
+    if (!syncOn()) {
+      return '<div style="padding:14px">' +
+        '<p class="small muted">Nothing is being synced. Either no server is connected, or ' +
+        'nobody is signed in \u2014 so this tracker is on this device alone, and a backup ' +
+        'file is the only way to move it.</p></div>';
+    }
+
+    var st = Sync.status();
+    var last = st.last;
+
+    return '<div style="padding:14px">' +
+      '<p class="small muted">Your activities, tasks, letters and reports are copied to the ' +
+      'council\u2019s server and picked up by everyone else signed in. It happens by itself ' +
+      'every few minutes and after every change.</p>' +
+
+      '<div class="card" style="margin-top:12px">' +
+        '<div class="strong" style="margin-bottom:3px">' +
+        (st.error ? 'Not synced' : st.at ? 'Up to date' : 'Not synced yet') + '</div>' +
+        '<div class="small muted">' + U.esc(
+          st.error ? st.error :
+          last ? (last.added + last.updated) + ' taken in, ' + last.sent + ' sent, last checked ' +
+                 U.fmtStamp(st.at)
+               : 'Checking\u2026') + '</div>' +
+      '</div>' +
+
+      '<div class="row" style="margin-top:12px">' +
+        '<button type="button" class="btn btn-primary" data-sync-now>Sync now</button>' +
+      '</div>' +
+
+      '<div class="gate-note" style="margin-top:14px">' + UI.icon('alert') +
+      '<span><strong>Photographs are not synced.</strong> They stay in the browser that took ' +
+      'them, because a term\u2019s documentation is hundreds of megabytes and would cost the ' +
+      'council both storage and everybody\u2019s data. A report begun on one phone has to be ' +
+      'finished on that phone \u2014 or its photographs added again on another.</span></div>' +
+
+      '<p class="tiny muted" style="margin-top:10px">If two people change the same thing at ' +
+      'once, the later change is the one kept.</p>' +
+      '</div>';
   }
 
   function section(key, title, meta, body) {
@@ -323,6 +380,21 @@
 
     var roster = root.querySelector('[data-roster]');
     if (roster) roster.addEventListener('click', function () { Forms.rosterList(); });
+
+    var sn = root.querySelector('[data-sync-now]');
+    if (sn) sn.addEventListener('click', function () {
+      sn.disabled = true;
+      sn.textContent = 'Syncing\u2026';
+      Sync.now({ loud: true }).then(function (st) {
+        App.render();
+        if (!st.error) {
+          var l = st.last;
+          UI.toast(l && (l.added + l.updated + l.sent)
+            ? 'Synced \u2014 ' + (l.added + l.updated) + ' in, ' + l.sent + ' out.'
+            : 'Everything was already up to date.');
+        }
+      });
+    });
 
     var cpw = root.querySelector('[data-change-pw]');
     if (cpw) cpw.addEventListener('click', function () { Auth.changePassword(); });

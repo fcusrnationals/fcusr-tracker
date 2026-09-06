@@ -49,6 +49,12 @@
     },
     pending: function () { return Promise.resolve([]); },
     withdraw: function () { return Promise.resolve(true); },
+    // Offline there is nowhere to sync to, and saying so plainly here means the
+    // sync layer needs no special case for it.
+    changed: function () { return Promise.resolve([]); },
+    upsert: function () { return Promise.resolve([]); },
+    remove: function () { return Promise.resolve(null); },
+    serverNow: function () { return Promise.resolve(null); },
     // Uses the tracker's own directory when the full app is loaded, and its own
     // list when it is not (the comparison page loads this driver on its own).
     roster: function () {
@@ -263,6 +269,51 @@
 
     units: function () { return sbFetch('/rest/v1/units?select=id,name,kind,code&order=kind,name'); },
 
+    /* ---------- the sync transport ----------
+       Four calls, deliberately dumb: what changed, write these, delete these,
+       what was deleted. Every decision about *which* records and who wins is
+       made in sync.js and store.js, where it can be read and tested without a
+       server. This part only carries things. */
+
+    // Rows changed since a moment, oldest first — so a pull interrupted halfway
+    // can be resumed from the last row it actually took in.
+    changed: function (table, since, limit) {
+      var q = '/rest/v1/' + table + '?select=*&order=updated_at.asc&limit=' + (limit || 500);
+      if (since) q += '&updated_at=gt.' + encodeURIComponent(since);
+      return sbFetch(q);
+    },
+
+    /* Upsert. `merge-duplicates` makes this an insert that becomes an update
+       when the id is already there, which is what an offline device coming back
+       always needs and what a plain insert would refuse. */
+    upsert: function (table, rows) {
+      if (!rows || !rows.length) return Promise.resolve([]);
+      return sbFetch('/rest/v1/' + table, {
+        method: 'POST',
+        body: rows,
+        headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' }
+      });
+    },
+
+    remove: function (table, ids) {
+      if (!ids || !ids.length) return Promise.resolve(null);
+      return sbFetch('/rest/v1/' + table + '?id=in.(' + ids.map(encodeURIComponent).join(',') + ')', {
+        method: 'DELETE',
+        headers: { 'Prefer': 'return=minimal' }
+      });
+    },
+
+    /* The server's own clock.
+
+       Every pull asks for "rows changed since X", and X has to be measured by
+       the same clock that stamped them. A phone running four minutes fast would
+       otherwise save a high-water mark from the future and quietly stop
+       receiving anything at all — no error, no empty state, just a device that
+       silently stops learning. */
+    serverNow: function () {
+      return sbFetch('/rest/v1/rpc/server_now', { method: 'POST', body: {} });
+    },
+
     roster: function () {
       return sbFetch('/rest/v1/profiles?select=id,email,full_name,position,access,is_head,active,units(name)&order=full_name');
     },
@@ -398,6 +449,22 @@
     },
     whoami: function () { return driver().whoami(); },
     units: function () { return driver().units(); },
+    changed: function (t, since, limit) {
+      var d = driver();
+      return d.changed ? d.changed(t, since, limit) : Promise.resolve([]);
+    },
+    upsert: function (t, rows) {
+      var d = driver();
+      return d.upsert ? d.upsert(t, rows) : Promise.resolve([]);
+    },
+    remove: function (t, ids) {
+      var d = driver();
+      return d.remove ? d.remove(t, ids) : Promise.resolve(null);
+    },
+    serverNow: function () {
+      var d = driver();
+      return d.serverNow ? d.serverNow() : Promise.resolve(null);
+    },
     roster: function () { return driver().roster(); },
     pending: function () { return driver().pending(); },
     enrol: function (m) { return driver().enrol(m); },
