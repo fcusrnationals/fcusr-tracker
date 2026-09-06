@@ -46,9 +46,14 @@
         'End the dry run</button></div>';
     }
 
-    /* ---- access and enrolment ---- */
-    html += section('access', 'Access and enrolment',
-      mineOnly ? Store.unitName(myUnit) : 'The President',
+    /* ---- people, and what they can reach ----
+       These were two tabs, and they are one subject: the list of everybody, and
+       whether each of them can sign in. Somebody looking for an officer had to
+       guess which of the two headings held them. */
+    var dupes = Store.duplicatePeopleCount();
+    html += section('access', 'People',
+      U.plural(people.length, 'person', 'people') +
+        (mineOnly ? ' \u00b7 ' + Store.unitName(myUnit) : ''),
       '<div style="padding:14px">' +
       '<p class="small muted">One form for everybody. Give somebody an email address and they ' +
       'can sign in; leave it out and they are simply somebody work can be assigned to. ' +
@@ -71,7 +76,27 @@
           'those events are running. When an event is completed their access to it ends by itself. ' +
           'Enrol them in another and it returns.</li>' +
         '</ul>' +
-      '</div></div>');
+      '</div></div>' +
+
+      /* Offered only when there is something to clear. A council that synced
+         before the dry run was kept off the server holds the same invented
+         officer once per device, and removing sixty rows by hand is not a task
+         anybody should be given. */
+      (dupes
+        ? '<div class="gate-note" style="margin:0 16px 14px">' + UI.icon('alert') +
+          '<span><strong>' + U.plural(dupes, 'duplicate') + ' on this list.</strong> ' +
+          'The same person recorded more than once \u2014 usually the rehearsal, copied ' +
+          'by each device that seeded its own. Merging keeps the first of each and moves ' +
+          'their tasks across; nothing is lost.<br>' +
+          '<button type="button" class="btn btn-sm" style="margin-top:10px" data-merge-dupes>' +
+          'Merge ' + U.plural(dupes, 'duplicate') + '</button></span></div>'
+        : '') +
+
+      (people.length
+        ? '<div class="list">' + people.map(personRow).join('') + '</div>'
+        : UI.empty('No one yet', 'Add your officers so tasks can be assigned.')) +
+      '<p class="tiny muted" style="margin:10px 16px 14px">Deactivating keeps their name on the ' +
+      'work they did. Removing takes them off the list and leaves that work unassigned.</p>');
 
     /* ---- the term ---- */
     var st = Store.termStatus();
@@ -134,30 +159,6 @@
       UI.icon('plus') + 'Add office</button>' +
       '<p class="tiny muted" style="margin:10px 0 0">An office letters have already passed ' +
       'through is set inactive rather than removed, so old trails still read correctly.</p></div>');
-
-    /* ---- directory ---- */
-    var dupes = Store.duplicatePeopleCount();
-    html += section('people', 'People', U.plural(people.length, 'officer'),
-      /* Offered only when there is something to clear. A council that synced
-         before the dry run was kept off the server is holding the same invented
-         officer once per device, and removing sixty rows by hand is not a task
-         anybody should be given. */
-      (dupes
-        ? '<div class="gate-note" style="margin:14px 16px 0">' + UI.icon('alert') +
-          '<span><strong>' + U.plural(dupes, 'duplicate') + ' on this list.</strong> ' +
-          'The same person recorded more than once \u2014 usually the rehearsal, copied ' +
-          'by each device that seeded its own. Merging keeps the first of each and moves ' +
-          'their tasks across; nothing is lost.<br>' +
-          '<button type="button" class="btn btn-sm" style="margin-top:10px" data-merge-dupes>' +
-          'Merge ' + U.plural(dupes, 'duplicate') + '</button></span></div>'
-        : '') +
-      (people.length
-        ? '<div class="list">' + people.map(personRow).join('') + '</div>'
-        : UI.empty('No one yet', 'Add your officers so tasks can be assigned.')) +
-      '<div style="padding:12px"><button type="button" class="btn btn-block" data-add-person>' +
-      UI.icon('plus') + 'Add person</button>' +
-      '<p class="tiny muted" style="margin:10px 0 0">Deactivating keeps their name on the work ' +
-      'they did. Removing takes them off the list and leaves that work unassigned.</p></div>');
 
     /* ---- positions & committees ---- */
     if (!mineOnly) html += section('roles', 'Positions and committees',
@@ -442,9 +443,9 @@
      tab cannot be worked out from a list that is still being filled in — the
      first panel would always find itself the only candidate and mark itself
      active, whatever had been chosen. */
-  var ALL_TABS = ['access', 'term', 'units', 'offices', 'people', 'roles',
+  var ALL_TABS = ['access', 'term', 'units', 'offices', 'roles',
                   'letterhead', 'sync', 'backup', 'data'];
-  var UNIT_HEAD_TABS = ['access', 'people', 'sync', 'backup'];
+  var UNIT_HEAD_TABS = ['access', 'sync', 'backup'];
 
   var active = '';
 

@@ -378,13 +378,19 @@ check('settings are tabs, not a stack of folds', $$('.set-tab').length > 4,
 check('exactly one panel is on screen', $$('.set-panel:not([hidden])').length === 1);
 check('and it is open on arrival', !!$('.set-panel:not([hidden]) [data-add-person]'));
 
-click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'people'));
-check('choosing a tab shows its panel',
-  !!$('[data-panel="people"]') && !$('[data-panel="people"]').hidden);
-check('and hides the one before it', $('[data-panel="access"]').hidden);
-check('directory lists officers', text().includes('Althea Ramirez'));
+/* The roster and who may sign in are one subject and one tab. They were two,
+   and somebody looking for an officer had to guess which heading held them. */
+check('there is no separate People tab', !$('[data-set-tab="people"]'),
+  $$('.set-tab').map((b) => b.textContent).join(' | '));
+check('the roster is on the same panel as enrolment',
+  !!$('.set-panel:not([hidden]) [data-add-person]') && text().includes('Althea Ramirez'));
 check('deactivate is offered', text().includes('Deactivate'));
 check('and so is removing somebody outright', !!$('[data-remove-person]'));
+
+click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'units'));
+check('choosing a tab shows its panel',
+  !!$('[data-panel="units"]') && !$('[data-panel="units"]').hidden);
+check('and hides the one before it', $('[data-panel="access"]').hidden);
 
 click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'backup'));
 check('backup offered', !!$('[data-backup]') && !!$('#restore-file'));
