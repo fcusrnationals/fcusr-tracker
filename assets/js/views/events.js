@@ -4,7 +4,12 @@
 (function (global) {
   'use strict';
 
-  var state = { archivedOpen: false, unitId: '' };
+  /* `unitId` is which unit's activities are on screen. It starts unset and is
+     filled in on the first render with whoever is signed in, because your own
+     unit is what you came here for — a national opening this tab wants the
+     national activities, not nine colleges' worth to scroll through. "All units"
+     is still one tap away for the times when the Republic is the question. */
+  var state = { archivedOpen: false, unitId: '', picked: false };
 
   /* The National officers work across the whole Republic, so they get a unit
      picker here and a unit badge on each row. Everyone else only ever sees one
@@ -15,6 +20,7 @@
 
   /* Opened from the Overview roll-up: show one unit's events. */
   function showUnit(unitId) {
+    state.picked = true;
     state.unitId = Store.unit(unitId) ? unitId : '';
     App.go('#/events');
     App.render();
@@ -28,6 +34,13 @@
     // A unit that has been removed or deactivated stops filtering rather than
     // showing an empty screen with no way back.
     var republic = seesRepublic();
+
+    // Once, on the way in. Afterwards the choice is the person's.
+    if (republic && !state.picked) {
+      state.picked = true;
+      state.unitId = (global.Auth && Auth.signedIn())
+        ? Auth.myUnitId() : Store.nationalUnitId();
+    }
     if (state.unitId && !Store.unit(state.unitId)) state.unitId = '';
     var picked = republic ? state.unitId : '';
     if (picked) all = all.filter(function (e) { return e.unitId === picked; });
@@ -125,11 +138,16 @@
 
     var pick = root.querySelector('#unit-pick');
     if (pick) pick.addEventListener('change', function () {
+      state.picked = true;
       state.unitId = pick.value;
       App.render();
     });
     U.els('[data-clear-unit]', root).forEach(function (b) {
-      b.addEventListener('click', function () { state.unitId = ''; App.render(); });
+      b.addEventListener('click', function () {
+        state.picked = true;          // "All units" is a choice, not the absence of one
+        state.unitId = '';
+        App.render();
+      });
     });
     U.els('[data-open-event]', root).forEach(function (b) {
       b.addEventListener('click', function () { App.go('#/events/' + b.getAttribute('data-open-event')); });

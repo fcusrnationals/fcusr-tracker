@@ -245,7 +245,10 @@ goto('#/events/' + created.id);
 check('empty state invites the first task', text().includes('No tasks under this event yet'));
 check('add form already open', !!$('#a-title'));
 
-const people = S.people();
+/* The people this activity may actually be assigned to: the unit that owns it,
+   plus anyone taken on for it in particular. Not the whole Republic — a
+   national officer should not scroll past nine colleges to find their own. */
+const people = S.assignable(created.id);
 ['Book the auditorium', 'Prepare the agenda', 'Invite the deans'].forEach((t, i) => {
   setValue($('#a-title'), t);
   setValue($('#a-assignee'), people[i].id);
@@ -255,6 +258,14 @@ check('three tasks added in a row', S.tasks({ eventId: created.id }).length === 
 check('form stays open', !!$('#a-title'));
 check('title clears each time', $('#a-title').value === '');
 check('assignee carries over', $('#a-assignee').value === people[2].id);
+check('the picker offers this unit, not the Republic',
+  people.length < S.people().length && people.every((p2) => p2.unitId === created.unitId),
+  people.length + ' of ' + S.people().length);
+check('and somebody from another college is not on offer',
+  !$$('#a-assignee option').some((o) => {
+    const p2 = S.person(o.value);
+    return p2 && p2.unitId !== created.unitId;
+  }));
 check('task cannot exist outside an event',
   (() => { try { S.addTask({ title: 'x' }); return false; } catch (e) { return true; } })());
 

@@ -102,7 +102,7 @@
         : '') +
       '</div>';
 
-    if (state.addOpen && mine) html += addForm();
+    if (state.addOpen && mine) html += addForm(e);
 
     if (!all.length) {
       return html + UI.empty(
@@ -308,7 +308,7 @@
       U.esc(label) + '</button>';
   }
 
-  function addForm() {
+  function addForm(e) {
     var d = state.draft;
     return '<div class="card" style="border-color:var(--gold-300);background:var(--gold-50);margin-bottom:14px">' +
       '<div class="field"><label for="a-title">Task <span class="req">*</span></label>' +
@@ -316,7 +316,7 @@
       '<div class="error-text" hidden>Give the task a title.</div></div>' +
       '<div class="field-row">' +
         '<div class="field"><label for="a-assignee">Assigned to</label>' +
-        '<select id="a-assignee">' + UI.peopleOptions(d.assigneeId, true) + '</select></div>' +
+        '<select id="a-assignee">' + UI.peopleOptions(d.assigneeId, true, e.id) + '</select></div>' +
         '<div class="field"><label for="a-due">Due date</label>' +
         '<input type="date" id="a-due" value="' + U.esc(d.dueDate) + '"></div>' +
       '</div>' +

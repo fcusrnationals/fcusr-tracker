@@ -406,6 +406,35 @@ function makeDevice(server, name) {
     A.w.Backend.changed = real;
   }
 
+  /* ---------------- the rehearsal stays at home ----------------
+     Each device seeds its own dry run, with its own ids. Pushing it means two
+     phones merge two rehearsals and the council sees every invented officer
+     twice — which is exactly what was reported. */
+  console.log('\n--- the dry run does not travel ---');
+  {
+    const D1 = makeDevice(server, 'Seeded');
+    const sampleCount = D1.S.people().filter((p) => p.sample).length;
+    check('the device seeded a rehearsal', sampleCount > 0, sampleCount + ' invented people');
+
+    const before = Object.keys(server.tables.people).length;
+    await D1.Sync.now();
+    check('none of it was sent', Object.keys(server.tables.people).length === before,
+      before + ' → ' + Object.keys(server.tables.people).length);
+
+    // And a rehearsal already on the server, from a version that did push it,
+    // is not taken in by anybody.
+    server.tables.people['ghost-sample'] = {
+      id: '33333333-3333-4333-8333-333333333333',
+      body: { id: '33333333-3333-4333-8333-333333333333', name: 'Invented Officer',
+              sample: true, active: true, unitId: natA, updatedAt: '2030-01-01T00:00:00.000Z' },
+      updated_at: '2030-01-01T00:00:00.000Z'
+    };
+    await A.Sync.now();
+    check('and one already up there is ignored',
+      !A.S.people().some((p) => p.name === 'Invented Officer'));
+    delete server.tables.people['ghost-sample'];
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

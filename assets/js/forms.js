@@ -83,7 +83,7 @@
       '<div class="field-row">' +
       field({
         name: 'headId', label: 'Event head',
-        control: '<select id="f-headId">' + UI.peopleOptions(e.headId, true).replace('>Unassigned<', '>Not set yet<') + '</select>'
+        control: '<select id="f-headId">' + UI.peopleOptions(e.headId, true, e.id).replace('>Unassigned<', '>Not set yet<') + '</select>'
       }) +
       field({
         name: 'status', label: 'Status',
@@ -161,7 +161,7 @@
       '<div class="field-row">' +
       field({
         name: 'assigneeId', label: 'Assigned to',
-        control: '<select id="f-assigneeId">' + UI.peopleOptions(t.assigneeId, true) + '</select>'
+        control: '<select id="f-assigneeId">' + UI.peopleOptions(t.assigneeId, true, t.eventId) + '</select>'
       }) +
       field({
         name: 'dueDate', label: 'Due date',

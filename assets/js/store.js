@@ -532,6 +532,8 @@
     if (!c) return 'skipped';
     var clean = c.clean(rec);
     if (!clean || !U.isUuid(clean.id)) return 'skipped';
+    // Somebody's rehearsal, from a version that used to push them. Not ours.
+    if (clean.sample) return 'skipped';
 
     // Deleted here since: the server has not heard yet, and will on the push.
     var gone = state.deleted[kind] && state.deleted[kind][clean.id];
@@ -578,6 +580,12 @@
     var out = { records: {}, deletions: [] };
     Object.keys(COLLECTIONS).forEach(function (kind) {
       out.records[kind] = state[COLLECTIONS[kind].list].filter(function (r) {
+        /* The dry run stays on the device that made it. Each device seeds its
+           own copy with its own ids, so syncing them merges two rehearsals into
+           one and the council sees every invented officer twice. It is a
+           rehearsal, not the council's work, and it has no business on a server
+           everybody shares. */
+        if (r.sample) return false;
         return U.isUuid(r.id) && (!since || newer(r.updatedAt, since));
       });
     });
@@ -824,7 +832,37 @@
     opts = opts || {};
     var list = state.people.slice();
     if (opts.activeOnly) list = list.filter(function (p) { return p.active !== false; });
+    if (opts.unitId) list = list.filter(function (p) { return p.unitId === opts.unitId; });
     return list.sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }
+
+  /* Who may be given a task on this activity.
+
+     Not everybody in the Republic, which is what the picker used to offer: a
+     national officer scrolled past every college's roster to find one of their
+     own. It is the unit that owns the activity, plus anybody taken on for this
+     activity in particular — which is how somebody from a college comes to be
+     working on a national event without leaving their college. */
+  function assignable(eventId) {
+    var e = event(eventId);
+    var unitId = e ? e.unitId : nationalUnitId();
+    var seen = {};
+    var out = [];
+
+    people({ activeOnly: true, unitId: unitId }).forEach(function (p) {
+      seen[p.id] = true;
+      out.push(p);
+    });
+
+    if (eventId) {
+      people({ activeOnly: true }).forEach(function (p) {
+        if (seen[p.id]) return;
+        if ((p.eventIds || []).indexOf(eventId) < 0) return;
+        seen[p.id] = true;
+        out.push(p);
+      });
+    }
+    return out.sort(function (a, b) { return a.name.localeCompare(b.name); });
   }
 
   function person(id) {
@@ -2365,6 +2403,23 @@
 
   function clearSampleData() {
     var removedEvents = state.events.filter(function (e) { return e.sample; }).map(function (e) { return e.id; });
+
+    /* Tombstoned as well as removed. A version of this app used to push the
+       rehearsal to the server, so a council that has already synced has
+       invented officers and activities sitting there. Recording the deletions
+       is what sweeps them off it rather than leaving them for every device to
+       keep ignoring. */
+    state.events.forEach(function (e) { if (e.sample) tombstone('event', e.id); });
+    state.tasks.forEach(function (t) {
+      if (t.sample || removedEvents.indexOf(t.eventId) >= 0) tombstone('task', t.id);
+    });
+    state.letters.forEach(function (l) {
+      if (l.sample || removedEvents.indexOf(l.eventId) >= 0) tombstone('letter', l.id);
+    });
+    state.people.forEach(function (p) { if (p.sample) tombstone('person', p.id); });
+    state.reports.forEach(function (r) {
+      if (removedEvents.indexOf(r.eventId) >= 0) tombstone('report', r.id);
+    });
     state.events = state.events.filter(function (e) { return !e.sample; });
     state.letters = state.letters.filter(function (l) {
       return !l.sample && removedEvents.indexOf(l.eventId) === -1;
@@ -2780,6 +2835,7 @@
     overrideCompliance: overrideCompliance, setOverallLink: setOverallLink, closeTerm: closeTerm,
     report: report, reports: reports, saveReport: saveReport, deleteReport: deleteReport,
     people: people, person: person, personName: personName, personByEmail: personByEmail,
+    assignable: assignable,
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
     addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
     deletePerson: deletePerson, personHolds: personHolds,

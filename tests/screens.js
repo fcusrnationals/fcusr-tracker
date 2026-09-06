@@ -65,10 +65,29 @@ const SCREENS = [
     await page.goto(BASE + (hash || '#/events/' + eventId), { waitUntil: 'networkidle0' });
     await new Promise((r) => setTimeout(r, 250));
 
+    /* Menus and dialogs are drawn on demand, so an audit that only walks screens
+       never measures them. The popup menu shipped with a delete icon a hundred
+       and sixty pixels tall — bigger than the button holding it — because its
+       icons had no size rule and nothing here ever opened one. */
+    await page.evaluate(() => {
+      const m = document.querySelector('[data-more]');
+      if (m) m.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
     const report = await page.evaluate(() => {
       const doc = document.documentElement;
       const vw = doc.clientWidth;
       const wide = [];
+      const huge = [];
+      document.querySelectorAll('.ico').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.width > 32 || r.height > 32) {
+          huge.push(Math.round(r.width) + 'x' + Math.round(r.height) + ' in ' +
+            (el.parentElement ? el.parentElement.tagName.toLowerCase() + '.' +
+              String(el.parentElement.className || '').trim().split(/\s+/)[0] : '?'));
+        }
+      });
       document.querySelectorAll('body *').forEach((el) => {
         const r = el.getBoundingClientRect();
         if (!r.width || getComputedStyle(el).position === 'fixed') return;
@@ -107,15 +126,18 @@ const SCREENS = [
             ' "' + (el.textContent || '').trim().slice(0, 20) + '"');
         }
       });
-      return { vw, sw: doc.scrollWidth, wide: wide.slice(0, 6), small: small.slice(0, 6) };
+      return { vw, sw: doc.scrollWidth, wide: wide.slice(0, 6), small: small.slice(0, 6),
+               huge: huge.slice(0, 6) };
     });
 
-    const bad = report.sw > report.vw || report.wide.length || report.small.length;
+    const bad = report.sw > report.vw || report.wide.length || report.small.length ||
+      report.huge.length;
     if (bad) faults++;
     console.log((bad ? 'FAULT ' : '  ok  ') + name + '  (viewport ' + report.vw +
       ', scrollWidth ' + report.sw + ')');
     report.wide.forEach((w) => console.log('        overflows: ' + w));
     report.small.forEach((s) => console.log('        small target: ' + s));
+    report.huge.forEach((h) => console.log('        oversized icon: ' + h));
 
     await page.screenshot({ path: path.join(OUT, tag + '-' + name + '.png'), fullPage: true });
   }

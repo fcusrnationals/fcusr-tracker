@@ -149,6 +149,14 @@ a { color: var(--gold-700); }
 }
 .appbar-spacer { flex: 1; }
 
+/* An icon's size no longer depends on somebody having written a rule for the
+   thing that contains it. Every place that wants a different size still says
+   so; every place that forgets gets something sensible instead of an SVG at
+   its intrinsic size, which is how the popup menu ended up with a delete icon
+   taller than the button it was in. */
+.ico { width: 17px; height: 17px; flex: 0 0 17px; }
+.menu button .ico { width: 18px; height: 18px; flex: 0 0 18px; }
+
 /* Which department a line belongs to, where a list spans more than one. First
    in the meta line, because when the list crosses the Republic that is the
    question being asked while reading it. */
