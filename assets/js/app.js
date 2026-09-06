@@ -559,13 +559,37 @@
             'happens by itself after every change and every few minutes.</p>') +
         (l ? '<p class="small muted">Last round: ' + (l.added + l.updated) + ' taken in, ' +
              l.sent + ' sent, ' + U.esc(U.fmtStamp(st.at)) + '.</p>' : '') +
+
+        /* Nothing in and nothing out, on a device that plainly holds work, is
+           not "up to date" — it is a device that believes it has already sent
+           what it never sent. Saying so here, where people actually tap, rather
+           than only in a settings panel they have no reason to open. */
+        (l && !l.sent && !(l.added + l.updated) && Store.events().length
+          ? '<div class="gate-note" style="margin-top:12px">' + UI.icon('alert') +
+            '<span>Nothing went either way. If something you made is missing on ' +
+            'another device, this device may believe it already sent it \u2014 ' +
+            '<strong>Send everything again</strong> below puts that right. Nothing is lost.</span></div>'
+          : '') +
         '<p class="tiny muted">Photographs are never synced — they stay in the browser that ' +
         'took them.</p>',
       footer: '<button type="button" class="btn" data-close>Close</button>' +
+        '<button type="button" class="btn" data-resend data-close>Send everything again</button>' +
         '<button type="button" class="btn btn-primary" data-retry data-close>Try now</button>',
       onMount: function (root) {
         var r = root.querySelector('[data-retry]');
         if (r) r.addEventListener('click', function () { Sync.now({ loud: true }); });
+        var again = root.querySelector('[data-resend]');
+        if (again) again.addEventListener('click', function () {
+          Store.resetSyncMarks();
+          Sync.now({ loud: true }).then(function (out) {
+            render();
+            var l2 = out.last;
+            if (!out.error) {
+              UI.toast('Sent ' + ((l2 && l2.sent) || 0) + ', took in ' +
+                ((l2 && (l2.added + l2.updated)) || 0) + '.');
+            }
+          });
+        });
       }
     });
   }
