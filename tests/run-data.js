@@ -403,6 +403,39 @@ console.log('\n--- routing a letter ---');
   check('the trail kept both passes at that office',
     L.stops.filter((x) => x.officeId === osa.id).length === 2);
 
+  /* ---- removing somebody from the directory ----
+     Different from deactivating, and the difference matters: an officer whose
+     term ended keeps their name on the work they did, but a name typed twice by
+     mistake should simply go. What they were holding is released, never deleted
+     with them — a task outliving its assignee is a record; a task deleted
+     because somebody left is a hole in one. */
+  {
+    const keep = S3.addPerson({ name: 'Twice Entered', position: 'Secretary' });
+    const ev2 = S3.addEvent({ title: 'Membership Drive', unitId: S3.nationalUnitId() });
+    const t1 = S3.addTask({ eventId: ev2.id, title: 'Draft the form', assigneeId: keep.id });
+    S3.updateEvent(ev2.id, { headId: keep.id });
+    const l3 = S3.addLetter({
+      subject: 'Venue request for the drive', unitId: S3.nationalUnitId(),
+      inChargeId: keep.id, officeIds: [S3.officeByCode('OSA').id]
+    });
+
+    const holds = S3.personHolds(keep.id);
+    check('what they hold is counted before the fact',
+      holds.tasks === 1 && holds.events === 1 && holds.letters === 1, JSON.stringify(holds));
+
+    S3.deletePerson(keep.id);
+    check('they are gone from the directory', !S3.person(keep.id));
+    check('but the task they held is not', !!S3.task(t1.id));
+    check('it is simply unassigned', S3.task(t1.id).assigneeId === '');
+    check('the activity keeps going without a head', !!S3.event(ev2.id) && S3.event(ev2.id).headId === '');
+    check('and the letter still says who was carrying it',
+      S3.letter(l3.id).inChargeName === 'Twice Entered',
+      S3.letterInCharge(S3.letter(l3.id)));
+    check('the removal is recorded so it does not come back on the next sync',
+      !!(S3.deletions().person && Object.keys(S3.deletions().person).length));
+    check('removing somebody who is not there is harmless', S3.deletePerson('nobody') === false);
+  }
+
   /* ---- the council's own routes ----
      Copied from the FCUSR's briefing. A route that quietly loses a desk is the
      failure mode that matters, so the templates are checked against the list as

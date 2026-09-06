@@ -344,8 +344,16 @@
           '<span class="sep">·</span>' + s.done + ' of ' + s.total + ' done' +
           (s.overdue ? '<span class="sep">·</span><span class="late">' + s.overdue + ' overdue</span>' : '') +
         '</span></button>' +
-      '<span class="task-right"><button type="button" class="btn btn-sm" data-toggle-active="' + U.esc(p.id) + '">' +
-        (p.active === false ? 'Reactivate' : 'Deactivate') + '</button></span>' +
+      /* Two different things, and only the person doing it knows which this is.
+         Deactivating suits an officer whose term ended — their name stays on the
+         work they did. Removing suits a name that should never have been here:
+         a typo, a duplicate, somebody put in the wrong unit. */
+      '<span class="task-right" style="display:flex;gap:6px">' +
+        '<button type="button" class="btn btn-sm" data-toggle-active="' + U.esc(p.id) + '">' +
+          (p.active === false ? 'Reactivate' : 'Deactivate') + '</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" data-remove-person="' + U.esc(p.id) + '" ' +
+          'aria-label="Remove ' + U.esc(p.name) + ' from the list">Remove</button>' +
+      '</span>' +
     '</div>';
   }
 
@@ -463,6 +471,36 @@
     U.els('[data-edit-person]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.personForm(b.getAttribute('data-edit-person')); });
     });
+    U.els('[data-remove-person]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var p = Store.person(b.getAttribute('data-remove-person'));
+        if (!p) return;
+        var holds = Store.personHolds(p.id);
+
+        var parts = [];
+        if (holds.tasks) parts.push(U.plural(holds.tasks, 'task') + ' assigned to them');
+        if (holds.events) parts.push(U.plural(holds.events, 'activity', 'activities') + ' they head');
+        if (holds.letters) parts.push(U.plural(holds.letters, 'letter') + ' they are carrying');
+
+        UI.confirm({
+          title: 'Remove ' + p.name + '?',
+          message: holds.total
+            ? p.name + ' is holding ' + parts.join(', ') + '. Those are kept \u2014 the ' +
+              'tasks simply become unassigned, and the letters keep their name as text \u2014 ' +
+              'but nobody will be answerable for them until somebody else is put on.'
+            : p.name + ' is not holding anything, so nothing else changes.',
+          detail: 'If they were an officer whose term has ended, deactivate them instead: ' +
+            'their name then stays on the work they did.',
+          confirmLabel: 'Remove from the list'
+        }).then(function (ok) {
+          if (!ok) return;
+          Store.deletePerson(p.id);
+          UI.toast(p.name + ' removed.' + (holds.tasks
+            ? ' ' + U.plural(holds.tasks, 'task') + ' now unassigned.' : ''));
+        });
+      });
+    });
+
     U.els('[data-toggle-active]', root).forEach(function (b) {
       b.addEventListener('click', function () {
         var p = Store.person(b.getAttribute('data-toggle-active'));

@@ -904,6 +904,56 @@
   // People are deactivated, never deleted, so past tasks keep their assignee.
   function setPersonActive(id, active) { return updatePerson(id, { active: active }); }
 
+  /* What removing somebody would actually disturb. Asked before the fact so the
+     confirmation can say it, rather than after, when it is a surprise. */
+  function personHolds(id) {
+    var assigned = state.tasks.filter(function (t) { return t.assigneeId === id; }).length;
+    var heads = state.events.filter(function (e) { return e.headId === id; }).length;
+    var carries = state.letters.filter(function (l) {
+      return l.inChargeId === id && l.status === 'Routing';
+    }).length;
+    return { tasks: assigned, events: heads, letters: carries,
+             total: assigned + heads + carries };
+  }
+
+  /* Removing a person, as opposed to deactivating one.
+
+     Deactivating is right for an officer whose term ended: their name stays on
+     the work they did, which is the whole point of a record. Removing is for a
+     name that should never have been in the list — a typo, a duplicate, someone
+     added to the wrong unit. Both are needed, and only the person doing it can
+     tell which case this is.
+
+     Whatever they held is released rather than deleted with them. A task
+     survives losing its assignee; deleting the task because the person left
+     would destroy the council's own record of the work. */
+  function deletePerson(id) {
+    var p = person(id);
+    if (!p) return false;
+
+    state.tasks.forEach(function (t) {
+      if (t.assigneeId === id) { t.assigneeId = ''; t.updatedAt = nowISO(); }
+    });
+    state.events.forEach(function (e) {
+      if (e.headId === id) { e.headId = ''; e.updatedAt = nowISO(); }
+    });
+    state.letters.forEach(function (l) {
+      if (l.inChargeId !== id) return;
+      // The name is kept as typed text so the trail still says who was carrying it.
+      l.inChargeId = '';
+      if (!l.inChargeName) l.inChargeName = p.name;
+      l.updatedAt = nowISO();
+    });
+
+    tombstone('person', id);
+    state.people = state.people.filter(function (x) { return x.id !== id; });
+    // The assignee picker remembers whoever was chosen last; it must not
+    // remember somebody who is no longer in the directory.
+    if (lastPerson() === id) setLastPerson('');
+    commit();
+    return true;
+  }
+
   /* ---------- units ---------- */
 
   function units(opts) {
@@ -2731,6 +2781,7 @@
     people: people, person: person, personName: personName, personByEmail: personByEmail,
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
     addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
+    deletePerson: deletePerson, personHolds: personHolds,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
     needsFeedback: needsFeedback, setFeedbackLink: setFeedbackLink,
     waiveFeedback: waiveFeedback, restoreFeedback: restoreFeedback,
