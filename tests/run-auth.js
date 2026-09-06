@@ -194,7 +194,7 @@ const FILES = [
   'assets/js/asset-db.js', 'assets/js/camera.js', 'assets/js/accomplishment.js',
   'assets/js/accomplishment-pdf.js', 'assets/js/accomplishment-word.js',
   'assets/js/accomplishment-ui.js', 'assets/js/backend/config.js', 'assets/js/backend/backend.js',
-  'assets/js/auth.js', 'assets/js/term-ui.js', 'assets/js/term-pdf.js', 'assets/js/letter-slip.js', 'assets/js/views/signin.js', 'assets/js/views/dashboard.js', 'assets/js/views/mytasks.js',
+  'assets/js/auth.js', 'assets/js/term-ui.js', 'assets/js/term-pdf.js', 'assets/js/letter-slip.js', 'assets/js/roster-pdf.js', 'assets/js/views/signin.js', 'assets/js/views/dashboard.js', 'assets/js/views/mytasks.js',
   'assets/js/views/directives.js', 'assets/js/views/events.js', 'assets/js/views/event-detail.js',
   'assets/js/views/letters.js', 'assets/js/views/letter-detail.js',
   'assets/js/views/settings.js', 'assets/js/forms.js', 'assets/js/app.js'

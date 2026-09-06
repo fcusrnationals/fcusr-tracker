@@ -255,6 +255,54 @@ function table(census) {
      times in three different files, always because the code asked the document
      how many pages it had instead of asking the table which of ITS pages this
      was. Counted per sheet, once, every time. */
+  /* ---------------- who can sign in ----------------
+     A roster sheet an adviser asks for and somebody files, so it goes on the
+     letterhead like everything else. Read back off the page rather than trusted:
+     the letterhead-over-content fault has shipped three times in this project,
+     always in a table that spilled onto a second sheet. */
+  console.log('\n--- the roster sheet ---');
+  {
+    const roster = await page.evaluate(async () => {
+      const many = [];
+      for (let i = 0; i < 40; i++) {
+        many.push({
+          full_name: 'Officer Number ' + i, position: 'Senator',
+          email: 'officer' + i + '@filamer.edu.ph', active: true,
+          units: { name: 'FCUSR Nationals' }
+        });
+      }
+      const doc = await RosterPDF.build({
+        roster: many.concat([{ full_name: 'Withdrawn One', position: 'Auditor',
+          email: 'gone@filamer.edu.ph', active: false, units: { name: 'College of Nursing' } }]),
+        pending: [{ full_name: 'Waiting One', position: 'Treasurer',
+          email: 'waiting@filamer.edu.ph', units: { name: 'FCUSR Nationals' } }]
+      });
+      const pages = doc.internal.getNumberOfPages();
+      const streams = [];
+      for (let i = 1; i <= pages; i++) streams.push((doc.internal.pages[i] || []).join('\n'));
+      const headMatch = streams[0].match(/\/([A-Za-z0-9]+) Do/);
+      const headName = headMatch ? headMatch[1] : null;
+      return {
+        pages,
+        census: streams.map((st, i) => ({
+          page: i + 1,
+          letterheads: headName
+            ? (st.match(new RegExp('/' + headName + ' Do', 'g')) || []).length : 0,
+          texts: (st.match(/(?:\([^)]*\)|<[0-9A-Fa-f\s]*>)\s*T[jJ]/g) || []).length
+        }))
+      };
+    });
+
+    console.log('  ' + roster.pages + ' sheets');
+    check('it runs past one sheet with a real roster', roster.pages > 1, roster.pages + ' sheets');
+    check('every sheet carries the letterhead exactly once',
+      roster.census.every((c) => c.letterheads === 1),
+      JSON.stringify(roster.census.map((c) => c.letterheads)));
+    check('and none of them is blank',
+      roster.census.every((c) => c.texts > 2),
+      JSON.stringify(roster.census.map((c) => c.texts)));
+  }
+
   console.log('\n--- the end-of-term record ---');
   const term = await page.evaluate(async () => {
     await window.Auth.signIn('', '');

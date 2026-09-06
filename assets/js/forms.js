@@ -1553,14 +1553,25 @@ body: '<p class="small">Send them the link to the tracker and this line:</p>' +
         '<p class="small muted" style="margin:0">Asking the server…</p>') + '</div>',
       footer: '<button type="button" class="btn" data-close>Close</button>' +
         '<button type="button" class="btn btn-primary" data-download>' +
-        UI.icon('download') + 'Download the list</button>',
+        UI.icon('pdf') + 'Download as PDF</button>',
       onMount: function (root) {
         var host = root.querySelector('[data-acc]');
         var last = { pending: [], roster: [] };
 
-        root.querySelector('[data-download]').addEventListener('click', function () {
-          UI.downloadFile('FCUSR-Accounts-' + U.today() + '.txt', asText(last), 'text/plain');
-          UI.toast('List downloaded.');
+        var dl = root.querySelector('[data-download]');
+        dl.addEventListener('click', function () {
+          /* On the council's letterhead rather than as a text file: this is a
+             document an adviser asks for and somebody files, not a data dump. */
+          if (!global.RosterPDF) {
+            UI.downloadFile('FCUSR-WhoCanSignIn-' + U.today() + '.txt', asText(last), 'text/plain');
+            return UI.toast('List downloaded.');
+          }
+          dl.disabled = true;
+          RosterPDF.save(last).then(function () {
+            UI.toast('Downloaded. It carries no passwords — this system holds none.');
+          }).catch(function (err) {
+            UI.toast(err.message || 'The list could not be made.', 'error');
+          }).then(function () { dl.disabled = false; });
         });
 
         if (offline) return;
