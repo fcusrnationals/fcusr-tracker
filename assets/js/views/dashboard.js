@@ -152,8 +152,6 @@
     });
 
     var events = busy.reduce(function (n, r) { return n + r.s.events; }, 0);
-
-    var events = busy.reduce(function (n, r) { return n + r.s.events; }, 0);
     var chase = busy.filter(function (r) { return r.s.overdue > 0; });
     var sealed = Store.units({ activeOnly: true, independentOnly: true });
 

@@ -447,8 +447,26 @@
      existed, scattered across four screens; the work here is putting it in one
      place and saying plainly what is still owed. */
 
+  /* What is still owed, and by whom.
+
+     A National executive is answerable for the Republic, not only for their own
+     desk, so for them this reaches across every unit they may see and each line
+     says which department it belongs to. A Governor sees their own college, and
+     naming the department on every row would be repeating the page title. */
+  function seesRepublic() {
+    return !global.Auth || !Auth.signedIn() || Auth.isNational();
+  }
+
+  function owedUnits(unitId) {
+    if (!seesRepublic()) return [unitId];
+    return Store.units({ activeOnly: true, governed: true }).map(function (u) { return u.id; });
+  }
+
   function myOwed(unitId) {
-    var evs = Store.events({ unitId: unitId });
+    var evs = [];
+    owedUnits(unitId).forEach(function (uid) {
+      evs = evs.concat(Store.events({ unitId: uid }));
+    });
     var unfinished = [], unfiled = [], unvouched = [];
 
     evs.forEach(function (e) {
@@ -462,7 +480,10 @@
       else if (!r.driveOwned) unvouched.push({ event: e, report: r });
     });
 
-    var letters = Store.letters({ unitId: unitId, openOnly: true });
+    var letters = [];
+    owedUnits(unitId).forEach(function (uid) {
+      letters = letters.concat(Store.letters({ unitId: uid, openOnly: true }));
+    });
 
     return {
       unfinished: unfinished, unfiled: unfiled, unvouched: unvouched, letters: letters,
@@ -475,6 +496,7 @@
     var unit = Store.unit(unitId);
     var owed = myOwed(unitId);
     var st = Store.termStatus();
+    var wide = seesRepublic();
 
     function block(title, note, items, render) {
       if (!items.length) return '';
@@ -485,12 +507,18 @@
         '<div class="list">' + items.map(render).join('') + '</div></div>';
     }
 
-    function row(title, meta, goto) {
+    /* The department goes first in the meta line, because when the list spans
+       the Republic "which college is this" is the question you are asking as you
+       read it, and a title alone does not answer it. */
+    function row(title, meta, goto, ownerUnitId) {
+      var dept = (wide && ownerUnitId) ? Store.unitName(ownerUnitId) : '';
       return '<button type="button" class="task" data-goto="' + U.esc(goto) + '" ' +
         'style="width:100%;text-align:left;border:0;background:transparent">' +
         '<span class="task-main" style="cursor:pointer">' +
         '<span class="task-title">' + U.esc(title) + '</span>' +
-        '<span class="task-meta">' + U.esc(meta) + '</span></span></button>';
+        '<span class="task-meta">' +
+          (dept ? '<span class="owner-unit">' + U.esc(dept) + '</span><span class="sep">·</span>' : '') +
+          U.esc(meta) + '</span></span></button>';
     }
 
     var body = '';
@@ -515,33 +543,34 @@
     } else {
       body += '<p class="small" style="margin-top:0">' +
         U.plural(owed.total, 'thing') + ' still owed before ' +
-        U.esc(unit ? unit.name : 'this unit') + ' can hand over.</p>';
+        (wide ? 'the Republic' : U.esc(unit ? unit.name : 'this unit')) + ' can hand over.</p>';
 
       body += block('Activities not finished',
         'Mark the activity complete once its tasks are done.',
         owed.unfinished, function (x) {
           return row(x.event.title,
             x.pending ? U.plural(x.pending, 'task') + ' still open' : 'Not marked complete',
-            '#/events/' + x.event.id);
+            '#/events/' + x.event.id, x.event.unitId);
         });
 
       body += block('Reports not filed',
         'Finished, but the accomplishment report has not been uploaded and linked.',
         owed.unfiled, function (x) {
-          return row(x.event.title, 'No Drive link yet', '#/events/' + x.event.id);
+          return row(x.event.title, 'No Drive link yet', '#/events/' + x.event.id, x.event.unitId);
         });
 
       body += block('Links nobody has vouched for',
         'Filed, but nobody has confirmed the file is on a drive the FCUSR owns. ' +
         'A link to a personal account dies when its owner graduates.',
         owed.unvouched, function (x) {
-          return row(x.event.title, 'Open the report and confirm the drive', '#/events/' + x.event.id);
+          return row(x.event.title, 'Open the report and confirm the drive',
+            '#/events/' + x.event.id, x.event.unitId);
         });
 
       body += block('Letters still out',
         'Still moving between offices, or waiting to be revised.',
         owed.letters, function (l) {
-          return row(l.subject, Store.letterWhere(l), '#/letters/' + l.id);
+          return row(l.subject, Store.letterWhere(l), '#/letters/' + l.id, l.unitId);
         });
     }
 

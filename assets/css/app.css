@@ -149,6 +149,11 @@ a { color: var(--gold-700); }
 }
 .appbar-spacer { flex: 1; }
 
+/* Which department a line belongs to, where a list spans more than one. First
+   in the meta line, because when the list crosses the Republic that is the
+   question being asked while reading it. */
+.owner-unit { font-weight: 700; color: var(--gold-700); }
+
 /* Syncing, said in a word.
 
    It was a coloured dot, which is not a sentence — it went red on a real
