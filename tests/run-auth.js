@@ -617,7 +617,36 @@ const FILES = [
     SB.requests.filter((r) => /password|signup/.test(JSON.stringify(r)))
       .every((r) => r.url.indexOf('/auth/v1/') === 0));
 
-  console.log('\n========================================');
+  /* ---------------- the page ships closed ----------------
+   The tab bar, the search and the settings button are markup in index.html,
+   not something a script draws. Before this, <body> carried no class, so all
+   three were on screen from the moment the file was parsed and only went away
+   once app.js had run and decided nobody was signed in. On a slow phone that
+   is a visible flash of the Republic's shell to a stranger; if a script is
+   blocked outright it is not a flash at all, it is the state the page stays
+   in. Closed by default, opened by script, is the way round that fails safe. */
+console.log('\n--- the page ships closed ---');
+{
+  const html = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'index.html'), 'utf8');
+  const body = (html.match(/<body[^>]*>/) || [''])[0];
+  check('index.html starts gated', /class="[^"]*\bis-gated\b/.test(body), body);
+
+  const css = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'assets', 'css', 'app.css'), 'utf8');
+  ['\\.tabs', '#btn-search', '#btn-settings'].forEach((sel) => {
+    check('and being gated hides ' + sel.replace('\\', ''),
+      new RegExp('body\\.is-gated\\s+' + sel).test(css));
+  });
+
+  // And the app must still be able to open it, or nobody ever gets in.
+  const app = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'assets', 'js', 'app.js'), 'utf8');
+  check('and app.js takes the class off once somebody is signed in',
+    /classList\.remove\('is-gated'\)/.test(app));
+}
+
+console.log('\n========================================');
   console.log(passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch((e) => {

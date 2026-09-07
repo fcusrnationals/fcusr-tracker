@@ -47,6 +47,40 @@ const COLUMNS = {
   council:   ['id', 'body', 'updated_at']
 };
 
+/* The colleges, as schema.sql actually seeds them: every one, under ids the
+   server chose. The client seeds the same list under ids of its own ('unit-nat',
+   'unit-cas'), and sync matches the two by code and adopts the server's — after
+   which a unit is one thing everywhere.
+
+   The stand-in used to hold no units at all and hand back a single invented
+   national one whenever the table was empty. That fallback vanished the moment
+   anything was pushed, so whether a device had adopted the server's ids
+   depended on the order the tests happened to run in, and "a renamed unit
+   travels" passed about one run in three. Worse than the flake: the adoption
+   path — the one thing that lets a college rename itself — was never being
+   tested at all. */
+const SERVER_UNITS = [
+  ['national',  'NAT'],     ['comelec',   'COMELEC'], ['judiciary', 'SC'],
+  ['branch',    'DUAG'],    ['province',  'CAS'],     ['province',  'CBA'],
+  ['province',  'CCJE'],    ['province',  'CTE'],     ['province',  'COE'],
+  ['province',  'CN'],      ['province',  'CHTM'],    ['province',  'CCS'],
+  ['province',  'ELEM'],    ['province',  'JHS'],     ['province',  'SHS'],
+  ['province',  'GS']
+];
+
+function seedServerUnits(tables, now) {
+  SERVER_UNITS.forEach(([kind, code], i) => {
+    const n = String(i + 1).padStart(2, '0');
+    const id = '9' + n + 'aaaaa-aaaa-4aaa-8aaa-aaaaaaaaaa' + n;
+    tables.units[id] = {
+      id, code, kind, name: code, tracker_name: code, active: true,
+      body: { id, code, kind, name: code, trackerName: code, active: true,
+              updatedAt: '2026-01-01T00:00:00.000Z' },
+      updated_at: now()
+    };
+  });
+}
+
 function makeServer() {
   const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {},
                    offices: {}, deletions: {}, term: {}, units: {}, council: {} };
@@ -55,6 +89,7 @@ function makeServer() {
     tick += 1;
     return new Date(Date.UTC(2026, 8, 6, 12, 0, 0) + tick * 1000).toISOString();
   };
+  seedServerUnits(tables, now);
   return {
     tables,
     now,
@@ -124,12 +159,9 @@ function makeServer() {
     serverNow() { return Promise.resolve(now()); },
     /* The unit list as PostgREST would answer it: whatever has been written to
        the table, plus the National unit every council starts with. */
+    // What /rest/v1/units answers: every unit, always. No fallback.
     units() {
-      const rows = Object.keys(tables.units).map((k) => tables.units[k]);
-      if (rows.length) return Promise.resolve(rows);
-      return Promise.resolve([
-        { id: '11111111-1111-4111-8111-111111111111', code: 'NAT', name: 'FCUSR Nationals', kind: 'national' }
-      ]);
+      return Promise.resolve(Object.keys(tables.units).map((k) => tables.units[k]));
     }
   };
 }
@@ -604,6 +636,24 @@ function makeDevice(server, name) {
       G2.S.org().email);
     check('and so do the posts a form offers',
       G2.S.positions().indexOf('Sergeant-at-Arms') >= 0);
+
+    /* A college renamed on a phone that has never synced. Its units are still
+       under the ids this device invented, and outbound() will not send a record
+       whose id is not a uuid — so the edit can only travel if adopting the
+       server's ids carries it. It has to: an officer setting up their college
+       on the bus, before they have signal, is the ordinary case, not the odd
+       one. */
+    const Fresh = makeDevice(s4, 'Never synced');
+    const cn = Fresh.S.units().filter((u) => u.code === 'CN')[0];
+    check('a new device holds its own id for a college', !Fresh.w.U.isUuid(cn.id), cn.id);
+    Fresh.S.updateUnit(cn.id, { trackerName: 'CN Governor\u2019s Office' });
+    await Fresh.Sync.now();
+    await Fresh.Sync.now();
+    await G2.Sync.now();
+    const cnG = G2.S.units().filter((u) => u.code === 'CN')[0];
+    check('and the rename still reaches the other phone',
+      cnG && cnG.trackerName === 'CN Governor\u2019s Office',
+      cnG && cnG.trackerName);
 
     // A letter template is the one everybody most needs to agree on.
     P2.S.updateOrg({ letterhead: 'data:image/png;base64,iVBORw0KGgo=', letterheadBy: 'Arron' });
