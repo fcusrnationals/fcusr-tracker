@@ -256,6 +256,7 @@
   }
 
   function renderBrand() {
+    paintAccount();
     renderEmblem();
     var el = document.querySelector('.brand-name');
     if (el) el.textContent = trackerTitle();
@@ -382,6 +383,9 @@
 
     Store.subscribe(function () { renderBrand(); render(); });
 
+    var acct = document.getElementById('btn-account');
+    if (acct) acct.addEventListener('click', function () { accountMenu(acct); });
+
     // Inline status editing works from anywhere a task row is drawn.
     U.on(document.body, 'click', '[data-status-for]', function (ev, el) {
       ev.preventDefault();
@@ -494,6 +498,74 @@
     document.body.appendChild(bar);
     bar.querySelector('[data-reload]').addEventListener('click', function () {
       location.reload(true);
+    });
+  }
+
+  /* ---------- who is signed in, and the way out ----------
+     A council runs on shared computers — the library PC, the org room laptop —
+     and there was no way to leave one. Somebody signed in and stayed signed in
+     for whoever sat down next. */
+  function paintAccount() {
+    var el = document.getElementById('btn-account');
+    if (!el || !global.Auth) return;
+    var who = Auth.signedIn() ? Auth.current() : null;
+    if (!who || Auth.isOffline()) { el.hidden = true; return; }
+
+    el.hidden = false;
+    el.innerHTML = '<span class="who w' + (U.initials(who.name).charCodeAt(0) % 6) + '">' +
+      U.esc(U.initials(who.name)) + '</span>';
+    el.setAttribute('title', who.name + ' · ' + (who.unitName || ''));
+    el.setAttribute('aria-label', 'Signed in as ' + who.name + '. Your account.');
+  }
+
+  function accountMenu(anchor) {
+    var who = Auth.current();
+    if (!who) return;
+    var items =
+      '<button type="button" data-set="who" disabled style="opacity:1;cursor:default">' +
+        UI.icon('users') + '<span><strong>' + U.esc(who.name) + '</strong><br>' +
+        '<span class="tiny muted">' + U.esc(who.position || '') +
+        (who.position && who.unitName ? ' · ' : '') + U.esc(who.unitName || '') + '</span></span>' +
+      '</button>' +
+      '<div class="sep"></div>' +
+      '<button type="button" data-set="password">Change my password</button>' +
+      '<button type="button" class="danger" data-set="out">Sign out</button>';
+
+    UI.openMenu(anchor, items, function (action) {
+      if (action === 'password') return Auth.changePassword();
+      if (action === 'out') return signOutFlow();
+    });
+  }
+
+  /* Signing out sends everything first, then takes the council's work off the
+     computer. If it cannot be sent, nothing is cleared and the person is asked
+     what they want to do — leaving without their afternoon's work is a choice
+     only they can make. */
+  function signOutFlow() {
+    UI.confirm({
+      title: 'Sign out?',
+      message: 'Your work is sent to the council\u2019s server first, and then removed ' +
+        'from this computer so the next person cannot see it.',
+      detail: 'Everything stays on the server. Signing back in brings it all down again.',
+      tone: 'primary',
+      cancelLabel: 'Stay signed in',
+      confirmLabel: 'Sign out'
+    }).then(function (ok) {
+      if (!ok) return;
+      return Auth.signOut().then(function () {
+        UI.toast('Signed out. This computer no longer holds the council\u2019s work.');
+      }).catch(function (err) {
+        if (!err || !err.unsent) throw err;
+        return UI.confirm({
+          title: 'Your work has not been sent',
+          message: err.message,
+          detail: 'You can stay signed in and try again in a moment, or sign out anyway — ' +
+            'which leaves anything unsent on this computer for the next person.',
+          confirmLabel: 'Sign out anyway'
+        }).then(function (force) {
+          if (force) return Auth.signOut({ force: true });
+        });
+      });
     });
   }
 

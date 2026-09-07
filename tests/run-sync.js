@@ -82,6 +82,26 @@ function makeServer() {
     },
     upsert(table, rows) {
       this.requests.push({ op: 'upsert', table, n: rows.length });
+
+      /* The unique indexes the real schema carries. Without them this stand-in
+         accepts two offices sharing a code, or two reports for one activity,
+         and the suite happily proves a collision cannot happen while Postgres
+         refuses it every time. */
+      for (const r of rows) {
+        for (const [t, col] of [['offices', 'code'], ['reports', 'event_id']]) {
+          if (table !== t || r[col] === undefined || r[col] === null) continue;
+          const clash = Object.keys(tables[t])
+            .map((k) => tables[t][k])
+            .find((x) => x[col] === r[col] && x.id !== r.id);
+          if (clash) {
+            const e = new Error('duplicate key value violates unique constraint "' +
+              t + '_' + col + '_key"');
+            e.status = 409;
+            return Promise.reject(e);
+          }
+        }
+      }
+
       rows.forEach((r) => {
         // The server stamps its own clock on arrival, exactly as a database does.
         const key = table === 'deletions' ? r.entity + ':' + r.entity_id : r.id;
@@ -756,6 +776,73 @@ function makeDevice(server, name) {
     check('and is still the one on the server',
       s9.tables.events[ev.id].body.venue === 'FCU Gymnasium',
       s9.tables.events[ev.id].body.venue);
+  }
+
+  /* ---------------- two devices inventing the same thing ----------------
+     The client mints an id, but the server holds other columns unique — an
+     office's code, an activity's report. Two officers doing the ordinary thing
+     at the same time could each produce a value the other had already used, and
+     the second to sync was refused every round afterwards with nothing on screen
+     naming the cause. */
+  console.log('\n--- two officers add the same office ---');
+  {
+    const sA = makeServer();
+    const D1 = makeDevice(sA, 'D1');
+    const D2 = makeDevice(sA, 'D2');
+    await D1.Sync.now(); await D2.Sync.now();
+
+    const o1 = D1.S.addOffice({ name: 'Office of the Chaplain' });
+    const o2 = D2.S.addOffice({ name: 'Office of the Chaplain' });
+    check('each device gave it a code', !!o1.code && !!o2.code, o1.code + ' / ' + o2.code);
+    check('and the two codes differ, so neither is refused', o1.code !== o2.code,
+      o1.code + ' vs ' + o2.code);
+
+    await D1.Sync.now();
+    const st = await D2.Sync.now();
+    check('both reached the server without a refusal', !st.error, st.error);
+    check('and both are on it',
+      !!sA.tables.offices[o1.id] && !!sA.tables.offices[o2.id]);
+  }
+
+  console.log('\n--- two officers start the same report ---');
+  {
+    const sB = makeServer();
+    const E1 = makeDevice(sB, 'E1');
+    const E2 = makeDevice(sB, 'E2');
+    const ev = E1.S.addEvent({ title: 'Nurses Week', unitId: E1.S.nationalUnitId() });
+    await E1.Sync.now(); await E2.Sync.now();
+    check('both phones have the activity', !!E2.S.event(ev.id));
+
+    // Each opens the wizard before either has synced.
+    E1.S.saveReport(ev.id, { description: 'Written on the first phone.' });
+    E2.S.saveReport(ev.id, { description: 'Written on the second phone.' });
+    check('both reports carry the same id, because the activity decides it',
+      E1.S.report(ev.id).id === E2.S.report(ev.id).id,
+      E1.S.report(ev.id).id + ' / ' + E2.S.report(ev.id).id);
+
+    await E1.Sync.now();
+    const st2 = await E2.Sync.now();
+    check('the second one is merged, not refused', !st2.error, st2.error);
+    check('and the server holds exactly one report for the activity',
+      Object.keys(sB.tables.reports).length === 1,
+      Object.keys(sB.tables.reports).length + ' reports');
+  }
+
+  console.log('\n--- deleting an activity takes its report with it ---');
+  {
+    const sC = makeServer();
+    const F1 = makeDevice(sC, 'F1');
+    const ev = F1.S.addEvent({ title: 'Sportsfest', unitId: F1.S.nationalUnitId() });
+    F1.S.saveReport(ev.id, { description: 'Filed.' });
+    const rid = F1.S.report(ev.id).id;
+    await F1.Sync.now();
+    check('the report reached the server', !!sC.tables.reports[rid]);
+
+    F1.S.deleteEvent(ev.id);
+    check('the report went with the activity, not on the next reload',
+      F1.S.reports().filter((r) => r.eventId === ev.id).length === 0);
+    await F1.Sync.now();
+    check('and it was removed from the server', !sC.tables.reports[rid]);
   }
 
   console.log('\n--- no console errors ---');

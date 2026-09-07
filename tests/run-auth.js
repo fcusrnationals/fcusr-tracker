@@ -427,6 +427,38 @@ const FILES = [
     D.querySelectorAll('.modal-backdrop').forEach((e) => e.remove());
   }
 
+  /* ---------------- leaving a shared computer ----------------
+     A council runs on the library PC and the org room laptop. Signing out has
+     to take the council's work with it, or the next person to sign in opens the
+     app onto somebody else's units — syncing only ever adds and updates, and
+     never removes what they should not be seeing. */
+  console.log('\n--- signing out clears the computer ---');
+  {
+    const D = window.document;
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    check('signed in to begin with', Auth.signedIn());
+
+    window.Store.addEvent({ title: 'Left behind', unitId: window.Store.nationalUnitId() });
+    check('and the device is holding work', window.Store.events().length > 0);
+
+    // Sync is not loaded in this suite, so sign-out has nothing to send through
+    // and clears on its own terms; that is the path a browser without it takes.
+    await Auth.signOut();
+    check('the session is gone', !Auth.signedIn());
+    check('there is a way out at all', typeof Auth.signOut === 'function');
+
+    // And somebody else signing in on the same computer does not inherit it.
+    window.Store.addEvent({ title: 'Someone else\u2019s', unitId: window.Store.nationalUnitId() });
+    const before = window.Store.events().length;
+    Auth.adopt({ id: 'a-different-person', email: 'other@filamer.edu.ph',
+      full_name: 'Another Officer', unit_id: window.Store.nationalUnitId(),
+      unit_name: 'FCUSR Nationals', unit_kind: 'national', access: 'officer' });
+    check('a different account does not inherit the last one\u2019s work',
+      window.Store.events().length < before || before === 0,
+      before + ' → ' + window.Store.events().length);
+    await Auth.signOut();
+  }
+
   /* ---------------- the doorstep ----------------
      A session is read out of localStorage instantly and trustingly. Confirming
      it with the backend takes a moment, and the app used to draw the Republic

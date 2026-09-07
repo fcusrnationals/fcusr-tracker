@@ -1461,11 +1461,24 @@
 
   function deleteEvent(id) {
     state.tasks.forEach(function (t) { if (t.eventId === id) tombstone('task', t.id); });
-    state.reports.forEach(function (r) { if (r.eventId === id) tombstone('report', r.id); });
+
+    /* The report was marked deleted and then left sitting in state, so it
+       lingered until the next page load tidied it away — and its photographs
+       were never freed at all. A term's worth of deleted activities leaves
+       hundreds of megabytes stranded in a phone's storage with nothing on any
+       screen to say so. */
+    var doomed = state.reports.filter(function (r) { return r.eventId === id; });
+    doomed.forEach(function (r) { tombstone('report', r.id); });
+    state.reports = state.reports.filter(function (r) { return r.eventId !== id; });
+
     state.tasks = state.tasks.filter(function (t) { return t.eventId !== id; });
     tombstone('event', id);
     state.events = state.events.filter(function (e) { return e.id !== id; });
     commit();
+
+    if (global.AssetDB) {
+      doomed.forEach(function (r) { global.AssetDB.delPrefix(r.id + ':'); });
+    }
   }
 
   /* ---------- tasks ---------- */
@@ -1664,9 +1677,19 @@
     return null;
   }
 
+  /* The report's id is the activity's id.
+
+     There is one report per activity — the server holds reports.event_id
+     unique — but the id used to be minted at random, so two officers opening
+     the wizard for the same activity before either had synced produced two
+     reports with different ids and the same activity. The second to reach the
+     server was refused, and that phone then failed every round afterwards.
+
+     Deriving the id from the activity means both devices produce the same one,
+     so the two become one record on arrival instead of a collision. */
   function blankReport(eventId) {
     return {
-      id: U.uid('rep'), eventId: eventId, description: '',
+      id: eventId, eventId: eventId, description: '',
       program: { assets: [] }, photos: [], letters: [],
       minutes: { mode: 'tasks', assets: [] }, evaluation: { assets: [] },
       liquidation: { assets: [] },
@@ -1890,16 +1913,26 @@
      caller has not given one — otherwise every office added from the letters
      screen would share the empty code and the templates would match the wrong
      desk. Uniqueness matters more than prettiness here. */
+  /* A code nothing else will have, including on somebody else's phone.
+
+     It used to count up from the name until it found a gap in *this* device's
+     list — so two officers each adding "Office of the Chaplain" both produced
+     CHAPLA, under different ids. The server holds office codes unique, so the
+     second one to sync was refused, and that device then failed the same way
+     every round until somebody renamed the office. Nothing on screen would have
+     said which office, or why.
+
+     Seeded offices keep their fixed codes, because the route templates and the
+     reconciliation both match on them. Anything typed in gets four random
+     characters after the name, which no second device is going to hit. */
   function deriveCode(name) {
     var base = String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
     if (!base) base = 'OFF';
-    var code = base, n = 2;
-    while (state.offices.some(function (o) { return o.code === code; })) {
-      code = base.slice(0, 5) + n;
-      n++;
-      if (n > 99) return '';
+    var tail = '';
+    for (var i = 0; i < 4; i++) {
+      tail += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)];
     }
-    return code;
+    return (base.slice(0, 6) + '-' + tail).slice(0, 16);
   }
 
   function addOffice(data) {
@@ -2715,6 +2748,33 @@
   }
 
   // Wipes people, events and tasks. The letterhead is setup, not tracker data, so it stays.
+  /* Take the council's work off this device, without telling anyone it was
+     deleted.
+
+     resetAll() is somebody deciding to wipe the tracker; this is a different
+     act with the same shape. It leaves no tombstones, because nothing has been
+     deleted from the council — the work is on the server and this device is
+     simply no longer holding a copy. The marks go with it so the next person to
+     sign in pulls their own. */
+  function clearLocalCopy() {
+    var reportIds = state.reports.map(function (r) { return r.id; });
+    var keepOrg = state.org;
+    var keepUnits = state.units;
+    var keepOffices = state.offices;
+
+    state = blank();
+    state.org = keepOrg;
+    state.units = keepUnits;
+    state.offices = keepOffices;
+    state.seeded = true;          // no rehearsal for whoever signs in next
+    commit();
+
+    // Photographs are held outside this record and are the largest thing here.
+    if (global.AssetDB) {
+      reportIds.forEach(function (id) { global.AssetDB.delPrefix(id + ':'); });
+    }
+  }
+
   function resetAll() {
     var keepOrg = state.org;
     var keepUnits = state.units;
@@ -3132,6 +3192,7 @@
     byDueDate: byDueDate, byPriority: byPriority, byStatus: byStatus, byUrgency: byUrgency,
     lastPerson: lastPerson, setLastPerson: setLastPerson,
     toJSON: toJSON, fromJSON: fromJSON,
-    clearSampleData: clearSampleData, hasSampleData: hasSampleData, resetAll: resetAll
+    clearSampleData: clearSampleData, hasSampleData: hasSampleData, resetAll: resetAll,
+    clearLocalCopy: clearLocalCopy
   };
 })(window);

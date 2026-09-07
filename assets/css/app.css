@@ -151,6 +151,14 @@ a { color: var(--gold-700); }
 }
 .appbar-spacer { flex: 1; }
 
+/* Who is signed in. Small, because it is a way out rather than a thing to
+   look at — but a real target, because on a shared computer leaving is the
+   most important thing anybody does here. */
+.who-btn { padding: 0; }
+.who-btn .who { width: 28px; height: 28px; flex-basis: 28px; font-size: 10.5px; }
+.menu button[disabled] { color: var(--ink); }
+.menu button[disabled] .tiny { font-weight: 400; }
+
 /* A new version is out and this tab is not it.
 
    Above the bottom navigation on a phone, so it does not sit under the thumb

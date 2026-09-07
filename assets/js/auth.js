@@ -165,7 +165,21 @@
     } catch (e) { /* storage blocked; the session lasts this visit only */ }
   }
 
+  /* Whoever was last signed in on this device. If somebody else signs in, the
+     copy on the device is not theirs to see, so it goes before they get in. */
+  var LAST_KEY = 'fcusr.tracker.lastAccount';
+
+  function forgetIfSomebodyElse(id) {
+    var last = '';
+    try { last = global.localStorage.getItem(LAST_KEY) || ''; } catch (e) { last = ''; }
+    if (last && id && last !== id && !isOffline() && global.Store && Store.clearLocalCopy) {
+      Store.clearLocalCopy();
+    }
+    try { if (id) global.localStorage.setItem(LAST_KEY, id); } catch (e) { /* not vital */ }
+  }
+
   function adopt(profile) {
+    forgetIfSomebodyElse(profile && profile.id);
     me = {
       id: profile.id || 'local',
       email: profile.email || '',
@@ -213,12 +227,45 @@
     });
   }
 
-  function signOut() {
-    me = null;
-    remember();
-    if (global.ViewSignIn) ViewSignIn.reset();
-    var p = global.Backend ? Backend.signOut() : Promise.resolve();
-    return p.then(function () { if (global.App) App.render(); });
+  /* Signing out has to take the council's work off the device.
+
+     It did not, and a student council runs on shared computers — the library
+     PC, the org room laptop. The President would sign out and the next person
+     to sign in would open the app onto the President's data: every unit's
+     activities, tasks and letters, still there, because syncing only ever adds
+     and updates and never removes what somebody should not be seeing.
+
+     So the work is sent first, then the local copy is cleared. Sent first
+     because a wipe that loses somebody's afternoon is worse than the problem
+     it solves; if the send fails, nothing is cleared and the person is told.
+
+     Offline there is no server and no other copy, so nothing is cleared —
+     wiping would be destroying the council's only record. */
+  function signOut(opts) {
+    opts = opts || {};
+    var wasOffline = isOffline();
+
+    function finish() {
+      me = null;
+      confirmed = true;
+      remember();
+      if (global.ViewSignIn) ViewSignIn.reset();
+      var p = global.Backend ? Backend.signOut() : Promise.resolve();
+      return p.then(function () { if (global.App) App.render(); });
+    }
+
+    if (wasOffline || !global.Sync || !global.Store) return finish();
+
+    return Sync.now({ full: true }).then(function (st) {
+      if (st.error && !opts.force) {
+        var e = new Error('Your work has not reached the server yet, so it has not been ' +
+          'cleared from this computer. ' + st.error);
+        e.unsent = true;
+        throw e;
+      }
+      Store.clearLocalCopy();
+      return finish();
+    });
   }
 
   /* Settings holds enrolment, so it asks who you are before it opens — even
