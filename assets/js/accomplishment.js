@@ -33,7 +33,7 @@
     { key: 'evaluation',  label: 'Evaluation',  title: 'Evaluation results' },
     { key: 'liquidation', label: 'Liquidation', title: 'Liquidation' },
     { key: 'signatories', label: 'Signatories', title: 'Who signs the report' },
-    { key: 'review',      label: 'Review',      title: 'Review and export' }
+    { key: 'review',      label: 'Export',      title: 'Export the report' }
   ];
 
   var MIN_PHOTOS = 8;

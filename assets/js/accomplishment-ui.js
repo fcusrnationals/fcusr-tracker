@@ -50,7 +50,7 @@
           .catch(function () { /* no thumbnails; the report still builds */ })
           .then(render);
       },
-      onClose: function () { state = null; rootEl = null; }
+      onClose: function () { dropPreview(); state = null; rootEl = null; }
     });
   }
 
@@ -78,13 +78,55 @@
 
   /* ---------- chrome ---------- */
 
+  /* What is still missing, in the order the steps appear. One answer, asked for
+     by the banner, by the Export step and by the export buttons, so all three
+     cannot disagree — which they did: the buttons went live on a rule of their
+     own while the banner still said the report was not ready. */
+  function missingSteps(d) {
+    return STEPS.filter(function (s) {
+      return s.key !== 'review' && s.key !== 'minutes' && s.key !== 'liquidation' &&
+        !A.stepDone(d, s.key);
+    });
+  }
+
+  function isReady(d) { return missingSteps(d).length === 0; }
+
+  var EXPORT_STEP = STEPS.length - 1;
+
+  /* Said on every step, not only the last one. An officer filling in photos
+     needs to know whether the thing is finished without walking to the end to
+     find out, and "ready" is the single fact this whole screen exists to
+     establish. */
+  function readyBanner() {
+    var d = state.draft;
+    var missing = missingSteps(d);
+    if (!missing.length) {
+      return '<div class="wiz-ready is-ready">' +
+        '<span class="wiz-ready-dot" aria-hidden="true"></span>' +
+        '<span class="wiz-ready-text"><strong>Ready to export.</strong> ' +
+        'Everything the OSA asks for is filled in.</span>' +
+        (state.step === EXPORT_STEP ? '' :
+          '<button type="button" class="btn btn-sm btn-primary" data-goto-export>' +
+          'Go to Export</button>') +
+        '</div>';
+    }
+    return '<div class="wiz-ready">' +
+      '<span class="wiz-ready-dot" aria-hidden="true"></span>' +
+      '<span class="wiz-ready-text"><strong>' +
+      U.plural(missing.length, 'section') + ' still to fill in:</strong> ' +
+      U.esc(missing.map(function (x) { return x.label; }).join(', ')) + '.</span>' +
+      '</div>';
+  }
+
   function header() {
     var p = A.progress(state.draft);
     var e = Store.event(state.eventId);
     return '<div class="wiz-head">' +
       '<div class="wiz-event">' + U.esc(e ? e.title : '') + '</div>' +
+      readyBanner() +
       '<div class="progress-row" style="margin:8px 0 10px">' +
-        '<div class="progress" role="progressbar" aria-valuenow="' + p.pct + '" aria-valuemin="0" aria-valuemax="100">' +
+        '<div class="progress' + (isReady(state.draft) ? ' is-done' : '') +
+        '" role="progressbar" aria-valuenow="' + p.pct + '" aria-valuemin="0" aria-valuemax="100">' +
         '<span style="width:' + p.pct + '%"></span></div>' +
         '<span class="progress-label">' + p.done + ' of ' + p.total + ' done</span>' +
       '</div>' +
@@ -291,16 +333,14 @@
 
     /* review */
     var p = A.progress(d);
-    var missing = STEPS.filter(function (s) {
-      return s.key !== 'review' && s.key !== 'minutes' && !A.stepDone(d, s.key);
-    });
+    var missing = missingSteps(d);
     return title +
       (missing.length
         ? '<div class="empty" style="border-color:var(--st-on-hold-bd);background:var(--st-on-hold-bg)">' +
-          '<strong>Not ready yet</strong><p>' +
-          U.esc(missing.map(function (s) { return s.label; }).join(', ')) + ' still needed.</p></div>'
-        : '<div class="empty" style="border-color:var(--st-done-bd);background:var(--st-done-bg)">' +
-          '<strong>Ready to export</strong><p>All required sections are filled in.</p></div>') +
+          '<strong>Not finished yet</strong><p>Fill in ' +
+          U.esc(missing.map(function (s) { return s.label; }).join(', ')) +
+          ' and this turns green.</p></div>'
+        : '') +
       '<div class="list" style="margin:12px 0">' +
         summaryRow('Description', d.description ? d.description.length + ' characters' : 'empty', !!d.description) +
         summaryRow('Program flow', U.plural(d.program.assets.length, 'page'), d.program.assets.length > 0) +
@@ -310,15 +350,28 @@
           : d.minutes.mode === 'upload' ? U.plural(d.minutes.assets.length, 'page') : 'Skipped', true) +
         summaryRow('Evaluation', U.plural(d.evaluation.assets.length, 'page'), d.evaluation.assets.length > 0) +
       '</div>' +
+      /* What pressing the button does, before it is pressed. The file leaves the
+         app and the app keeps only a link, and being told that afterwards is
+         being told too late. */
+      (missing.length ? '' :
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin:0 0 14px">' +
+        '<div class="strong" style="margin-bottom:6px">What happens next</div>' +
+        '<ol class="small" style="padding-left:18px;line-height:1.8;margin:0">' +
+        '<li>The report is saved to this device as a file.</li>' +
+        '<li>You upload that file to the council\u2019s Google Drive.</li>' +
+        '<li>You paste the link back here, so anybody can find it later.</li>' +
+        '</ol></div>') +
+
       '<div class="row">' +
-        '<button type="button" class="btn btn-primary" data-export' + (missing.length ? ' disabled' : '') + '>' +
-        UI.icon('download') + 'Download PDF</button>' +
+        '<button type="button" class="btn ' + (missing.length ? '' : 'btn-go ') +
+        'btn-primary" data-export' + (missing.length ? ' disabled' : '') + '>' +
+        UI.icon('download') + 'Export the report (PDF)</button>' +
         '<button type="button" class="btn" data-export-word' + (missing.length ? ' disabled' : '') + '>' +
-        UI.icon('download') + 'Download Word</button>' +
+        UI.icon('download') + 'Export as Word instead</button>' +
       '</div>' +
       '<p class="small muted" style="margin-top:10px">' +
-        'The Word file has the same pages as the PDF, so both read alike — but you can edit it, ' +
-        'and the pictures sit in boxes you can drag.</p>' +
+        'The PDF is the one to file. The Word file has the same pages and can be edited if ' +
+        'something needs correcting by hand.</p>' +
       (d.driveLink
         ? '<div class="card" style="margin-top:14px;background:var(--st-done-bg);border-color:var(--st-done-bd)">' +
           '<div class="strong">Filed.</div>' +
@@ -326,7 +379,8 @@
           '<button type="button" class="btn btn-sm" style="margin-top:10px" data-open-upload>Change the link</button>' +
           '</div>'
         : '<div class="row" style="margin-top:14px">' +
-          '<button type="button" class="btn" data-open-upload>' + UI.icon('upload') + 'I have uploaded it</button>' +
+          '<button type="button" class="btn" data-open-upload>' + UI.icon('upload') +
+          'I already uploaded it \u2014 paste the link</button>' +
           '</div>') +
       '<p class="tiny muted" style="margin-top:12px">' + p.done + ' of ' + p.total + ' sections complete.</p>';
   }
@@ -342,9 +396,13 @@
   /* ---------- render ---------- */
 
   // Which section of the PDF the step on screen corresponds to.
+  /* Every step, including the two that were missing. Liquidation has a page of
+     its own and was landing the reader on the cover; signatories are drawn on
+     the cover, which was right by accident rather than by saying so. */
   var STEP_PAGE = {
     description: 'description', program: 'program', photos: 'photos',
-    letters: 'letters', minutes: 'minutes', evaluation: 'evaluation', review: 'cover'
+    letters: 'letters', minutes: 'minutes', evaluation: 'evaluation',
+    liquidation: 'liquidation', signatories: 'cover', review: 'cover'
   };
 
   function previewPane() {
@@ -361,16 +419,36 @@
      you see is the document itself rather than an impression of it. */
   var pvTimer = null;
   var pvURL = null;
+  var pvSeq = 0;
+
+  /* Every built preview is a blob the browser holds until it is told otherwise.
+     Two were being leaked: the one on screen when the wizard closed, and any
+     build still running when it closed. A report with twenty scans is a large
+     document, and a council that opens this screen a dozen times in an evening
+     was carrying every one of them.
+
+     Builds are also numbered. Typing edits the draft and each edit schedules a
+     build, so two can be in flight at once — and whichever finished last won,
+     not whichever was asked for last. That is a preview showing a page you have
+     already moved on from, with the newer one thrown away underneath it. */
+  function dropPreview() {
+    clearTimeout(pvTimer);
+    pvSeq += 1;
+    if (pvURL) { URL.revokeObjectURL(pvURL); pvURL = null; }
+  }
+
   function refreshPreview(delay) {
     clearTimeout(pvTimer);
     pvTimer = setTimeout(function () {
       if (!state || !rootEl) return;
       var frame = rootEl.querySelector('#pv-frame');
       if (!frame) return;
+      var mine = ++pvSeq;
       AccomplishmentPDF.previewURL(state.eventId, state.draft).then(function (out) {
-        if (!state || !rootEl) return;
-        var frameNow = rootEl.querySelector('#pv-frame');
-        if (!frameNow) return;
+        var frameNow = state && rootEl && rootEl.querySelector('#pv-frame');
+        // Overtaken, or the wizard closed while this was building. Either way
+        // this document is nobody's, so let go of it.
+        if (mine !== pvSeq || !frameNow) return URL.revokeObjectURL(out.url);
         if (pvURL) URL.revokeObjectURL(pvURL);
         pvURL = out.url;
         var key = STEP_PAGE[STEPS[state.step].key];
@@ -379,10 +457,9 @@
           out.url + '#page=' + page + '&view=FitH&toolbar=0"></iframe>';
       }).catch(function (err) {
         var frameNow = rootEl && rootEl.querySelector('#pv-frame');
-        if (frameNow) {
-          frameNow.innerHTML = '<p class="small muted" style="padding:14px">' +
-            U.esc(err.message || 'Preview unavailable.') + '</p>';
-        }
+        if (mine !== pvSeq || !frameNow) return;
+        frameNow.innerHTML = '<p class="small muted" style="padding:14px">' +
+          U.esc(err.message || 'Preview unavailable.') + '</p>';
       });
     }, delay || 250);
   }
@@ -406,7 +483,11 @@
     var back = rootEl.querySelector('[data-back]');
     var next = rootEl.querySelector('[data-next]');
     back.disabled = state.step === 0;
-    next.hidden = STEPS[state.step].key === 'review';
+    /* Hidden on the last step, where it did nothing at all. A button that is
+       visible, enabled, and silent when pressed teaches people that the screen
+       is broken. */
+    next.hidden = state.step === EXPORT_STEP;
+    next.textContent = state.step === EXPORT_STEP - 1 ? 'Next: Export' : 'Next';
 
     bind(host);
     refreshPreview(120);
@@ -465,6 +546,9 @@
     U.els('[data-step]', host).forEach(function (b) {
       b.addEventListener('click', function () { go(Number(b.getAttribute('data-step'))); });
     });
+
+    var goExp = host.querySelector('[data-goto-export]');
+    if (goExp) goExp.addEventListener('click', function () { go(EXPORT_STEP); });
 
     var rp = host.querySelector('[data-refresh-preview]');
     if (rp) rp.addEventListener('click', function () { refreshPreview(0); });

@@ -1004,6 +1004,79 @@ console.log('\n--- a letter nobody is carrying says so in red ---');
   }
 }
 
+/* ---------------- the accomplishment report wizard ----------------
+   The screen an officer meets at the end of every activity, and the one thing
+   it has to answer is whether the report is finished. It used to answer that
+   only on the last step, so the way to find out was to walk to the end. */
+console.log('\n--- the report wizard says whether it is finished ---');
+{
+  const S = window.Store;
+  const D = window.document;
+  const ev = S.events()[0];
+
+  /* The preview points at the page for the step you are on. Two steps were
+     missing from that map — Liquidation, which has a page of its own and was
+     landing the reader on the cover, and Signatories, which is drawn on the
+     cover and was right only by accident. */
+  const src = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'assets', 'js', 'accomplishment-ui.js'), 'utf8');
+  const mapped = (src.match(/var STEP_PAGE = \{([\s\S]*?)\};/) || [])[1] || '';
+  window.Accomplishment.STEPS.forEach((st) => {
+    check('the preview knows where ' + st.label + ' is',
+      new RegExp('\\b' + st.key + ':').test(mapped), mapped.replace(/\s+/g, ' ').slice(0, 120));
+  });
+
+  window.AccomplishmentUI.open(ev.id);
+  await sleep(60);
+
+  const banner = () => D.querySelector('.wiz-ready');
+  check('the wizard opens', !!banner());
+  check('and says plainly it is not finished',
+    banner() && !banner().classList.contains('is-ready'),
+    banner() && banner().className);
+  check('naming the sections still to fill in',
+    /still to fill in/i.test(banner().textContent), banner().textContent.slice(0, 90));
+
+  // Fill in everything the report needs.
+  const st = window.Accomplishment._state();
+  const d = st.draft;
+  d.description = 'A paragraph long enough to count as a proper write-up of the activity for the OSA.';
+  d.program = { assets: ['a1'] };
+  d.photos = Array.from({ length: window.Accomplishment.MIN_PHOTOS }, (_, i) => ({ assetId: 'p' + i, caption: '' }));
+  d.letters = [{ name: 'Letter of Intent', assets: ['l1'] }];
+  d.evaluation = { assets: ['e1'] };
+  d.signatories.preparedBy = { name: 'Job Sarmiento', position: 'Secretary' };
+  D.querySelector('[data-step="0"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(60);
+
+  check('once everything is in, it goes green',
+    banner() && banner().classList.contains('is-ready'), banner() && banner().className);
+  check('and says so in words, not only in colour',
+    /ready to export/i.test(banner().textContent), banner().textContent.slice(0, 90));
+  check('with a way straight to the export step',
+    !!D.querySelector('[data-goto-export]'));
+
+  D.querySelector('[data-goto-export]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(60);
+
+  check('which lands on the last step',
+    st.step === window.Accomplishment.STEPS.length - 1, String(st.step));
+  /* A button that is visible, enabled and silent when pressed teaches people
+     that the screen is broken. */
+  check('where Next is out of the way, having nothing left to do',
+    D.querySelector('[data-next]').hidden);
+  check('the export button is offered',
+    !!D.querySelector('[data-export]') && !D.querySelector('[data-export]').disabled);
+  check('and it is the green one',
+    /btn-go/.test(D.querySelector('[data-export]').className),
+    D.querySelector('[data-export]').className);
+  check('the step is called Export, not Review',
+    /Export/.test(D.querySelector('[data-step="8"]').textContent),
+    D.querySelector('[data-step="8"]').textContent);
+
+  D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+}
+
 console.log('\n--- console cleanliness ---');
 check('no console errors across the walk-through', errors.length === 0, errors.slice(0, 4).join(' | '));
 

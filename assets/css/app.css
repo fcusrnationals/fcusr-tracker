@@ -491,6 +491,32 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
 .group-title.unassigned { color: var(--st-overdue-fg); }
 .er-meta .unassigned { color: var(--st-overdue-fg); font-weight: 700; }
 
+/* The one fact the report wizard exists to establish: is this finished or not.
+   Said on every step, in the colour people already read as "go". */
+.wiz-ready {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 10px 0 2px; padding: 9px 12px; border-radius: 10px;
+  border: 1px solid var(--st-on-hold-bd); background: var(--st-on-hold-bg);
+  color: var(--ink);
+}
+.wiz-ready-dot {
+  width: 9px; height: 9px; border-radius: 50%; flex: none;
+  background: var(--st-on-hold-fg);
+}
+.wiz-ready-text { flex: 1 1 220px; font-size: 13px; line-height: 1.5; }
+.wiz-ready.is-ready { border-color: var(--st-done-bd); background: var(--st-done-bg); }
+.wiz-ready.is-ready .wiz-ready-dot { background: var(--st-done-fg); }
+
+/* The button that is now safe to press. Green rather than the council's gold,
+   because "go" is the thing being said and gold is every other button here. */
+/* Finished. The bar says the same thing as the banner above it, in the same
+   colour, so the two cannot be read as disagreeing. */
+.progress.is-done > span { background: var(--st-done-fg); }
+
+.btn.btn-go, .btn.btn-go:hover {
+  background: var(--st-done-fg); border-color: var(--st-done-fg); color: #fff;
+}
+
 .task-right { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
 
 /* Priority reads as a dot before the title — a whole column was overkill. */
