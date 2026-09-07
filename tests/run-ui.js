@@ -1077,8 +1077,67 @@ console.log('\n--- the report wizard says whether it is finished ---');
   D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
 }
 
+/* ---------------- a browser that will not save ----------------
+   A full browser, or a private window, refuses to store anything. The app used
+   to say so in a toast and carry on looking perfectly normal — so an officer
+   works all afternoon, every event added and every task ticked, with none of it
+   written down, and one refresh ends it. A warning that is gone in four seconds
+   is not a warning about something that lasts. */
+console.log('\n--- a browser that will not save says so, and keeps saying it ---');
+{
+  const D = window.document;
+  /* jsdom's Storage ignores an own-property stub on setItem — it has to go on
+     the prototype, which is also where a real browser's lives. Worth knowing:
+     stubbing it the obvious way silently does nothing, and the test then proves
+     that storage working is handled, which nobody doubted. */
+  const proto = Object.getPrototypeOf(window.localStorage);
+  const real = proto.setItem;
+  proto.setItem = function (k, v) {
+    if (k === 'fcusr.tracker.v1') { const e = new Error('QuotaExceededError'); e.name = 'QuotaExceededError'; throw e; }
+    return real.call(this, k, v);
+  };
+  window.Store.addEvent({ title: 'probe', unitId: window.Store.nationalUnitId() });
+  check('the stub actually refuses writes', window.Store.storageBroken(),
+    'storage did not refuse, so the rest of this section proves nothing');
+
+  window.Store.addEvent({ title: 'Made while storage was full', unitId: window.Store.nationalUnitId() });
+  await sleep(60);
+
+  const bar = () => D.getElementById('storage-bar');
+  check('a bar appears and stays', !!bar());
+  check('and it says nothing is being saved',
+    bar() && /not being saved/i.test(bar().textContent), bar() && bar().textContent.slice(0, 80));
+  check('the work is still on the screen, not thrown away',
+    window.Store.events().some((e) => e.title === 'Made while storage was full'));
+
+  // A second change must not stack a second bar.
+  window.Store.addEvent({ title: 'And another', unitId: window.Store.nationalUnitId() });
+  await sleep(60);
+  check('and one bar, however many changes', D.querySelectorAll('#storage-bar').length === 1,
+    String(D.querySelectorAll('#storage-bar').length));
+
+  proto.setItem = real;
+  window.Store.addEvent({ title: 'After storage came back', unitId: window.Store.nationalUnitId() });
+  await sleep(60);
+  check('and it goes when saving works again', !bar());
+
+  window.Store.events()
+    .filter((e) => /probe|Made while storage was full|And another|After storage came back/.test(e.title))
+    .forEach((e) => window.Store.deleteEvent(e.id));
+}
+
 console.log('\n--- console cleanliness ---');
-check('no console errors across the walk-through', errors.length === 0, errors.slice(0, 4).join(' | '));
+/* One error is deliberate: the section above refuses every write to storage on
+   purpose, and the app is right to complain about it in the console. Anything
+   else is a fault. Named exactly rather than loosened, so a real storage error
+   somewhere else still fails this. */
+const deliberate = /Could not save to browser storage/;
+const unexpected = errors.filter((e) => !deliberate.test(e));
+check('no console errors across the walk-through', unexpected.length === 0,
+  unexpected.slice(0, 4).join(' | '));
+check('and the storage complaint was raised exactly once, where it was asked for',
+  errors.filter((e) => deliberate.test(e)).length === 1,
+  String(errors.filter((e) => deliberate.test(e)).length));
 
 const failed = results.filter((r) => !r.pass);
 console.log('\n========================================');

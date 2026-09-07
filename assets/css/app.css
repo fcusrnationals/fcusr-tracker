@@ -513,6 +513,13 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
    colour, so the two cannot be read as disagreeing. */
 .progress.is-done > span { background: var(--st-done-fg); }
 
+/* The bar that says nothing is being saved. Red rather than the update bar's
+   quiet gold: one is an offer, the other is a warning. */
+.update-bar.is-bad {
+  background: var(--st-overdue-bg); border-color: var(--st-overdue-bd);
+  color: var(--st-overdue-fg);
+}
+
 .btn.btn-go, .btn.btn-go:hover {
   background: var(--st-done-fg); border-color: var(--st-done-fg); color: #fff;
 }

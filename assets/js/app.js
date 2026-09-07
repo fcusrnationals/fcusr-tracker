@@ -383,7 +383,7 @@
     renderBrand();
     preloadSeal();
 
-    Store.subscribe(function () { renderBrand(); render(); });
+    Store.subscribe(function () { renderBrand(); paintStorageBar(); render(); });
 
     var acct = document.getElementById('btn-account');
     if (acct) acct.addEventListener('click', function () { accountMenu(acct); });
@@ -486,6 +486,48 @@
         showUpdateBar(j.version);
       })
       .catch(function () { /* offline, or the file is not deployed yet */ });
+  }
+
+  /* Nothing is being written to this device. Said in a bar that does not go
+     away, because what is being reported is that the screen is lying: the work
+     is on it and nowhere else, and a refresh ends it. */
+  function paintStorageBar() {
+    var broken = global.Store && Store.storageBroken && Store.storageBroken();
+    var bar = document.getElementById('storage-bar');
+    if (!broken) { if (bar) bar.remove(); return; }
+    if (bar) return;
+    bar = document.createElement('div');
+    bar.id = 'storage-bar';
+    bar.className = 'update-bar is-bad';
+    bar.setAttribute('role', 'alert');
+    bar.innerHTML = '<span><strong>Not being saved on this device.</strong> ' +
+      'This browser is full or is blocking storage. Your work is on the screen and ' +
+      (global.Sync && Sync.able()
+        ? 'is still going to the council\u2019s server \u2014 but it will be gone from ' +
+          'this device if you close the tab.'
+        : 'nowhere else \u2014 if you close this tab it is gone.') +
+      '</span>' +
+      '<button type="button" class="btn btn-sm" data-storage-help>What to do</button>';
+    document.body.appendChild(bar);
+    bar.querySelector('[data-storage-help]').addEventListener('click', function () {
+      UI.modal({
+        title: 'This browser will not save',
+        body:
+          '<p class="small">Everything you have done is still on the screen and will stay ' +
+          'there until you close or reload the tab. It is not being written to this device.</p>' +
+          '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-top:14px">' +
+          '<div class="strong" style="margin-bottom:6px">Do this first</div>' +
+          '<ol class="small" style="padding-left:18px;line-height:1.8;margin:0">' +
+          '<li><strong>Do not close this tab yet.</strong></li>' +
+          '<li>If you are signed in, wait until the sync says Synced. Then the work is on ' +
+          'the server and safe.</li>' +
+          '<li>Close other tabs, or clear space in the browser, then reload.</li>' +
+          '<li>Private or incognito windows refuse to store anything at all. Use an ' +
+          'ordinary window.</li>' +
+          '</ol></div>',
+        footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
+      });
+    });
   }
 
   function showUpdateBar(version) {

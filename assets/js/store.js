@@ -1000,13 +1000,31 @@
     return normaliseIds(s);
   }
 
+  /* Whether the last attempt to write to this device failed.
+
+     It used to be a toast and nothing else. A toast is gone in four seconds, and
+     what follows is an officer working all afternoon on a screen that looks
+     perfectly normal — every event added, every task ticked — with none of it
+     written down. One refresh and the afternoon is gone, with no warning still
+     on screen by the time it mattered.
+
+     So the app is told, and keeps saying so until a save works. */
+  var saveBroken = false;
+
+  function storageBroken() { return saveBroken; }
+
   function save() {
     try {
       global.localStorage.setItem(KEY, JSON.stringify(state));
+      if (saveBroken) { saveBroken = false; notify(); }
     } catch (e) {
-      console.error('Could not save to browser storage.', e);
-      if (global.UI && global.UI.toast) {
-        global.UI.toast('Could not save — browser storage may be full or blocked.', 'error');
+      if (!saveBroken) {
+        saveBroken = true;
+        console.error('Could not save to browser storage.', e);
+        if (global.UI && global.UI.toast) {
+          global.UI.toast('Could not save — browser storage may be full or blocked.', 'error');
+        }
+        notify();
       }
     }
   }
@@ -3210,6 +3228,7 @@
     council: council, applyRemoteCouncil: applyRemoteCouncil,
     outbound: outbound, deletions: deletions, isDeleted: isDeleted,
     syncState: syncState, markSynced: markSynced, remapIds: remapIds,
+    storageBroken: storageBroken,
     now: nowISO,
     resetSyncMarks: resetSyncMarks,
     commit: commit,

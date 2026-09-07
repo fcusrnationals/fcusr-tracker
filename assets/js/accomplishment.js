@@ -51,6 +51,14 @@
     if (own) return Promise.resolve(own);
 
     if (letterheadData) return Promise.resolve(letterheadData);
+
+    /* No fetch at all — an old browser, or a page opened straight off the disk
+       with the network shut out. The catch below handles a fetch that FAILS;
+       it cannot handle one that was never there, because that throws before
+       there is a promise to catch on. The report prints plain either way, which
+       is the answer to both. */
+    if (typeof fetch !== 'function') return Promise.resolve(null);
+
     return fetch(LETTERHEAD)
       .then(function (r) { if (!r.ok) throw new Error('missing'); return r.blob(); })
       .then(function (b) {
