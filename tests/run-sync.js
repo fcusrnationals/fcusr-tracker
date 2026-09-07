@@ -1239,19 +1239,28 @@ function makeDevice(server, name) {
     const e5 = F.S.addEvent({ title: 'Made before syncing', unitId: F.S.nationalUnitId() });
     for (let i = 0; i < 4; i++) F.S.addTask({ kind: 'event', eventId: e5.id, title: 'Task ' + i });
 
-    /* A couple of rounds to get everything up and let the marks settle — a
-       record written in the same millisecond as the first round's mark is sent
-       once more, which is by design and costs one round. What matters is that
-       it stops, and stays stopped. */
-    for (let i = 0; i < 3; i++) await F.Sync.now();
-
-    const quiet = [];
-    for (let i = 0; i < 4; i++) {
+    /* Records written in the same millisecond as a round's mark are offered
+       once more, which is by design and costs a round — sometimes two, since a
+       change also schedules a round of its own. How many is not the point and
+       asserting it made this fail about twice in twenty-five runs on timing
+       alone. The property is that it STOPS, and then stays stopped. */
+    const sent = [];
+    let settledAfter = -1;
+    for (let i = 0; i < 10; i++) {
+      /* A breath between rounds, because the app leaves twenty seconds. Run
+         back to back, every round starts in the same millisecond the records
+         were written in, and the mark — one tick behind the round's start —
+         cannot get past them. That is the harness racing itself, not the app
+         misbehaving, and it made this fail about twice in twenty-five runs. */
+      await new Promise((r) => setTimeout(r, 6));
       const st = await F.Sync.now();
-      quiet.push(st.last ? st.last.sent : -1);
+      sent.push(st.last ? st.last.sent : -1);
+      if (sent.length >= 3 && sent.slice(-3).every((n) => n === 0)) { settledAfter = i + 1; break; }
     }
-    check('it settles and stays settled, rather than pushing for ever',
-      quiet.every((n) => n === 0), quiet.join(', ') + ' sent over four rounds');
+    check('it settles, rather than pushing the same rows for ever',
+      settledAfter > 0, sent.join(', ') + ' sent — never went quiet');
+    check('and it settles at once, not eventually',
+      settledAfter > 0 && settledAfter <= 4, 'took ' + settledAfter + ' rounds: ' + sent.join(', '));
 
     F.w.Date = realDate;
   }
