@@ -193,15 +193,37 @@
 
     // Deletions last: applying them after the records means a row deleted and
     // re-created within one window ends up in the state it was left in.
-    chain = chain.then(function () {
+    /* Paged, exactly like the records above, and for a reason that took a
+       thousand tombstones to show.
+
+       This used to be one ask with a cap and no second one. On its own that
+       would only have been slow — the mark would stop at the last tombstone
+       seen and the rest would come next round. But records and deletions share
+       ONE mark and the records run first, so anything edited after the last
+       tombstone that fitted in the page carried the mark past the ones that did
+       not, and they were never asked for again. A full reconcile did not save
+       it either: it starts from the beginning and truncates in the same place.
+
+       What a council saw was deleted work quietly back on one person's phone,
+       for good, and nowhere else. */
+    function deletionPage(from, guard) {
       // `deleted_at`, not `updated_at`: a tombstone has no other clock, and
       // asking for a column a table does not have is a refusal, not an empty list.
-      return Backend.changed('deletions', since, 1000, 'deleted_at').then(function (rows) {
-        (rows || []).forEach(function (row) {
+      return Backend.changed('deletions', from, PAGE, 'deleted_at').then(function (rows) {
+        rows = rows || [];
+        var last = from;
+        rows.forEach(function (row) {
           if (Store.applyRemoteDeletion(row.entity, row.entity_id, row.deleted_at)) counts.removed++;
           if (row.deleted_at && row.deleted_at > high) high = row.deleted_at;
+          if (row.deleted_at) last = row.deleted_at;
         });
-      }).catch(function (err) {
+        if (rows.length < PAGE || last === from || guard <= 0) return null;
+        return deletionPage(last, guard - 1);
+      });
+    }
+
+    chain = chain.then(function () {
+      return deletionPage(since, 40).catch(function (err) {
         /* Only a server that has never had the table gets a free pass — a
            council that has not run the sync migration yet. Anything else is a
            real fault, and swallowing it is how a deletion that never propagates
@@ -366,12 +388,24 @@
 
     if (full) { since = ''; pushedSince = ''; }
     var startedAt = '';
-    var deviceStart = new Date().toISOString();
+    var deviceStart = Store.now();
 
     return Backend.serverNow().then(function (t) {
       // Read before anything else: a row written while this sync runs must be
       // caught by the next one, not skipped because the mark was taken at the end.
-      startedAt = t || new Date().toISOString();
+      startedAt = t || Store.now();
+
+      /* The server's time is read for the pull mark and for nothing else.
+
+         Correcting this device's own clock by it was tried and taken out again.
+         It sounded right — a phone two days fast writes stamps two days ahead —
+         but the records it had already made stayed in its future, so they were
+         "still to send" against every mark it wrote afterwards, and it pushed
+         the same five rows every twenty seconds for ever.
+
+         The skew is answered where it actually bites instead: an edit is always
+         stamped later than the version it replaces, so a fast phone can be
+         corrected by anybody and does not win by having the wrong clock. */
       /* Whenever anything is still on a local id, not only on the very first
          round. A device that synced under an older version never reconciled,
          and pushing `unit-nat` where a uuid belongs is refused by the server. */

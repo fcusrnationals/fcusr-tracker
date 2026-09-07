@@ -84,10 +84,19 @@ function seedServerUnits(tables, now) {
 function makeServer() {
   const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {},
                    offices: {}, deletions: {}, term: {}, units: {}, council: {} };
+  /* A real server tells roughly the real time, and the devices talking to it
+     have roughly that time too. This used to answer with a fixed date in the
+     past, which made every device look like its clock was a day fast — so the
+     records they wrote were stamped ahead of the server's own clock, and that
+     is a state no healthy council is ever in. Tests written against it were
+     testing the stand-in's fiction.
+
+     Still strictly increasing, because the pull asks for "newer than" and two
+     rows sharing a stamp is a page that never ends. */
   let tick = 0;
   const now = () => {
     tick += 1;
-    return new Date(Date.UTC(2026, 8, 6, 12, 0, 0) + tick * 1000).toISOString();
+    return new Date(Date.now() + tick).toISOString();
   };
   seedServerUnits(tables, now);
   return {
@@ -110,10 +119,16 @@ function makeServer() {
         e.status = 400;
         return Promise.reject(e);
       }
+      /* PostgREST answers `order=<col>.asc&limit=N` and stops at N. This used to
+         hand back every row whatever it was asked for, so the cap the real
+         server applies — and every consequence of a page ending early — was
+         never once exercised here. A stand-in more generous than the real thing
+         hides exactly the faults it exists to catch. */
       return Promise.resolve(Object.keys(tables[table] || {})
         .map((k) => tables[table][k])
         .filter((r) => !since || String(r[key]) > String(since))
-        .sort((a, b) => String(a[key]).localeCompare(String(b[key]))));
+        .sort((a, b) => String(a[key]).localeCompare(String(b[key])))
+        .slice(0, limit || 500));
     },
     upsert(table, rows) {
       this.requests.push({ op: 'upsert', table, n: rows.length });
@@ -1067,6 +1082,162 @@ function makeDevice(server, name) {
     const u2 = two.S.units().filter((u) => u.code === 'CN')[0];
     check('so it reaches the other phone', u2 && u2.trackerName === 'CN Governor',
       u2 && u2.trackerName);
+  }
+
+  /* ---------------- a great many deletions at once ----------------
+     Records are fetched a page at a time, over and over, until the table is
+     exhausted. Deletions were fetched once, with a cap, and no second ask.
+
+     On its own that would only be slow: the mark would stop at the last
+     tombstone seen and the rest would come next round. But records and
+     deletions share ONE mark, and the records pass runs first — so if anything
+     was edited after the last tombstone that fitted in the page, the mark jumps
+     past the tombstones that did not fit and they are never asked for again.
+     Those rows stay on that phone for good, and a full reconcile does not save
+     it: it starts from the beginning and truncates in exactly the same place.
+
+     A council reaches this by clearing out a term, or by a mass removal, and
+     what it looks like is deleted work quietly reappearing on one person's
+     phone and nowhere else. */
+  console.log('\n--- a thousand deletions do not lose the rest ---');
+  {
+    const sD = makeServer();
+    const D = makeDevice(sD, 'Catcher');
+    const unit = D.S.nationalUnitId();
+
+    const ev3 = D.S.addEvent({ title: 'Clearing out', unitId: unit });
+    await D.Sync.now();
+
+    // 1200 tasks the council made and then deleted somewhere else.
+    const ids = [];
+    for (let i = 0; i < 1200; i++) {
+      const t = D.S.addTask({ kind: 'event', eventId: ev3.id, title: 'Task ' + i });
+      ids.push(t.id);
+    }
+    await D.Sync.now();
+    check('the phone is holding all of them', D.S.tasks().length >= 1200,
+      D.S.tasks().length);
+
+    ids.forEach((id) => {
+      delete sD.tables.tasks[id];
+      sD.tables.deletions['task:' + id] = {
+        entity: 'task', entity_id: id, unit_id: unit,
+        deleted_at: sD.now(), deleted_by: 'President'
+      };
+    });
+
+    /* Something edited AFTER the last of those tombstones. This is what carries
+       the shared mark past them. */
+    sD.tables.events[ev3.id].updated_at = sD.now();
+    sD.tables.events[ev3.id].body.updatedAt = '2030-01-01T00:00:00.000Z';
+    sD.tables.events[ev3.id].body.title = 'Clearing out (revised)';
+
+    await D.Sync.now();
+    await D.Sync.now();
+    check('every deletion arrives, not just the first page',
+      ids.every((id) => !D.S.task(id)),
+      ids.filter((id) => !!D.S.task(id)).length + ' left behind');
+
+    // And it survives the full reconcile, which starts from nothing.
+    await D.Sync.now({ full: true });
+    check('and they stay gone after a full round',
+      ids.every((id) => !D.S.task(id)),
+      ids.filter((id) => !!D.S.task(id)).length + ' came back');
+  }
+
+  /* ---------------- a phone whose clock is wrong ----------------
+     Merging is last-write-wins on the stamp the AUTHORING device wrote. So a
+     phone two days fast stamps everything two days in the future, and from then
+     on it wins every disagreement for ever: nobody else's genuine later edit can
+     ever be newer, and the corrections simply vanish with nothing said.
+
+     Students' phones have wrong clocks. A dead battery, a manual time zone, a
+     cheap handset that drifts. The server's own time is asked for on every round
+     already — it was just being thrown away. */
+  console.log('\n--- a phone with a wrong clock cannot win for ever ---');
+  {
+    const sC2 = makeServer();
+    const Right = makeDevice(sC2, 'Correct clock');
+    const Fast = makeDevice(sC2, 'Two days fast');
+
+    /* Two days ahead, the way a handset with a manual time zone is. Only this
+       device's clock moves; the server's is untouched. */
+    const SKEW = 2 * 24 * 3600 * 1000;
+    const realDate = Fast.w.Date;
+    function FakeDate(...a) {
+      return a.length ? new realDate(...a) : new realDate(realDate.now() + SKEW);
+    }
+    FakeDate.now = () => realDate.now() + SKEW;
+    FakeDate.parse = realDate.parse;
+    FakeDate.UTC = realDate.UTC;
+    FakeDate.prototype = realDate.prototype;
+    Fast.w.Date = FakeDate;
+
+    const ev4 = Right.S.addEvent({ title: 'Original title', unitId: Right.S.nationalUnitId() });
+    for (let i = 0; i < 2; i++) for (const d of [Right, Fast]) await d.Sync.now();
+    check('both phones have it', !!Fast.S.event(ev4.id) && !!Right.S.event(ev4.id));
+
+    // The fast phone edits it once.
+    Fast.S.updateEvent(ev4.id, { title: 'Edited on the fast phone' });
+    for (let i = 0; i < 2; i++) for (const d of [Fast, Right]) await d.Sync.now();
+    check('its edit travels', Right.S.event(ev4.id).title === 'Edited on the fast phone',
+      Right.S.event(ev4.id).title);
+
+    /* And now the correction, made afterwards by somebody whose clock is right.
+       This is the one that used to disappear. */
+    Right.S.updateEvent(ev4.id, { title: 'Corrected by the President' });
+    for (let i = 0; i < 2; i++) for (const d of [Right, Fast]) await d.Sync.now();
+
+    check('a later edit from a correct clock is not overruled',
+      Right.S.event(ev4.id).title === 'Corrected by the President',
+      Right.S.event(ev4.id).title);
+    check('and it reaches the fast phone too',
+      Fast.S.event(ev4.id).title === 'Corrected by the President',
+      Fast.S.event(ev4.id).title);
+
+    Fast.w.Date = realDate;
+  }
+
+  /* A fast phone that made records BEFORE it ever synced. Those carry its own
+     wrong clock, and once it learns the server's the correction moves its clock
+     backwards — so those records sit ahead of every mark it will ever write.
+     If the mark is a wall clock and the records are in its future, they are
+     "still to send" on every round, for ever: a phone pushing the same rows
+     every twenty seconds until its battery dies. */
+  console.log('\n--- a fast phone settles down instead of pushing for ever ---');
+  {
+    const sF = makeServer();
+    const F = makeDevice(sF, 'Fast');
+    const SKEW = 2 * 24 * 3600 * 1000;
+    const realDate = F.w.Date;
+    function FakeDate(...a) {
+      return a.length ? new realDate(...a) : new realDate(realDate.now() + SKEW);
+    }
+    FakeDate.now = () => realDate.now() + SKEW;
+    FakeDate.parse = realDate.parse;
+    FakeDate.UTC = realDate.UTC;
+    FakeDate.prototype = realDate.prototype;
+    F.w.Date = FakeDate;
+
+    // Work done before it has ever spoken to the server.
+    const e5 = F.S.addEvent({ title: 'Made before syncing', unitId: F.S.nationalUnitId() });
+    for (let i = 0; i < 4; i++) F.S.addTask({ kind: 'event', eventId: e5.id, title: 'Task ' + i });
+
+    /* A couple of rounds to get everything up and let the marks settle — a
+       record written in the same millisecond as the first round's mark is sent
+       once more, which is by design and costs one round. What matters is that
+       it stops, and stays stopped. */
+    for (let i = 0; i < 3; i++) await F.Sync.now();
+
+    const quiet = [];
+    for (let i = 0; i < 4; i++) {
+      const st = await F.Sync.now();
+      quiet.push(st.last ? st.last.sent : -1);
+    }
+    check('it settles and stays settled, rather than pushing for ever',
+      quiet.every((n) => n === 0), quiet.join(', ') + ' sent over four rounds');
+
+    F.w.Date = realDate;
   }
 
   console.log('\n--- no console errors ---');

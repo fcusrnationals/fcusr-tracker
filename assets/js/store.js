@@ -1020,6 +1020,14 @@
 
   /* A stamp that is always later than the one before it.
 
+     Used on every edit, not only on the singletons it was written for. An edit
+     has to be newer than the version it replaces or it is not an edit at all —
+     merging asks exactly that question and discards anything that is not. Plain
+     "now" cannot promise it: a phone whose clock is corrected backwards, or two
+     changes inside one millisecond, both produce an edit that is not newer than
+     what it overwrites, and it disappears with nothing said.
+
+
      A phone's clock has millisecond resolution, and two changes to the same
      thing inside one millisecond is ordinary — a form saves, a sync fires, a
      second edit lands. Sync compares these stamps with a strict "newer than", so
@@ -1130,7 +1138,7 @@
       if (r.access && p.access !== r.access) { p.access = r.access; changed = true; }
       if (!p.claimed && r.active !== undefined) { p.claimed = true; changed = true; }
 
-      if (changed) { p.updatedAt = nowISO(); fixed++; }
+      if (changed) { p.updatedAt = bumpStamp(p.updatedAt); fixed++; }
     });
 
     if (fixed) commit();
@@ -1164,7 +1172,7 @@
     if ('eventIds' in data && Array.isArray(data.eventIds)) p.eventIds = data.eventIds.slice(0, 200);
     if ('claimed' in data) p.claimed = !!data.claimed;
     if ('isHead' in data) p.isHead = !!data.isHead;
-    p.updatedAt = nowISO();
+    p.updatedAt = bumpStamp(p.updatedAt);
     commit();
     return p;
   }
@@ -1186,7 +1194,7 @@
     if (!p) return null;
     p.eventIds = (p.eventIds || []).filter(function (x) { return x !== eventId; });
     if (!p.eventIds.length) p.active = false;
-    p.updatedAt = nowISO();
+    p.updatedAt = bumpStamp(p.updatedAt);
     commit();
     return p;
   }
@@ -1259,13 +1267,13 @@
 
       group.slice(1).forEach(function (drop) {
         state.tasks.forEach(function (t) {
-          if (t.assigneeId === drop.id) { t.assigneeId = keep.id; t.updatedAt = nowISO(); }
+          if (t.assigneeId === drop.id) { t.assigneeId = keep.id; t.updatedAt = bumpStamp(t.updatedAt); }
         });
         state.events.forEach(function (e) {
-          if (e.headId === drop.id) { e.headId = keep.id; e.updatedAt = nowISO(); }
+          if (e.headId === drop.id) { e.headId = keep.id; e.updatedAt = bumpStamp(e.updatedAt); }
         });
         state.letters.forEach(function (l) {
-          if (l.inChargeId === drop.id) { l.inChargeId = keep.id; l.updatedAt = nowISO(); }
+          if (l.inChargeId === drop.id) { l.inChargeId = keep.id; l.updatedAt = bumpStamp(l.updatedAt); }
         });
         // The activities they were taken on for belong to the person, not the row.
         (drop.eventIds || []).forEach(function (evId) {
@@ -1280,7 +1288,7 @@
         removed++;
       });
 
-      keep.updatedAt = nowISO();
+      keep.updatedAt = bumpStamp(keep.updatedAt);
     });
 
     if (removed) {
@@ -1297,17 +1305,17 @@
     if (!p) return false;
 
     state.tasks.forEach(function (t) {
-      if (t.assigneeId === id) { t.assigneeId = ''; t.updatedAt = nowISO(); }
+      if (t.assigneeId === id) { t.assigneeId = ''; t.updatedAt = bumpStamp(t.updatedAt); }
     });
     state.events.forEach(function (e) {
-      if (e.headId === id) { e.headId = ''; e.updatedAt = nowISO(); }
+      if (e.headId === id) { e.headId = ''; e.updatedAt = bumpStamp(e.updatedAt); }
     });
     state.letters.forEach(function (l) {
       if (l.inChargeId !== id) return;
       // The name is kept as typed text so the trail still says who was carrying it.
       l.inChargeId = '';
       if (!l.inChargeName) l.inChargeName = p.name;
-      l.updatedAt = nowISO();
+      l.updatedAt = bumpStamp(l.updatedAt);
     });
 
     tombstone('person', id);
@@ -1391,7 +1399,7 @@
       u.kind = data.kind;
     }
     if ('active' in data && u.kind !== 'national') u.active = !!data.active;
-    u.updatedAt = nowISO();
+    u.updatedAt = bumpStamp(u.updatedAt);
     commit();
     return u;
   }
@@ -1491,7 +1499,7 @@
     if ('status' in data && EVENT_STATUSES.indexOf(data.status) >= 0) e.status = data.status;
     if ('unitId' in data && unit(data.unitId)) e.unitId = data.unitId;
     if ('feedbackLink' in data) e.feedbackLink = formLink(data.feedbackLink);
-    e.updatedAt = nowISO();
+    e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
   }
@@ -1511,7 +1519,7 @@
       throw new Error('That needs to be a Google Forms link — docs.google.com/forms or forms.gle.');
     }
     e.feedbackLink = v;
-    e.updatedAt = nowISO();
+    e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
   }
@@ -1529,7 +1537,7 @@
     e.feedbackWaivedReason = str(r, LIMITS.reason);
     e.feedbackWaivedBy = str(by || '', LIMITS.name);
     e.feedbackWaivedAt = nowISO();
-    e.updatedAt = nowISO();
+    e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
   }
@@ -1541,7 +1549,7 @@
     e.feedbackWaivedReason = '';
     e.feedbackWaivedBy = '';
     e.feedbackWaivedAt = '';
-    e.updatedAt = nowISO();
+    e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
   }
@@ -1643,7 +1651,7 @@
     if ('priority' in data && PRIORITIES.indexOf(data.priority) >= 0) t.priority = data.priority;
     if ('status' in data && STATUSES.indexOf(data.status) >= 0) applyStatus(t, data.status);
     if (t.status !== 'On hold') t.blockedReason = '';
-    t.updatedAt = nowISO();
+    t.updatedAt = bumpStamp(t.updatedAt);
     commit();
     return t;
   }
@@ -1804,7 +1812,7 @@
       if (k === 'id' || k === 'eventId' || k === 'createdAt') return;
       r[k] = patch[k];
     });
-    r.updatedAt = nowISO();
+    r.updatedAt = bumpStamp(r.updatedAt);
     // Run it back through the sanitiser so nothing malformed can settle in state.
     var idx = state.reports.indexOf(r);
     state.reports[idx] = cleanReport(r);
@@ -2049,7 +2057,7 @@
       if (isFinite(d) && d > 0 && d < 400) o.turnaroundDays = Math.round(d);
     }
     if ('active' in data) o.active = !!data.active;
-    o.updatedAt = nowISO();
+    o.updatedAt = bumpStamp(o.updatedAt);
     commit();
     return o;
   }
@@ -2217,7 +2225,7 @@
     if ('status' in data && LETTER_STATUSES.indexOf(data.status) >= 0) l.status = data.status;
     if ('internal' in data) l.internal = !!data.internal;
     if (Array.isArray(data.route) || Array.isArray(data.officeIds)) setRoute(l, toEntries(data));
-    l.updatedAt = nowISO();
+    l.updatedAt = bumpStamp(l.updatedAt);
     commit();
     return l;
   }
@@ -2243,7 +2251,7 @@
     if (!isFinite(at)) at = l.stops.length;
 
     l.stops.splice(at, 0, st);
-    l.updatedAt = nowISO();
+    l.updatedAt = bumpStamp(l.updatedAt);
     commit();
     return l;
   }
@@ -2380,7 +2388,7 @@
     s.releasedAt = '';
     s.outcome = '';
     l.status = 'Routing';
-    l.updatedAt = nowISO();
+    l.updatedAt = bumpStamp(l.updatedAt);
     commit();
     return l;
   }
@@ -2406,7 +2414,7 @@
       l.status = currentStop(l) ? 'Routing' : 'Approved';
     }
 
-    l.updatedAt = nowISO();
+    l.updatedAt = bumpStamp(l.updatedAt);
     commit();
     return l;
   }
@@ -2424,7 +2432,7 @@
       l.stops.splice(at + 1, 0, respawn(s));
     }
     l.status = 'Routing';
-    l.updatedAt = nowISO();
+    l.updatedAt = bumpStamp(l.updatedAt);
     commit();
     return l;
   }
@@ -2659,7 +2667,7 @@
     /* The record of the year, taken before anything is removed. */
     var keepTerm = cleanTerm(state.term);
     keepTerm.closedAt = nowISO();
-    keepTerm.updatedAt = nowISO();
+    keepTerm.updatedAt = bumpStamp(keepTerm.updatedAt);
     keepTerm.archive = units({ activeOnly: true }).map(function (u) {
       var c = unitCompliance(u.id);
       return {
@@ -2720,7 +2728,7 @@
     u.letterhead = lh;
     u.letterheadBy = lh ? str(data.letterheadBy, LIMITS.name) : '';
     u.letterheadAt = lh ? nowISO() : '';
-    u.updatedAt = nowISO();
+    u.updatedAt = bumpStamp(u.updatedAt);
     commit();
     return u;
   }
@@ -2895,7 +2903,7 @@
       e.unitId = natId;
       e.sample = true;
       e.createdAt = nowISO();
-      e.updatedAt = nowISO();
+      e.updatedAt = bumpStamp(e.updatedAt);
       state.events.push(e);
       return e.id;
     });
@@ -3202,6 +3210,7 @@
     council: council, applyRemoteCouncil: applyRemoteCouncil,
     outbound: outbound, deletions: deletions, isDeleted: isDeleted,
     syncState: syncState, markSynced: markSynced, remapIds: remapIds,
+    now: nowISO,
     resetSyncMarks: resetSyncMarks,
     commit: commit,
     insertStop: insertStop, presidentOfficeId: presidentOfficeId,
