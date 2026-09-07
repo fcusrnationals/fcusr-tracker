@@ -133,6 +133,22 @@ function makeServer() {
     upsert(table, rows) {
       this.requests.push({ op: 'upsert', table, n: rows.length });
 
+      /* Row-level security refuses writes, and refuses them for the whole
+         request — PostgREST does not write the rows it likes and skip the rest.
+         This stand-in used to accept everything from anybody, so a device
+         holding a record it may read but not write looked perfectly healthy
+         here and could not sync at all in the field. */
+      if (this.refuseWrite) {
+        for (const r of rows) {
+          if (this.refuseWrite(table, r)) {
+            const e = new Error('new row violates row-level security policy for table "' +
+              table + '"');
+            e.status = 401;
+            return Promise.reject(e);
+          }
+        }
+      }
+
       /* The unique indexes the real schema carries. Without them this stand-in
          accepts two offices sharing a code, or two reports for one activity,
          and the suite happily proves a collision cannot happen while Postgres
@@ -1238,6 +1254,63 @@ function makeDevice(server, name) {
       quiet.every((n) => n === 0), quiet.join(', ') + ' sent over four rounds');
 
     F.w.Date = realDate;
+  }
+
+  /* ---------------- a record you may read but not write ----------------
+     An officer of a college is attached to a National activity so it shows on
+     their dashboard. They may read it — that is the point — and they may not
+     write it, because a college does not edit the Republic's activities.
+
+     Their phone holds it all the same. And a full round sends everything the
+     phone holds, so it offers that activity back; the server refuses the whole
+     request, because row-level security refuses a request, not a row. So one
+     record they were deliberately given breaks every sync they will ever run,
+     and nothing else gets through either — their own college's work included. */
+  console.log('\n--- one record you may not write does not stop the rest ---');
+  {
+    const sR = makeServer();
+    const Gov = makeDevice(sR, 'Governor');
+    const natUnit = Gov.S.nationalUnitId();
+    const cn = Gov.S.units().filter((u) => u.kind === 'province')[0];
+
+    // A National activity this phone was given sight of, and its own college's.
+    const natEv = Gov.S.addEvent({ title: 'National General Assembly', unitId: natUnit });
+    const ownEv = Gov.S.addEvent({ title: 'CN Nurses Week', unitId: cn.id });
+
+    /* The server now behaves as the policy does: this device may write its own
+       college and nothing else. */
+    sR.refuseWrite = function (table, row) {
+      if (table !== 'events') return false;
+      return row.unit_id && row.unit_id !== cn.id;
+    };
+
+    const st = await Gov.Sync.now();
+    check('the round does not fault', !st.error, st.error);
+    check('their own college\u2019s activity still reaches the server',
+      !!sR.tables.events[ownEv.id],
+      Object.keys(sR.tables.events).length + ' events on the server');
+    check('the one they may not write is simply left alone',
+      !sR.tables.events[natEv.id]);
+    check('and it is still on their phone, where they can read it',
+      !!Gov.S.event(natEv.id));
+
+    check('and the refusal is counted, not swallowed',
+      st.last && st.last.refused === 1, st.last && st.last.refused);
+
+    // And the next round is not stuck on it either.
+    const again = await Gov.Sync.now();
+    check('the round after that is fine too', !again.error, again.error);
+
+    /* Nor is it offering the same record back one at a time for ever. Finding
+       out which row a refusal was about costs one request per row; doing that
+       every hour, for the life of a term, on a phone that already knows the
+       answer, is not a cost anybody should pay twice. */
+    const before = sR.requests.length;
+    await Gov.Sync.now({ full: true });
+    const singles = sR.requests.slice(before)
+      .filter((r) => r.op === 'upsert' && r.table === 'events' && r.n === 1).length;
+    check('and it does not go back to asking one row at a time', singles <= 1,
+      JSON.stringify(sR.requests.slice(before).filter((r) => r.op === 'upsert')));
   }
 
   console.log('\n--- no console errors ---');

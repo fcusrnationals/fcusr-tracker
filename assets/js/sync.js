@@ -238,20 +238,68 @@
 
   /* ---------- the push ---------- */
 
+  /* Records this device holds and the server will not take from it.
+
+     An officer of a college is attached to a National activity so that it shows
+     on their dashboard: they may read it, and they may not write it. Their phone
+     holds it all the same, and a full round offers back everything the phone
+     holds — so the server refuses, and row-level security refuses the REQUEST,
+     not the row. One record they were deliberately given therefore broke every
+     sync they would ever run, and their own college's work never left the phone
+     either.
+
+     Remembered for the session so a settled device is not re-offering them one
+     at a time every hour. Not written down anywhere: what a person may write can
+     change the moment somebody enrols them differently, and a refusal recorded
+     for ever would outlive the reason for it. */
+  var unwritable = {};
+
+  function offer(table, rows) {
+    if (!rows.length) return Promise.resolve(0);
+    return Backend.upsert(table, rows).then(function () { return rows.length; })
+      .catch(function (err) {
+        if (!err || (err.status !== 401 && err.status !== 403)) throw err;
+        /* Something in here is not this device's to write, and the answer does
+           not say which. Offer them singly to find out, take what is taken, and
+           remember the rest so this only happens once. */
+        var taken = 0;
+        var c = Promise.resolve();
+        rows.forEach(function (row) {
+          c = c.then(function () {
+            return Backend.upsert(table, [row]).then(function () { taken += 1; })
+              .catch(function (e) {
+                if (e && (e.status === 401 || e.status === 403)) {
+                  unwritable[table + ':' + row.id] = 1;
+                  refused += 1;
+                  return;
+                }
+                throw e;
+              });
+          });
+        });
+        return c.then(function () { return taken; });
+      });
+  }
+
+  var refused = 0;
+
   function push(since) {
     var out = Store.outbound(since);
     var sent = 0;
+    refused = 0;
     var chain = Promise.resolve();
 
     TABLES.forEach(function (t) {
-      var rows = (out.records[t.kind] || []).map(function (r) { return toRow(t.kind, r); });
+      var rows = (out.records[t.kind] || [])
+        .filter(function (r) { return !unwritable[t.table + ':' + r.id]; })
+        .map(function (r) { return toRow(t.kind, r); });
       if (!rows.length) return;
       // In batches, because one letter with forty photos' worth of body is not
       // the same size as forty tasks, and a request that is too big fails whole.
       for (var i = 0; i < rows.length; i += 50) {
         (function (slice) {
           chain = chain.then(function () {
-            return Backend.upsert(t.table, slice).then(function () { sent += slice.length; });
+            return offer(t.table, slice).then(function (n) { sent += n; });
           });
         })(rows.slice(i, i + 50));
       }
@@ -446,7 +494,12 @@
         });
         state.last = {
           added: res.counts.added, updated: res.counts.updated,
-          removed: res.counts.removed, sent: sent, at: startedAt, full: full
+          removed: res.counts.removed, sent: sent, at: startedAt, full: full,
+          /* Records this phone holds that the server will not take from it.
+             Not an error — it is usually correct, an officer holding sight of a
+             National activity they may not edit — but it is not nothing either,
+             and a number nobody can see is a number nobody can act on. */
+          refused: refused
         };
         /* Something arrived, so whatever is on screen is out of date. This is
            the only place a sync is allowed to announce itself — and only when

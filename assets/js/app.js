@@ -643,6 +643,17 @@
         (l ? '<p class="small muted">Last round: ' + (l.added + l.updated) + ' taken in, ' +
              l.sent + ' sent, ' + U.esc(U.fmtStamp(st.at)) + '.</p>' : '') +
 
+        /* Records this device holds that the server will not take from it. It is
+           usually right — an officer given sight of a National activity may read
+           it and not edit it — but it is not nothing, and a number nobody can
+           see is a number nobody can act on. */
+        (l && l.refused
+          ? '<p class="small muted">' + U.plural(l.refused, 'record') + ' on this device ' +
+            (l.refused === 1 ? 'is' : 'are') + ' not yours to change, so ' +
+            (l.refused === 1 ? 'it was' : 'they were') + ' left as they are. That is normal ' +
+            'for anything another unit owns.</p>'
+          : '') +
+
         /* What the app is doing on its own, said plainly, because otherwise the
            only visible state is a word that has been wrong before. */
         '<p class="small muted">It checks by itself a few seconds after any change ' +
