@@ -29,23 +29,6 @@
         : 'The Republic\u2019s settings.') + '</div></div></div>' +
       '<!--TABS-->';
 
-    if (Store.dryRun().active) {
-      var invented = Store.events().filter(function (e) { return e.sample; }).length;
-      var real = Store.events().filter(function (e) { return !e.sample; }).length;
-      html += '<div class="card" style="background:var(--st-on-hold-bg);' +
-        'border-color:var(--st-on-hold-bd);margin-bottom:16px">' +
-        '<div class="strong" style="margin-bottom:4px">The system is in a dry run.</div>' +
-        '<div class="small">' + U.plural(invented, 'invented activity', 'invented activities') +
-        ' and a rehearsal closing date are in place so the end of term can be walked through. ' +
-        (real
-          ? U.plural(real, 'activity', 'activities') + ' of your own ' +
-            (real === 1 ? 'is' : 'are') + ' kept separately and will survive.'
-          : 'Anything you create yourself is kept separately and will survive.') +
-        '</div>' +
-        '<button type="button" class="btn btn-sm" style="margin-top:12px" data-end-dryrun>' +
-        'End the dry run</button></div>';
-    }
-
     /* ---- people, and what they can reach ----
        These were two tabs, and they are one subject: the list of everybody, and
        whether each of them can sign in. Somebody looking for an officer had to
@@ -272,9 +255,6 @@
     /* ---- data ---- */
     if (!mineOnly) html += section('data', 'Data', '',
       '<div style="padding:14px" class="stack">' +
-      (Store.hasSampleData()
-        ? '<button type="button" class="btn btn-block" data-clear-sample>' + UI.icon('trash') + 'Clear sample data</button>'
-        : '') +
       '<button type="button" class="btn btn-danger btn-block" data-reset>' + UI.icon('trash') + 'Delete all data</button>' +
       '</div>');
 
@@ -305,7 +285,6 @@
            : unsent ? ' <span class="chip st-on-hold"><span class="dot"></span>not sent</span>' : '') +
         '</span>' +
         '<span class="task-meta">here ' + r.here +
-          (r.real !== null && r.real !== r.here ? ' (' + r.real + ' real)' : '') +
           '<span class="sep">·</span>server ' +
           (r.there === null ? '—' : r.there) + '</span>' +
         '</span></div>';
@@ -475,9 +454,15 @@
           '<span class="sep">·</span>' + U.plural(held, 'event') +
           (s.overdue ? '<span class="sep">·</span><span class="late">' + s.overdue + ' overdue</span>' : '') +
         '</span></button>' +
-      '<span class="task-right">' +
+      /* A unit's roster belongs with the unit. Enrolling a college's officers
+         from a page headed "Access" meant choosing the college from a dropdown
+         after arriving somewhere that had nothing to do with it. */
+      '<span class="task-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
+        '<button type="button" class="btn btn-sm" data-unit-people="' + U.esc(u.id) + '">' +
+          UI.icon('users') + U.plural(Store.people({ unitId: u.id }).length, 'person', 'people') +
+        '</button>' +
         (u.kind === 'national' ? '' :
-          '<button type="button" class="btn btn-sm" data-toggle-unit="' + U.esc(u.id) + '">' +
+          '<button type="button" class="btn btn-sm btn-ghost" data-toggle-unit="' + U.esc(u.id) + '">' +
           (u.active === false ? 'Reactivate' : 'Deactivate') + '</button>') +
       '</span></div>';
   }
@@ -604,8 +589,6 @@
     var cpw = root.querySelector('[data-change-pw]');
     if (cpw) cpw.addEventListener('click', function () { Auth.changePassword(); });
 
-    var endDry = root.querySelector('[data-end-dryrun]');
-    if (endDry && global.TermUI) endDry.addEventListener('click', TermUI.endDryRunForm);
 
     var mh = root.querySelector('[data-my-handover]');
     if (mh && global.TermUI) mh.addEventListener('click', TermUI.myHandoverForm);
@@ -627,6 +610,12 @@
       }).catch(function (err) {
         termExport.disabled = false;
         UI.toast(err.message || 'That could not be exported.', 'error');
+      });
+    });
+
+    U.els('[data-unit-people]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        Forms.unitPeopleForm(b.getAttribute('data-unit-people'));
       });
     });
 
@@ -883,20 +872,6 @@
         });
       };
       reader.readAsText(f);
-    });
-
-    var clearSample = root.querySelector('[data-clear-sample]');
-    if (clearSample) clearSample.addEventListener('click', function () {
-      UI.confirm({
-        title: 'Clear the sample data?',
-        message: 'The example events, their tasks and the sample officers will be removed.',
-        detail: 'Anything you created yourself stays.',
-        confirmLabel: 'Clear sample data'
-      }).then(function (ok) {
-        if (!ok) return;
-        Store.clearSampleData();
-        UI.toast('Sample data cleared.');
-      });
     });
 
     var reset = root.querySelector('[data-reset]');

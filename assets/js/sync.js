@@ -317,11 +317,6 @@
   function pushTerm(since) {
     var t = Store.term();
     if (!t.declaredAt) return Promise.resolve(0);
-    /* The rehearsal's closing date is part of the rehearsal. Everything else
-       invented stays on the device that invented it, and a date that says the
-       term ends next month has no business reaching a council that never
-       started a dry run. */
-    if (Store.dryRun().active) return Promise.resolve(0);
     if (since && !newer(t.updatedAt || '', since)) return Promise.resolve(0);
     return Backend.upsert('term', [{ id: 1, body: t }]).then(function () { return 1; });
   }
@@ -527,12 +522,6 @@
       letter: Store.letters().length,
       office: Store.offices().length
     };
-    var mine = {
-      event: Store.events().filter(function (e) { return !e.sample; }).length,
-      task: Store.tasks().filter(function (t) { return !t.sample; }).length,
-      person: Store.people().filter(function (p) { return !p.sample; }).length
-    };
-
     var rows = [];
     var chain = Promise.resolve();
     var trouble = '';
@@ -544,7 +533,6 @@
             kind: t.kind,
             table: t.table,
             here: local[t.kind] || 0,
-            real: mine[t.kind] === undefined ? null : mine[t.kind],
             there: (server || []).length
           });
         }).catch(function (err) {

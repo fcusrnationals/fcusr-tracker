@@ -164,11 +164,6 @@
       offices: seedOffices(),
       officesSeed: OFFICE_SEED_VERSION,
       term: blankTerm(),
-      /* The dry run: the site seeded with invented activities and a closing date
-         a month out, so the council can walk the end of term through before it
-         matters. Everything invented carries sample:true, which is what makes
-         ending the dry run able to keep the real work and drop the rest. */
-      dryRun: { active: false, startedAt: '' },
       people: [], events: [], tasks: [], reports: [], letters: [],
       /* What has been deleted, and when. A row removed on one phone has to stay
          removed: without this the next device to sync sees it missing from the
@@ -191,7 +186,13 @@
     try { raw = global.localStorage.getItem(KEY); } catch (e) { raw = null; }
     if (!raw) {
       state = blank();
-      seed();
+      /* Empty. The tracker used to open on an invented council — nine
+         activities, sixteen officers, a closing date next month — so that the
+         end of term could be walked through before it mattered. It was a good
+         idea and it went wrong in the field: every device seeded its own copy
+         with its own ids, syncing merged them, and officers opened the app onto
+         three of everything and a closing date nobody had set. The rehearsal is
+         a fixture the tests ask for now, not something the council is given. */
       save();
       return;
     }
@@ -201,7 +202,6 @@
     } catch (e) {
       console.warn('Saved data could not be read; starting fresh.', e);
       state = blank();
-      seed();
     }
   }
 
@@ -288,6 +288,10 @@
       }).slice(0, 200),
       // True once they have set a password and can actually sign in.
       claimed: !!p.claimed,
+      /* The head of their unit: a Governor, or the Vice Governor who stands in.
+         It is what opens their own council's settings to them, and nothing
+         else — so it is the National government's to set. */
+      isHead: !!p.isHead,
       active: p.active !== false,
       sample: !!p.sample,
       createdAt: stamp(p.createdAt),
@@ -573,8 +577,14 @@
     if (!c) return 'skipped';
     var clean = c.clean(rec);
     if (!clean || !U.isUuid(clean.id)) return 'skipped';
-    // Somebody's rehearsal, from a version that used to push them. Not ours.
-    if (clean.sample) return 'skipped';
+    /* Somebody's rehearsal, from a version that used to seed one and push it.
+       Ignoring it is not enough — it would sit on the server forever, offered to
+       every device on every round. Recording it as deleted is what sweeps it
+       off, from whichever device happens to see it first. */
+    if (clean.sample) {
+      tombstone(kind, clean.id);
+      return 'skipped';
+    }
 
     // Deleted here since: the server has not heard yet, and will on the push.
     var gone = state.deleted[kind] && state.deleted[kind][clean.id];
@@ -848,10 +858,6 @@
     s.letters = (Array.isArray(data.letters) ? data.letters : []).map(cleanLetter).filter(Boolean);
 
     s.term = cleanTerm(data.term);
-    s.dryRun = {
-      active: !!(data.dryRun && data.dryRun.active),
-      startedAt: data.dryRun && data.dryRun.startedAt ? stamp(data.dryRun.startedAt) : ''
-    };
     s.deleted = cleanDeleted(data.deleted);
     s.sync = {
       pulled: data.sync && typeof data.sync.pulled === 'string' ? stamp(data.sync.pulled) : '',
@@ -916,6 +922,37 @@
     });
     s.letters = s.letters.filter(function (l) { return l.stops.length > 0; });
     s.tasks.forEach(function (t) { if (!personIds[t.assigneeId]) t.assigneeId = ''; });
+
+    /* The rehearsal, wherever it still is.
+
+       Devices that ran an older version are holding invented activities and
+       officers, and some of it reached the server before it was kept off. This
+       clears it once, on every device as it updates, and records the deletions
+       so it goes from the server and from everybody else too. Nobody has to
+       find a button, and it cannot come back: nothing seeds it any more. */
+    var sampleEvents = {};
+    s.events.forEach(function (e) { if (e.sample) sampleEvents[e.id] = 1; });
+    var doomed = function (list, r) {
+      if (r.sample) return true;
+      // A task or a letter written against an invented activity goes with it.
+      return (list !== 'people') && !!r.eventId && !!sampleEvents[r.eventId];
+    };
+
+    var KIND = { events: 'event', tasks: 'task', letters: 'letter',
+                 people: 'person', reports: 'report' };
+    var at = nowISO();
+    Object.keys(KIND).forEach(function (list) {
+      var going = s[list].filter(function (r) { return doomed(list, r); });
+      if (!going.length) return;
+      if (!s.deleted[KIND[list]]) s.deleted[KIND[list]] = {};
+      going.forEach(function (r) { s.deleted[KIND[list]][r.id] = at; });
+      s[list] = s[list].filter(function (r) { return !doomed(list, r); });
+    });
+
+    // The closing date the rehearsal invented is not the council's.
+    if (s.term && s.term.declaredBy === 'Dry run') s.term = blankTerm();
+    delete s.dryRun;
+
     return normaliseIds(s);
   }
 
@@ -1009,7 +1046,7 @@
          default meant an officer enrolled into a college was filed as national,
          so their own Governor could not find them and the national roster filled
          with people who had never been national. */
-      email: data.email,
+      email: data.email, isHead: !!data.isHead,
       unitId: data.unitId ||
         ((global.Auth && Auth.signedIn() && Auth.myUnitId()) || nationalUnitId()),
       access: data.access, eventIds: data.eventIds, claimed: data.claimed,
@@ -1065,6 +1102,11 @@
     return null;
   }
 
+  /* The head, and the person standing in, for one unit. */
+  function unitHeads(unitId) {
+    return people({ unitId: unitId }).filter(function (p) { return p.isHead; });
+  }
+
   function updatePerson(id, data) {
     var p = person(id);
     if (!p) return null;
@@ -1077,6 +1119,7 @@
     if ('access' in data) p.access = oneOf(data.access, ['officer', 'volunteer'], p.access);
     if ('eventIds' in data && Array.isArray(data.eventIds)) p.eventIds = data.eventIds.slice(0, 200);
     if ('claimed' in data) p.claimed = !!data.claimed;
+    if ('isHead' in data) p.isHead = !!data.isHead;
     p.updatedAt = nowISO();
     commit();
     return p;
@@ -2443,25 +2486,6 @@
 
   function term() { return state.term; }
 
-  function dryRun() { return state.dryRun; }
-
-  /* Ending the dry run. Everything invented goes; everything the council
-     actually made stays, because the two were never mixed — invented records
-     carry sample:true and real ones do not. The declared closing date goes with
-     it, since it was part of the rehearsal. */
-  function endDryRun() {
-    clearSampleData();
-    state.term = blankTerm();
-    state.dryRun = { active: false, startedAt: '' };
-    commit();
-    return {
-      events: state.events.length,
-      tasks: state.tasks.length,
-      letters: state.letters.length,
-      people: state.people.length
-    };
-  }
-
   function declareTerm(endDate, opts) {
     opts = opts || {};
     var d = dateOnly(endDate);
@@ -2709,44 +2733,6 @@
     };
   }
 
-  function clearSampleData() {
-    var removedEvents = state.events.filter(function (e) { return e.sample; }).map(function (e) { return e.id; });
-
-    /* Tombstoned as well as removed. A version of this app used to push the
-       rehearsal to the server, so a council that has already synced has
-       invented officers and activities sitting there. Recording the deletions
-       is what sweeps them off it rather than leaving them for every device to
-       keep ignoring. */
-    state.events.forEach(function (e) { if (e.sample) tombstone('event', e.id); });
-    state.tasks.forEach(function (t) {
-      if (t.sample || removedEvents.indexOf(t.eventId) >= 0) tombstone('task', t.id);
-    });
-    state.letters.forEach(function (l) {
-      if (l.sample || removedEvents.indexOf(l.eventId) >= 0) tombstone('letter', l.id);
-    });
-    state.people.forEach(function (p) { if (p.sample) tombstone('person', p.id); });
-    state.reports.forEach(function (r) {
-      if (removedEvents.indexOf(r.eventId) >= 0) tombstone('report', r.id);
-    });
-    state.events = state.events.filter(function (e) { return !e.sample; });
-    state.letters = state.letters.filter(function (l) {
-      return !l.sample && removedEvents.indexOf(l.eventId) === -1;
-    });
-    state.tasks = state.tasks.filter(function (t) {
-      return !t.sample && removedEvents.indexOf(t.eventId) === -1;
-    });
-    state.people = state.people.filter(function (p) { return !p.sample; });
-    state.seeded = true;
-    commit();
-  }
-
-  function hasSampleData() {
-    return state.letters.some(function (l) { return l.sample; }) ||
-      state.events.some(function (e) { return e.sample; }) ||
-      state.tasks.some(function (t) { return t.sample; }) ||
-      state.people.some(function (p) { return p.sample; });
-  }
-
   // Wipes people, events and tasks. The letterhead is setup, not tracker data, so it stays.
   /* Take the council's work off this device, without telling anyone it was
      deleted.
@@ -2791,6 +2777,22 @@
   }
 
   /* ---------- seed ---------- */
+
+  /* An invented council, for the tests.
+
+     It is no longer given to anybody: the app opens empty. The suites need
+     something to walk through, so they ask for it by name — and the underscore
+     is the whole point, because this is not part of what the app does. */
+  function _seedRehearsal() {
+    seed();
+    /* The fixture is loaded deliberately, so it must not be swept away by the
+       clearing pass that runs when real data is read back in. */
+    ['events', 'tasks', 'letters', 'people', 'reports'].forEach(function (list) {
+      state[list].forEach(function (r) { delete r.sample; });
+    });
+    commit();
+    return state;
+  }
 
   function seed() {
     var t = U.today();
@@ -3118,17 +3120,6 @@
       'Althea Ramirez', ['AUTH', 'GOV'], null);
     if (n3) n3.internal = true;
 
-    /* The rehearsal. A closing date a month out, so a council opening this for
-       the first time lands in the end of term with something to look at rather
-       than an empty screen and an abstract explanation. */
-    state.term = blankTerm();
-    state.term.endDate = U.addDays(U.today(), 30);
-    state.term.note = 'Dry run — the system is being rehearsed before it is used for real.';
-    state.term.declaredAt = nowISO();
-    state.term.declaredBy = 'Dry run';
-    state.term.updatedAt = nowISO();
-    state.dryRun = { active: true, startedAt: nowISO() };
-
     state.seeded = true;
   }
 
@@ -3171,7 +3162,6 @@
     org: org, updateOrg: updateOrg,
     templateFor: templateFor, setUnitTemplate: setUnitTemplate,
     term: term, termStatus: termStatus, declareTerm: declareTerm, withdrawTerm: withdrawTerm,
-    dryRun: dryRun, endDryRun: endDryRun,
     compliance: compliance, unitCompliance: unitCompliance,
     overrideCompliance: overrideCompliance, setOverallLink: setOverallLink, closeTerm: closeTerm,
     report: report, reports: reports, saveReport: saveReport, deleteReport: deleteReport,
@@ -3179,7 +3169,7 @@
     assignable: assignable,
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
     addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
-    deletePerson: deletePerson, personHolds: personHolds,
+    deletePerson: deletePerson, personHolds: personHolds, unitHeads: unitHeads,
     reconcileDirectory: reconcileDirectory,
     duplicatePeopleCount: duplicatePeopleCount, mergeDuplicatePeople: mergeDuplicatePeople,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
@@ -3192,7 +3182,7 @@
     byDueDate: byDueDate, byPriority: byPriority, byStatus: byStatus, byUrgency: byUrgency,
     lastPerson: lastPerson, setLastPerson: setLastPerson,
     toJSON: toJSON, fromJSON: fromJSON,
-    clearSampleData: clearSampleData, hasSampleData: hasSampleData, resetAll: resetAll,
-    clearLocalCopy: clearLocalCopy
+    resetAll: resetAll,
+    clearLocalCopy: clearLocalCopy, _seedRehearsal: _seedRehearsal
   };
 })(window);

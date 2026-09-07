@@ -438,33 +438,42 @@ function makeDevice(server, name) {
     A.w.Backend.changed = real;
   }
 
-  /* ---------------- the rehearsal stays at home ----------------
-     Each device seeds its own dry run, with its own ids. Pushing it means two
-     phones merge two rehearsals and the council sees every invented officer
-     twice — which is exactly what was reported. */
-  console.log('\n--- the dry run does not travel ---');
+  /* ---------------- nothing is invented any more ----------------
+     The app used to open on a seeded council so the end of term could be
+     rehearsed. Every device seeded its own, with its own ids, so two phones
+     syncing merged two rehearsals and the council saw every invented officer
+     twice. Nothing seeds now, and anything left over from then is swept up. */
+  console.log('\n--- the app opens empty ---');
   {
-    const D1 = makeDevice(server, 'Seeded');
-    const sampleCount = D1.S.people().filter((p) => p.sample).length;
-    check('the device seeded a rehearsal', sampleCount > 0, sampleCount + ' invented people');
+    const D1 = makeDevice(server, 'Fresh');
+    check('a new device invents nobody', D1.S.people().length === 0,
+      D1.S.people().length + ' people');
+    check('and no activities', D1.S.events().length === 0, D1.S.events().length);
+    check('and no closing date', !D1.S.term().declaredAt, D1.S.term().declaredAt);
+    check('but it does have the units', D1.S.units().length > 0, D1.S.units().length);
 
     const before = Object.keys(server.tables.people).length;
     await D1.Sync.now();
-    check('none of it was sent', Object.keys(server.tables.people).length === before,
-      before + ' → ' + Object.keys(server.tables.people).length);
+    check('and it sends nothing invented', Object.keys(server.tables.people).length === before,
+      before + ' \u2192 ' + Object.keys(server.tables.people).length);
 
-    // And a rehearsal already on the server, from a version that did push it,
-    // is not taken in by anybody.
-    server.tables.people['ghost-sample'] = {
+    /* A rehearsal that reached the server from the old version. It must not be
+       taken in, and it must not be left there either: whoever sees it first
+       records the deletion so it goes for everybody. */
+    server.tables.people['33333333-3333-4333-8333-333333333333'] = {
       id: '33333333-3333-4333-8333-333333333333',
       body: { id: '33333333-3333-4333-8333-333333333333', name: 'Invented Officer',
               sample: true, active: true, unitId: natA, updatedAt: '2030-01-01T00:00:00.000Z' },
       updated_at: '2030-01-01T00:00:00.000Z'
     };
     await A.Sync.now();
-    check('and one already up there is ignored',
+    check('one already up there is not taken in',
       !A.S.people().some((p) => p.name === 'Invented Officer'));
-    delete server.tables.people['ghost-sample'];
+    await A.Sync.now();
+    check('and it is swept off the server',
+      !server.tables.people['33333333-3333-4333-8333-333333333333'],
+      JSON.stringify(Object.keys(server.tables.people)
+        .filter((k) => k.indexOf('3333') === 0)));
   }
 
   /* ---------------- the closing date ----------------
@@ -472,13 +481,11 @@ function makeDevice(server, name) {
      the 6th here and nowhere else is worse than no term at all. */
   console.log('\n--- the term reaches everyone ---');
   {
-    /* Two phones of their own, so ending the rehearsal here disturbs nothing
-       the earlier sections built. */
+    /* Two phones of their own, so declaring a term here disturbs nothing the
+       earlier sections built. */
     const server2 = makeServer();
     const P = makeDevice(server2, 'President');
     const G = makeDevice(server2, 'Governor');
-    P.S.endDryRun();
-    G.S.endDryRun();
     await P.Sync.now();
     await G.Sync.now();
 
@@ -503,22 +510,24 @@ function makeDevice(server, name) {
     await P.Sync.now();
     check('a quiet round leaves it alone', P.S.termStatus().endDate === '2026-10-20');
 
-    /* A rehearsal's date is part of the rehearsal: a council that never started
-       one should not be told its term ends next month. */
-    const R = makeDevice(server2, 'Rehearsing');
-    check('a device in a dry run has its own date', R.S.dryRun().active);
+    /* A phone joining late has no date of its own and must not overwrite the
+       one the council actually declared \u2014 it takes it. */
+    const R = makeDevice(server2, 'Latecomer');
+    check('a new phone starts with no date', !R.S.term().declaredAt);
     const before = server2.tables.term[1] && server2.tables.term[1].body.endDate;
     await R.Sync.now();
-    check('and does not push it over the real one',
+    check('it does not blank the real one',
       server2.tables.term[1].body.endDate === before, server2.tables.term[1].body.endDate);
+    check('and it now has the date', R.S.termStatus().endDate === before,
+      R.S.termStatus().endDate);
   }
 
-  /* ---------------- clearing a rehearsal that already spread ----------------
-     Before the dry run was kept off the server, every device pushed its own
-     copy — so a council ends up with the same invented activity three or four
-     times over, each carrying a "sample" chip. Ending the rehearsal has to
-     clear it everywhere, not just on the phone that presses the button. */
-  console.log('\n--- ending the dry run reaches the other phones ---');
+  /* ---------------- a rehearsal that already spread ----------------
+     Before the seed was removed, every device pushed its own copy \u2014 so a
+     council ends up holding the same invented activity three or four times.
+     Updating to this version has to clear it everywhere, by itself, with
+     nobody pressing anything. */
+  console.log('\n--- updating sweeps the old rehearsal away ---');
   {
     const s3 = makeServer();
     const X = makeDevice(s3, 'Nationals');
@@ -526,38 +535,41 @@ function makeDevice(server, name) {
 
     /* What a device on the old version left behind: the rehearsal, on the
        server, under ids nobody else agrees with. */
-    X.S.people().filter((p) => p.sample).slice(0, 3).forEach((p) => {
-      s3.tables.people[p.id] = { id: p.id, body: p, unit_id: p.unitId, updated_at: '2026-01-01T00:00:00.000Z' };
-    });
-    X.S.events().filter((e) => e.sample).forEach((e) => {
-      s3.tables.events[e.id] = { id: e.id, body: e, unit_id: e.unitId, updated_at: '2026-01-01T00:00:00.000Z' };
-    });
-    const strayIds = Object.keys(s3.tables.events);
-    check('the rehearsal is on the server, as it would be', strayIds.length > 0, strayIds.length);
+    const stray = [];
+    for (let i = 0; i < 3; i++) {
+      const id = '4444444' + i + '-4444-4444-8444-44444444444' + i;
+      s3.tables.events[id] = {
+        id: id, unit_id: natA,
+        body: { id: id, unitId: natA, title: 'Invented activity ' + i, sample: true,
+                dateStart: '2026-03-0' + (i + 1), status: 'Planned',
+                updatedAt: '2026-01-01T00:00:00.000Z' },
+        updated_at: '2026-01-01T00:00:00.000Z'
+      };
+      stray.push(id);
+    }
+    check('the rehearsal is on the server, as it would be',
+      Object.keys(s3.tables.events).length === 3, Object.keys(s3.tables.events).length);
 
-    await Y.Sync.now();
-    check('a device today does not take it in',
-      Y.S.events().filter((e) => e.sample && s3.tables.events[e.id]).length === 0);
-
-    // Ending it sweeps the server too.
-    X.S.endDryRun();
     await X.Sync.now();
-    check('ending the rehearsal removes it from the server',
+    check('a device today does not take it in',
+      stray.every((id) => !X.S.event(id)),
+      stray.filter((id) => !!X.S.event(id)).length + ' taken in');
+
+    await X.Sync.now();
+    check('and it is removed from the server',
       Object.keys(s3.tables.events).length === 0,
-      JSON.stringify(Object.keys(s3.tables.events).length));
-    check('and records the deletions so they travel',
+      Object.keys(s3.tables.events).length + ' left');
+    check('with the deletions recorded so they travel',
       Object.keys(s3.tables.deletions).length > 0);
 
     await Y.Sync.now();
-    /* Y is left holding its own rehearsal, which was never shared and is Y's to
-       end — but not one copy of anybody else's, which is the duplication a
-       council actually sees. */
     check('the other phone is left with none of the copies',
-      strayIds.every((id) => !Y.S.event(id)),
-      strayIds.filter((id) => !!Y.S.event(id)).length + ' copies left');
-    check('and still has its own rehearsal to end itself',
-      Y.S.events().filter((e) => e.sample).length > 0);
+      stray.every((id) => !Y.S.event(id)),
+      stray.filter((id) => !!Y.S.event(id)).length + ' copies left');
+    check('and holds no rehearsal of its own', Y.S.events().length === 0,
+      Y.S.events().length);
   }
+
 
   /* ---------------- setup travels too ----------------
      The letterhead every report is printed on, the unit list, and the posts a
@@ -656,13 +668,11 @@ function makeDevice(server, name) {
     const ev = before.rows.filter((r) => r.kind === 'event')[0];
     check('it counts what this device holds', ev.here > 0, JSON.stringify(ev));
     check('and that the server has none of it', ev.there === 0, JSON.stringify(ev));
-    check('the rehearsal is counted apart from real work', ev.real !== null && ev.real < ev.here,
-      JSON.stringify(ev));
 
     await D.Sync.now();
     const after = await D.Sync.diagnose();
     const ev2 = after.rows.filter((r) => r.kind === 'event')[0];
-    check('after a sync the server has the real work', ev2.there === ev2.real,
+    check('after a sync the server has it', ev2.there === ev2.here,
       JSON.stringify(ev2));
 
     // It must never change what it is looking at.
@@ -843,6 +853,74 @@ function makeDevice(server, name) {
       F1.S.reports().filter((r) => r.eventId === ev.id).length === 0);
     await F1.Sync.now();
     check('and it was removed from the server', !sC.tables.reports[rid]);
+  }
+
+  /* ---------------- three phones, one council ----------------
+     Every section above proves one mechanism. This one asks the only question a
+     council actually has: after everybody has worked, does every phone show the
+     same thing, and does it then stay still? A system that converges but keeps
+     rewriting itself is not synced — it is arguing. */
+  console.log('\n--- three phones end up holding the same council ---');
+  {
+    const s7 = makeServer();
+    const P = makeDevice(s7, 'President');
+    const G = makeDevice(s7, 'Governor');
+    const S = makeDevice(s7, 'Senator');
+    const all = [P, G, S];
+    const unit = P.S.nationalUnitId();
+
+    // Each phone does its own work, none of them having seen the others.
+    const e1 = P.S.addEvent({ title: 'General Assembly', unitId: unit, dateStart: '2026-10-01' });
+    const e2 = G.S.addEvent({ title: 'Leadership Training', unitId: unit, dateStart: '2026-10-08' });
+    S.S.addPerson({ name: 'Dueño, Kyla', unitId: unit, position: 'Senator' });
+    P.S.addTask({ kind: 'event', eventId: e1.id, title: 'Book the gymnasium', dueDate: '2026-09-20' });
+    G.S.addTask({ kind: 'event', eventId: e2.id, title: 'Print the certificates', dueDate: '2026-09-25' });
+
+    // Two rounds each: one to send, one to take in what the others sent.
+    for (let i = 0; i < 2; i++) for (const d of all) await d.Sync.now();
+
+    const shape = (d) => JSON.stringify({
+      events: d.S.events().map((e) => e.title).sort(),
+      tasks: d.S.tasks().map((t) => t.title).sort(),
+      people: d.S.people().map((x) => x.name).sort()
+    });
+    check('the President and the Governor hold the same council',
+      shape(P) === shape(G), shape(P) + '\n        vs ' + shape(G));
+    check('and so does the Senator', shape(P) === shape(S),
+      shape(P) + '\n        vs ' + shape(S));
+    check('all three activities and tasks are there',
+      P.S.events().length === 2 && P.S.tasks().length === 2 && P.S.people().length === 1,
+      P.S.events().length + ' events, ' + P.S.tasks().length + ' tasks, ' +
+      P.S.people().length + ' people');
+
+    /* Settled. Another round must move nothing — not one record sent, not one
+       taken in. Anything else is two devices handing the same row back and
+       forth, which is how a council's battery dies and its data churns. */
+    const quiet = [];
+    for (const d of all) {
+      const st = await d.Sync.now();
+      quiet.push(d.name + ': ' + (st.last ? st.last.sent + ' sent, ' +
+        (st.last.added + st.last.updated) + ' taken' : 'no round'));
+    }
+    check('and a further round moves nothing at all',
+      quiet.every((q) => q.indexOf('0 sent, 0 taken') > 0), quiet.join(' | '));
+
+    // A deletion on one phone reaches the other two and does not come back.
+    P.S.deleteEvent(e2.id);
+    for (let i = 0; i < 2; i++) for (const d of all) await d.Sync.now();
+    check('a deletion reaches every phone',
+      all.every((d) => !d.S.event(e2.id)),
+      all.filter((d) => !!d.S.event(e2.id)).map((d) => d.name).join(', '));
+    check('and its task went with it',
+      all.every((d) => d.S.tasks().length === 1),
+      all.map((d) => d.name + '=' + d.S.tasks().length).join(', '));
+
+    for (let i = 0; i < 2; i++) for (const d of all) await d.Sync.now();
+    check('and it does not come back on later rounds',
+      all.every((d) => !d.S.event(e2.id)));
+    check('none of the three logged an error',
+      all.every((d) => d.errors.length === 0),
+      all.map((d) => d.name + ': ' + d.errors.slice(0, 1).join('')).join(' | '));
   }
 
   console.log('\n--- no console errors ---');

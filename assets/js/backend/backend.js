@@ -49,6 +49,7 @@
     },
     pending: function () { return Promise.resolve([]); },
     withdraw: function () { return Promise.resolve(true); },
+    setHead: function () { return Promise.resolve(true); },
     // Offline there is nowhere to sync to, and saying so plainly here means the
     // sync layer needs no special case for it.
     changed: function () { return Promise.resolve([]); },
@@ -330,14 +331,46 @@
         '&claimed_at=is.null&order=created_at.desc');
     },
 
+    /* Standing (Governor, Vice Governor) is passed here, but the database only
+       accepts it once heads.sql has been run — and the site updates the moment
+       it is deployed, which is not the moment somebody opens the SQL editor.
+       PostgREST answers an argument it does not recognise with 404, so enrolling
+       anybody at all would stop working in the gap between the two.
+
+       So: ask for standing, and if the database has not learned about it yet,
+       enrol without it. Nobody is turned away because a migration is late; the
+       worst case is that a Governor is enrolled as a plain officer and has to be
+       named again afterwards. */
     enrol: function (m) {
-      return sbFetch('/rest/v1/rpc/enroll_member', {
-        method: 'POST',
-        body: {
-          p_email: m.email, p_full_name: m.full_name, p_position: m.position,
-          p_unit_id: m.unit_id, p_access: m.access,
-          p_event_ids: m.eventIds || []
+      var body = {
+        p_email: m.email, p_full_name: m.full_name, p_position: m.position,
+        p_unit_id: m.unit_id, p_access: m.access,
+        p_event_ids: m.eventIds || []
+      };
+      var withHead = {};
+      Object.keys(body).forEach(function (k) { withHead[k] = body[k]; });
+      withHead.p_is_head = !!m.isHead;
+
+      return sbFetch('/rest/v1/rpc/enroll_member', { method: 'POST', body: withHead })
+        .catch(function (err) {
+          if (!err || err.status !== 404) throw err;
+          return sbFetch('/rest/v1/rpc/enroll_member', { method: 'POST', body: body });
+        });
+    },
+
+    /* Naming, or unnaming, the head of a unit. The server decides whether the
+       asker may — a Governor cannot appoint their own successor, and nobody
+       changes their own standing. */
+    setHead: function (email, isHead) {
+      return sbFetch('/rest/v1/rpc/set_unit_head', {
+        method: 'POST', body: { p_email: email, p_is_head: !!isHead }
+      }).catch(function (err) {
+        // The one place where saying why is better than a bare failure.
+        if (err && err.status === 404) {
+          throw new Error('Governors and Vice Governors need one more setup step on the ' +
+            'database (heads.sql). Everything else works; ask for that to be run.');
         }
+        throw err;
       });
     },
 
@@ -473,6 +506,10 @@
     roster: function () { return driver().roster(); },
     pending: function () { return driver().pending(); },
     enrol: function (m) { return driver().enrol(m); },
+    setHead: function (e, h) {
+      var d = driver();
+      return d.setHead ? d.setHead(e, h) : Promise.resolve(true);
+    },
     withdraw: function (email) { return driver().withdraw(email); },
     audit: function () { return driver().audit(); },
     changePassword: function (pw) {

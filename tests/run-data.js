@@ -44,6 +44,9 @@ function sandbox() {
    'assets/js/util.js', 'assets/js/store.js', 'assets/js/ui.js', 'assets/js/report.js']
     .forEach((f) => vm.runInContext(read(f), sb, { filename: f }));
   vm.runInContext('Store.load();', sb);
+  /* The app opens empty now, so the suite asks for something to walk through.
+     It is a fixture, not what a council is given. */
+  vm.runInContext('Store._seedRehearsal();', sb);
   return sb;
 }
 
@@ -473,6 +476,55 @@ console.log('\n--- routing a letter ---');
     check('the merge is recorded so it does not come back on the next sync',
       !!S3.deletions().person[second.id] && !!S3.deletions().person[third.id]);
     check('and running it again finds nothing', S3.mergeDuplicatePeople() === 0);
+  }
+
+  /* ---- a whole council from a spreadsheet ----
+     Typing sixteen officers one at a time is how a system gets abandoned in
+     week one. The email column is optional, which is the difference from the
+     volunteer import: a roster is full of people who do the work and never
+     sign in. */
+  {
+    const csv = 'name,position,email\n' +
+      'Juan D. Dela Cruz,Governor,juan@filamer.edu.ph\n' +
+      'Maria S. Santos,Secretary,\n' +
+      ',Treasurer,nobody@filamer.edu.ph\n' +
+      'Bad Address,Auditor,not-an-email\n' +
+      'Twice Listed,PIO,twice@filamer.edu.ph\n' +
+      'Twice Again,Member,twice@filamer.edu.ph\n' +
+      ',,\n';
+    const out = sb.window.Forms
+      ? null : null;   // Forms is a browser module; the reader is exercised through run-ui
+    void out; void csv;
+  }
+
+  /* ---- the head of a unit ----
+     A Governor, and the Vice Governor who stands in, open their own council's
+     settings and nothing else. It is recorded on the person because the app
+     has to know it before that person has ever signed in. */
+  {
+    const cn = S3.units().find((u) => u.code === 'CN');
+    const gov = S3.addPerson({ name: 'Pauline Alcantara', position: 'Governor',
+      unitId: cn.id, access: 'officer', isHead: true });
+    const vice = S3.addPerson({ name: 'Mark Tumbaga', position: 'Vice Governor',
+      unitId: cn.id, access: 'officer' });
+    const plain = S3.addPerson({ name: 'Ordinary Member', position: 'Senator',
+      unitId: cn.id, access: 'officer' });
+
+    check('standing is recorded on the person', S3.person(gov.id).isHead === true);
+    check('and not on everybody else', S3.person(plain.id).isHead === false);
+    check('the unit knows who runs it',
+      S3.unitHeads(cn.id).length === 1 && S3.unitHeads(cn.id)[0].id === gov.id);
+
+    S3.updatePerson(vice.id, { isHead: true });
+    check('a unit can have two heads, a Governor and a Vice Governor',
+      S3.unitHeads(cn.id).length === 2);
+    check('and they are that unit\u2019s, not another\u2019s',
+      S3.unitHeads(S3.nationalUnitId()).every((p) => p.unitId === S3.nationalUnitId()));
+
+    S3.updatePerson(gov.id, { isHead: false });
+    check('standing can be taken back', S3.unitHeads(cn.id).length === 1);
+
+    S3.deletePerson(gov.id); S3.deletePerson(vice.id); S3.deletePerson(plain.id);
   }
 
   /* ---- the council's own routes ----

@@ -577,7 +577,7 @@
     // One notice at a time: the rehearsal notice already explains the closing
     // date, so stacking the term reminder behind it would greet somebody with
     // two dialogs saying overlapping things.
-    if (!TermUI.dryRunNotice()) TermUI.maybeRemind();
+    TermUI.maybeRemind();
   }
 
   /* Whether this device is behind. In the header rather than a settings page,

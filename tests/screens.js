@@ -56,6 +56,15 @@ const SCREENS = [
   await page.setViewport({ width, height, deviceScaleFactor: 2 });
 
   await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+  /* The app ships empty, and an empty screen measures nothing. The fixture is
+     asked for by name and written to storage with its sample flags stripped, so
+     it survives the reloads this audit does between screens. */
+  await page.evaluate(() => { localStorage.clear(); });
+  await page.reload({ waitUntil: 'networkidle0' });
+  await page.evaluate(() => { Store._seedRehearsal(); });
+  await page.reload({ waitUntil: 'networkidle0' });
+
   const eventId = await page.evaluate(() => {
     Store.setLastPerson(Store.people()[0].id);
     return Store.events().find((e) => e.title.startsWith('Foundation')).id;

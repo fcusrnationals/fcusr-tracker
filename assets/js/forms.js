@@ -1411,6 +1411,332 @@
     });
   }
 
+  /* ---------- one unit's roster ----------
+
+     Opened from the unit itself, because that is where somebody is standing
+     when they think "the College of Nursing needs its officers in". Choosing
+     the college from a dropdown on a page headed "Access" was asking them to
+     start again somewhere else.
+
+     It carries the whole job: who is in this unit, adding one, adding a list
+     from a spreadsheet, and naming the Governor and Vice Governor — who get
+     their own council's settings and nothing beyond it. */
+
+  function unitPeopleForm(unitId) {
+    var u = Store.unit(unitId);
+    if (!u) return;
+    var president = !global.Auth || Auth.isPresident() || Auth.isOffline();
+
+    function body() {
+      var list = Store.people({ unitId: unitId });
+      var heads = list.filter(function (p) { return p.isHead; });
+
+      var html = '<p class="small" style="margin-top:0">' +
+        U.plural(list.length, 'person', 'people') + ' in ' + U.esc(u.name) + '. ' +
+        'Anybody here can be given work on this unit\u2019s activities.</p>';
+
+      html += '<div class="row" style="margin-bottom:14px">' +
+        '<button type="button" class="btn btn-primary" data-up-add>' + UI.icon('plus') +
+        'Add someone</button>' +
+        '<button type="button" class="btn" data-up-import>' + UI.icon('upload') +
+        'Add a list</button>' + '</div>';
+
+      /* Standing, said before the list, because it is the question somebody
+         opens this to answer. */
+      html += '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:14px">' +
+        '<div class="strong" style="margin-bottom:4px">Who runs ' + U.esc(u.name) + '</div>' +
+        (heads.length
+          ? '<div class="small">' + heads.map(function (p) {
+              return U.esc(p.name) + (p.position ? ' \u2014 ' + U.esc(p.position) : '');
+            }).join('<br>') + '</div>'
+          : '<div class="small muted">Nobody named yet. The Governor and Vice Governor open ' +
+            'this unit\u2019s settings \u2014 their own roster and nothing else.</div>') +
+        (president ? '' :
+          '<div class="tiny muted" style="margin-top:6px">Only the FCUSR President names them.</div>') +
+        '</div>';
+
+      if (!list.length) {
+        html += UI.empty('Nobody yet', 'Add the Governor first, then the rest of the council.');
+        return html;
+      }
+
+      html += '<div class="list">' + list.map(function (p) {
+        return '<div class="task"><span class="task-main" style="cursor:default">' +
+          '<span class="task-title">' + U.esc(p.name) +
+            (p.isHead ? ' <span class="chip st-done">runs this unit</span>' : '') +
+            (p.active === false ? ' <span class="chip st-not-started">Inactive</span>' : '') +
+            (p.access === 'volunteer' ? ' <span class="chip chip-plain">volunteer</span>' : '') +
+          '</span>' +
+          '<span class="task-meta">' + U.esc(p.position || 'No position') +
+            '<span class="sep">\u00b7</span>' +
+            U.esc(p.email || 'no sign-in') + '</span></span>' +
+          (president && p.access !== 'volunteer'
+            ? '<span class="task-right"><button type="button" class="btn btn-sm" ' +
+              'data-up-head="' + U.esc(p.id) + '">' +
+              (p.isHead ? 'Stand down' : 'Make head') + '</button></span>'
+            : '') +
+          '</div>';
+      }).join('') + '</div>';
+
+      return html;
+    }
+
+    UI.modal({
+      title: u.name,
+      wide: true,
+      body: body(),
+      footer: '<button type="button" class="btn btn-primary" data-close>Done</button>',
+      onMount: function (root, close) {
+        function redraw() {
+          root.querySelector('.modal-body').innerHTML = body();
+          wire();
+        }
+
+        function wire() {
+          var add = root.querySelector('[data-up-add]');
+          if (add) add.addEventListener('click', function () {
+            close();
+            personForm(null, { unitId: unitId });
+          });
+
+          var imp = root.querySelector('[data-up-import]');
+          if (imp) imp.addEventListener('click', function () {
+            close();
+            importPeopleForm(unitId);
+          });
+
+          U.els('[data-up-head]', root).forEach(function (b) {
+            b.addEventListener('click', function () {
+              var p = Store.person(b.getAttribute('data-up-head'));
+              if (!p) return;
+              var making = !p.isHead;
+
+              UI.confirm({
+                title: making ? 'Put ' + p.name + ' in charge of ' + u.name + '?' : p.name + ' stands down?',
+                message: making
+                  ? p.name + ' will be able to open this unit\u2019s settings \u2014 its roster, ' +
+                    'and nothing belonging to any other unit or to the Republic.'
+                  : p.name + ' keeps their place in ' + u.name + ' but no longer opens its settings.',
+                detail: making
+                  ? 'The Governor and the Vice Governor are both heads. Naming somebody does not ' +
+                    'unname anybody else.'
+                  : '',
+                tone: 'primary',
+                cancelLabel: 'Leave it',
+                confirmLabel: making ? 'Put them in charge' : 'Stand them down'
+              }).then(function (ok) {
+                if (!ok) return;
+                Store.updatePerson(p.id, { isHead: making });
+
+                // The server decides standing; without an address there is no
+                // account to decide anything about yet.
+                if (p.email && global.Auth && !Auth.isOffline()) {
+                  Backend.setHead(p.email, making).catch(function (err) {
+                    UI.toast(err.message || 'Saved here, but the server refused.', 'error');
+                  });
+                }
+                UI.toast(making ? p.name + ' now runs ' + u.name + '.'
+                                : p.name + ' has stood down.');
+                redraw();
+              });
+            });
+          });
+        }
+        wire();
+      }
+    });
+  }
+
+  /* ---------- a whole council at once ----------
+
+     Typing sixteen officers in one at a time is how a system gets abandoned in
+     week one. A spreadsheet with a row each, saved as CSV.
+
+     The email column is optional here, and that is the difference from the
+     volunteer import: a council roster is full of people who do the work and
+     never sign in. A row with an address gets an account waiting for it; a row
+     without one is simply somebody tasks can be given to. */
+
+  function readRosterCSV(text) {
+    var rows = parseCSV(text);
+    if (!rows.length) return { rows: [], error: 'That file is empty.' };
+
+    var head = rows[0].map(function (h) { return h.trim().toLowerCase(); });
+    var looksLikeHeader = head.some(function (h) {
+      return h === 'name' || h === 'email' || h === 'position' || h.indexOf('e-mail') >= 0;
+    });
+
+    var col = { name: 0, position: 1, email: 2 };
+    if (looksLikeHeader) {
+      head.forEach(function (h, i) {
+        if (h === 'name' || h === 'full name' || h === 'full_name') col.name = i;
+        else if (h === 'email' || h === 'e-mail' || h === 'email address') col.email = i;
+        else if (h === 'position' || h === 'role') col.position = i;
+        else if (h === 'committee') col.committee = i;
+      });
+      rows = rows.slice(1);
+    }
+
+    var seen = {};
+    var out = [];
+    rows.forEach(function (r, n) {
+      var name = (r[col.name] || '').trim();
+      // A trailing blank line in a spreadsheet is not a person.
+      if (!name && !(r[col.email] || '').trim()) return;
+
+      var addr = (r[col.email] || '').trim().toLowerCase();
+      var problem = '';
+      if (!name) problem = 'No name';
+      else if (addr && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) problem = 'That email does not look right';
+      else if (addr && seen[addr]) problem = 'That email is listed twice in this file';
+      else if (addr && Store.personByEmail(addr)) problem = 'Already in the directory';
+      if (!problem && addr) seen[addr] = true;
+
+      out.push({
+        line: n + (looksLikeHeader ? 2 : 1),
+        name: name, email: addr,
+        position: (r[col.position] || '').trim(),
+        committee: (col.committee !== undefined ? (r[col.committee] || '') : '').trim(),
+        problem: problem
+      });
+    });
+    return { rows: out, error: '' };
+  }
+
+  function importPeopleForm(unitId) {
+    var u = Store.unit(unitId);
+    if (!u) return;
+    var parsed = null;
+
+    UI.modal({
+      title: 'Add a list to ' + u.name,
+      wide: true,
+      body:
+        '<p class="small" style="margin-top:0">A spreadsheet with one person per row, saved as ' +
+        '<strong>CSV</strong>. In Excel or Google Sheets: <em>File \u2192 Download \u2192 ' +
+        'Comma-separated values</em>.</p>' +
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+        '<div class="small strong" style="margin-bottom:4px">Columns</div>' +
+        '<div class="small muted">A header row of <code>name, position, email</code>. The order ' +
+        'does not matter and anything else in the file is ignored.<br><br>' +
+        '<strong>Email is optional.</strong> With one, that person can sign in and see their own ' +
+        'tasks. Without one, they are somebody work can be assigned to \u2014 which is most of a ' +
+        'council. Everybody here joins <strong>' + U.esc(u.name) + '</strong>.</div></div>' +
+        '<div class="row" style="margin:14px 0">' +
+        '<label class="btn">' + UI.icon('upload') + 'Choose the file' +
+        '<input type="file" id="r-csv" accept=".csv,text/csv,text/plain" hidden></label>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-sample>Download a blank one</button>' +
+        '</div>' +
+        '<div id="r-preview"></div>',
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-save disabled>Add them</button>',
+      onMount: function (root, close) {
+        var save = root.querySelector('[data-save]');
+        var preview = root.querySelector('#r-preview');
+
+        root.querySelector('[data-sample]').addEventListener('click', function () {
+          UI.downloadFile('FCUSR-' + U.slug(u.name) + '-roster.csv',
+            'name,position,email\n' +
+            'Juan D. Dela Cruz,Governor,juan@filamer.edu.ph\n' +
+            'Maria S. Santos,Secretary,\n',
+            'text/csv');
+        });
+
+        root.querySelector('#r-csv').addEventListener('change', function (ev) {
+          var f = ev.target.files && ev.target.files[0];
+          if (!f) return;
+          if (f.size > 2 * 1024 * 1024) {
+            preview.innerHTML = '<div class="error-text">That file is very large \u2014 ' +
+              'split it into a few smaller ones.</div>';
+            return;
+          }
+          var reader = new FileReader();
+          reader.onload = function () {
+            var res = readRosterCSV(String(reader.result));
+            parsed = res.rows;
+            var good = parsed.filter(function (r) { return !r.problem; });
+            var bad = parsed.filter(function (r) { return r.problem; });
+
+            preview.innerHTML =
+              (res.error ? '<div class="error-text">' + U.esc(res.error) + '</div>' : '') +
+              '<p class="small strong">' + U.plural(good.length, 'person', 'people') +
+              ' ready' + (bad.length ? ', ' + bad.length + ' skipped' : '') + '</p>' +
+              (good.length
+                ? '<div class="list">' + good.slice(0, 12).map(function (r) {
+                    return '<div class="task"><span class="task-main" style="cursor:default">' +
+                      '<span class="task-title">' + U.esc(r.name) + '</span>' +
+                      '<span class="task-meta">' + U.esc(r.position || 'No position') +
+                      '<span class="sep">\u00b7</span>' +
+                      U.esc(r.email || 'no sign-in') + '</span></span></div>';
+                  }).join('') +
+                  (good.length > 12 ? '<div class="task"><span class="task-main" ' +
+                    'style="cursor:default"><span class="task-meta">and ' +
+                    (good.length - 12) + ' more</span></span></div>' : '') +
+                  '</div>'
+                : '') +
+              (bad.length
+                ? '<p class="small muted" style="margin-top:10px">Skipped: ' +
+                  bad.slice(0, 6).map(function (r) {
+                    return 'line ' + r.line + ' (' + U.esc(r.problem) + ')';
+                  }).join(', ') + (bad.length > 6 ? ', and more' : '') + '</p>'
+                : '');
+
+            save.disabled = !good.length;
+          };
+          reader.readAsText(f);
+        });
+
+        save.addEventListener('click', function () {
+          var good = (parsed || []).filter(function (r) { return !r.problem; });
+          if (!good.length) return;
+          save.disabled = true;
+          save.textContent = 'Adding\u2026';
+
+          var added = 0, invited = 0, failed = 0;
+          var chain = Promise.resolve();
+
+          good.forEach(function (r) {
+            chain = chain.then(function () {
+              Store.addPerson({
+                name: r.name, position: r.position, committee: r.committee,
+                email: r.email, unitId: unitId, access: 'officer'
+              });
+              added++;
+              if (!r.email || (global.Auth && Auth.isOffline())) return;
+              return Backend.enrol({
+                email: r.email, full_name: r.name, position: r.position,
+                unit_id: unitId, access: 'officer', eventIds: []
+              }).then(function () { invited++; })
+                .catch(function () { failed++; });
+            });
+          });
+
+          chain.then(function () {
+            close();
+            UI.modal({
+              title: U.plural(added, 'person', 'people') + ' added to ' + u.name,
+              body: '<p class="small">' +
+                (invited
+                  ? U.plural(invited, 'of them') + ' gave an email address, so ' +
+                    (invited === 1 ? 'that person' : 'they') + ' can sign in. Send them the link ' +
+                    'and this line:</p>' +
+                    '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+                    '<p class="small" style="margin:0">Open the site, type your Filamer email and a ' +
+                    'password you will remember, then press <strong>Sign in</strong>. It will ask ' +
+                    'you to set that password the first time.</p></div>'
+                  : 'None of them gave an email address, so they cannot sign in \u2014 they are ' +
+                    'people work can be assigned to. Add an address later and they can.</p>') +
+                (failed ? '<p class="small error-text">' + U.plural(failed, 'account') +
+                  ' could not be created on the server. They are in the list here; try enrolling ' +
+                  'them again in a moment.</p>' : ''),
+              footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
+            });
+          });
+        });
+      }
+    });
+  }
+
   /* ---------- who can sign in ----------
 
      Enrolling somebody creates a row saying the address may have an account,
@@ -1672,10 +1998,14 @@
 
   /* ---------- person ---------- */
 
-  function personForm(personId) {
+  function personForm(personId, opts) {
+    opts = opts || {};
     var p = personId ? Store.person(personId) : null;
     var isNew = !p;
-    var myUnit = (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId();
+    // Opened from a unit, that unit is the answer — not wherever the person
+    // doing it happens to belong.
+    var myUnit = opts.unitId ||
+      ((global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId());
     var d = p || { name: '', position: '', committee: '', active: true, unitId: myUnit };
     // Only the President moves people between units; a Governor's people are theirs.
     var canPickUnit = !global.Auth || Auth.isPresident() || Auth.isOffline();
@@ -1793,7 +2123,8 @@
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,
     readVolunteerCSV: readVolunteerCSV, parseCSV: parseCSV,
     eventForm: eventForm, taskForm: taskForm, personForm: personForm,
-    rosterList: rosterList,
+    rosterList: rosterList, unitPeopleForm: unitPeopleForm,
+    importPeopleForm: importPeopleForm,
     groupMessage: groupMessage, personalMessage: personalMessage,
     field: field, showError: showError, clearErrors: clearErrors
   };

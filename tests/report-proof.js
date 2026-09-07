@@ -57,6 +57,11 @@ async function buildReport(opts) {
   AssetDB.getMany = (ids) =>
     Promise.resolve(ids.map((id) => ({ id, dataUrl: shots[id] || null })));
 
+  /* The app ships empty. A report needs an activity with tasks, letters and
+     photographs behind it, so the suite asks for the test fixture by name —
+     the same one the other suites walk through. */
+  Store._seedRehearsal();
+
   const ev = Store.events().find((e) => e.title.indexOf('Foundation') === 0);
 
   // A long task list is what pushes the generated minutes onto a second sheet.

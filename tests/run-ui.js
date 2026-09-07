@@ -64,18 +64,17 @@ try {
   if (window.document.readyState === 'loading') {
     window.document.dispatchEvent(new window.Event('DOMContentLoaded', { bubbles: true }));
   }
+  // The app opens empty; the walk-through needs a council to walk through.
+  window.Store._seedRehearsal();
+  window.App.render();
   check('all scripts evaluated', true);
-  /* The dry-run notice is deliberately not dismissible by clicking away, so it
-     is still on screen here and would answer every later $('.modal-…') query
-     ahead of the dialog actually under test. Read it and close it, as a person
-     would. */
-  check('the dry run announces itself at the door',
-    !!window.document.querySelector('.modal-backdrop'));
-  check('and it is the only notice shown',
-    window.document.querySelectorAll('.modal-backdrop').length === 1);
+  /* Nothing greets anybody at the door any more. The app used to open on an
+     invented council and a notice explaining it; both are gone. */
+  check('no rehearsal notice on arrival',
+    !window.document.querySelector('.modal-backdrop'));
   window.document.querySelectorAll('.modal-backdrop [data-close]').forEach((b) =>
     b.dispatchEvent(new window.MouseEvent('click', { bubbles: true })));
-  check('and closes when acknowledged', !window.document.querySelector('.modal-backdrop'));
+    check('and the screen is clear', !window.document.querySelector('.modal-backdrop'));
   /* This sandbox has no fetch() and no IndexedDB, which is the point: start-up
      must not depend on either. Loading the council seal for the report header
      once threw here and took the whole boot with it — no screen was wired at
@@ -396,6 +395,72 @@ click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'backu
 check('backup offered', !!$('[data-backup]') && !!$('#restore-file'));
 click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'letterhead'));
 check('emblem slot offered', !!$('#emblem-file'));
+
+/* ---- a unit's roster, from the unit ----
+   Enrolling a college's officers used to mean going to a page headed "Access"
+   and picking the college from a dropdown. It belongs with the unit. */
+console.log('\n--- enrolling into a unit ---');
+{
+  const dlg = () => $$('.modal-backdrop').pop();
+  $$('.modal-backdrop').forEach((e) => e.remove());
+
+  goto('#/settings');
+  click($$('[data-set-tab]').find((b) => b.getAttribute('data-set-tab') === 'units'));
+  check('every unit offers its own people', $$('[data-unit-people]').length > 1,
+    $$('[data-unit-people]').length + ' units');
+
+  const cn = S.units().find((u) => u.code === 'CN');
+  click($$('[data-unit-people]').find((b) => b.getAttribute('data-unit-people') === cn.id));
+  check('the unit\u2019s roster opens', !!dlg() && /College of Nursing/.test(dlg().textContent));
+  check('and offers to add one or a list',
+    !!dlg().querySelector('[data-up-add]') && !!dlg().querySelector('[data-up-import]'));
+  check('it says who runs the unit', /Who runs/i.test(dlg().textContent));
+
+  /* Naming a head is what opens that unit's settings to them — and only
+     theirs. It is the President's to do. */
+  const gov = S.people({ unitId: cn.id })[0];
+  check('the unit has somebody to name', !!gov, S.people({ unitId: cn.id }).length + ' in CN');
+  check('and a control to name them', !!dlg().querySelector('[data-up-head="' + gov.id + '"]'));
+
+  click(dlg().querySelector('[data-up-head="' + gov.id + '"]'));
+  click(dlg().querySelector('[data-ok]'));
+  await sleep(10);
+  check('naming them is recorded', S.person(gov.id).isHead === true);
+
+  /* And that standing is exactly what a scoped Settings turns on. */
+  const before = window.Auth.current();
+  /* Signing in as somebody else clears the device — which is the point of it,
+     and means this section has to put the council's work back when it is done
+     pretending to be a Governor. */
+  const snapshot = S.toJSON();
+  /* Standing only means anything where there are accounts. Offline the app
+     falls back to the rule that held before they existed, so this section
+     needs a backend connected to be asking a real question. */
+  const CFG2 = window.Backend.config.supabase;
+  CFG2.url = 'https://example.supabase.co';
+  CFG2.anonKey = 'sb_publishable_test';
+  window.Auth.adopt({ id: 'gov-1', full_name: gov.name, position: 'Governor',
+    unit_id: cn.id, unit_name: cn.name, unit_kind: cn.kind, access: 'officer', is_head: true });
+  check('a head may open Settings', window.Auth.canOpenSettings());
+  check('but is not national', !window.Auth.isNational());
+  check('and is not the President', !window.Auth.isPresident());
+  goto('#/settings');
+  check('they get their own unit only', /College of Nursing/.test(text()), text().slice(0, 80));
+  check('and not the Republic\u2019s letterhead', !$('[data-panel="letterhead"]'));
+  check('nor the closing date', !$('[data-panel="term"]'));
+  check('nor the unit list', !$('[data-panel="units"]'));
+
+  CFG2.url = '';
+  CFG2.anonKey = '';
+  window.Auth.adopt({ id: 'local', full_name: before.name, position: before.position,
+    unit_id: before.unitId, unit_name: before.unitName, unit_kind: before.unitKind,
+    access: before.access, is_head: true });
+  S.fromJSON(snapshot);
+  check('and the device was cleared when the account changed, then restored',
+    S.events().length > 0, S.events().length + ' events');
+  S.updatePerson(gov.id, { isHead: false });
+  $$('.modal-backdrop').forEach((e) => e.remove());
+}
 
 console.log('\n--- export and search ---');
 goto('#/events/' + foundation.id);
