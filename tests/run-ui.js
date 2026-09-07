@@ -1074,6 +1074,15 @@ console.log('\n--- the report wizard says whether it is finished ---');
     /Export/.test(D.querySelector('[data-step="8"]').textContent),
     D.querySelector('[data-step="8"]').textContent);
 
+  /* A phone very often refuses to show a PDF inside the page: the frame is
+     ignored, or the file is offered as a download, and what the officer gets is
+     a grey box that never fills in. The report is fine; the preview OF it is
+     what cannot be drawn — and from the outside those look identical, so it
+     reads as a broken screen. There has to be a way to see the thing either
+     way, and it must not depend on guessing the browser right. */
+  check('there is always a way to open the preview',
+    !!D.querySelector('[data-open-preview]'));
+
   /* Pictures go in one at a time. A failure on the fifth of eight used to
      redraw the four that made it and save none of them — on screen, in the
      draft in memory, and written down nowhere. A reload then lost four uploads
@@ -1102,6 +1111,18 @@ console.log('\n--- the report wizard says whether it is finished ---');
       st.draft.photos.length === 2, String(st.draft.photos.length));
     check('and written down, not just drawn', saved() === 2, String(saved()));
   }
+
+  /* Reopened last, because it throws away the wizard's state and anything
+     holding a reference to it. */
+  D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+  Object.defineProperty(window.navigator, 'pdfViewerEnabled', { get: () => false, configurable: true });
+  window.AccomplishmentUI.open(ev.id);
+  await sleep(60);
+  check('a browser that will not show one is told so, not left with a grey box',
+    /will not show a PDF/i.test((D.querySelector('#pv-frame') || {}).textContent || ''),
+    (D.querySelector('#pv-frame') || {}).textContent);
+  check('and the way out is still there', !!D.querySelector('[data-open-preview]'));
+  Object.defineProperty(window.navigator, 'pdfViewerEnabled', { get: () => true, configurable: true });
 
   D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
 }

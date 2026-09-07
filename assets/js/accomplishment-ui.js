@@ -405,13 +405,39 @@
     liquidation: 'liquidation', signatories: 'cover', review: 'cover'
   };
 
+  /* Whether this browser will show a PDF inside the page at all.
+
+     Phones very often will not: a PDF in a frame is refused outright, or offered
+     as a download, and what the officer gets is a grey box that never fills in.
+     The report itself is fine — the preview of it is the thing that cannot be
+     drawn — but there is no way to tell those two apart from the outside, and
+     what it looks like is a broken screen.
+
+     Chrome and Firefox say so plainly. Safari does not implement the property
+     at all, so `undefined` is treated as "probably yes" and the way out sits
+     under the frame regardless, for anybody whose frame stays empty. */
+  function canShowPdfInline() {
+    return !(global.navigator && global.navigator.pdfViewerEnabled === false);
+  }
+
   function previewPane() {
+    var inline = canShowPdfInline();
     return '<div class="wiz-preview">' +
       '<div class="row" style="justify-content:space-between;margin-bottom:8px">' +
         '<span class="field-label" style="margin:0">Preview of this page</span>' +
         '<button type="button" class="btn btn-sm" data-refresh-preview>Refresh</button>' +
       '</div>' +
-      '<div class="wiz-frame" id="pv-frame"><p class="small muted" style="padding:14px">Building…</p></div>' +
+      (inline
+        ? '<div class="wiz-frame" id="pv-frame">' +
+          '<p class="small muted" style="padding:14px">Building\u2026</p></div>'
+        : '<div class="wiz-frame is-flat" id="pv-frame">' +
+          '<p class="small muted" style="padding:14px">This browser will not show a PDF ' +
+          'inside the page. The report is fine \u2014 open it to look at it.</p></div>') +
+      '<div class="row" style="margin-top:8px">' +
+        '<button type="button" class="btn btn-sm" data-open-preview>' +
+        'Open the preview in a new tab</button>' +
+        '<span class="tiny muted">Nothing showing above? Use this.</span>' +
+      '</div>' +
       '</div>';
   }
 
@@ -453,8 +479,10 @@
         pvURL = out.url;
         var key = STEP_PAGE[STEPS[state.step].key];
         var page = out.pageMap[key] || 1;
-        frameNow.innerHTML = '<iframe title="Report preview" src="' +
-          out.url + '#page=' + page + '&view=FitH&toolbar=0"></iframe>';
+        if (canShowPdfInline()) {
+          frameNow.innerHTML = '<iframe title="Report preview" src="' +
+            out.url + '#page=' + page + '&view=FitH&toolbar=0"></iframe>';
+        }
       }).catch(function (err) {
         var frameNow = rootEl && rootEl.querySelector('#pv-frame');
         if (mine !== pvSeq || !frameNow) return;
@@ -556,6 +584,26 @@
   function bind(host) {
     U.els('[data-step]', host).forEach(function (b) {
       b.addEventListener('click', function () { go(Number(b.getAttribute('data-step'))); });
+    });
+
+    var openPv = host.querySelector('[data-open-preview]');
+    if (openPv) openPv.addEventListener('click', function () {
+      /* The document already built for the frame, where one was built. Building
+         a second copy to open would be a second copy of a large file for no
+         reason. */
+      if (pvURL) return global.open(pvURL, '_blank');
+      openPv.disabled = true;
+      openPv.textContent = 'Building\u2026';
+      AccomplishmentPDF.previewURL(state.eventId, state.draft).then(function (out) {
+        pvURL = out.url;
+        openPv.disabled = false;
+        openPv.textContent = 'Open the preview in a new tab';
+        global.open(out.url, '_blank');
+      }).catch(function (err) {
+        openPv.disabled = false;
+        openPv.textContent = 'Open the preview in a new tab';
+        UI.toast(err.message || 'The preview could not be built.', 'error');
+      });
     });
 
     var goExp = host.querySelector('[data-goto-export]');
