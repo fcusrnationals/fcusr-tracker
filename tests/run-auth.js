@@ -48,6 +48,7 @@ const SB = {
   tokens: {},         // access token → { userId, expiresAt }
   refreshes: {},      // refresh token → userId
   requests: [],       // every call the client made
+  recoveries: {},     // user id → the one-shot token their reset link carries
   n: 0
 };
 
@@ -70,9 +71,14 @@ function bearerUser(headers) {
   const auth = (headers && (headers.Authorization || headers.authorization)) || '';
   const tok = auth.replace(/^Bearer /, '');
   const rec = SB.tokens[tok];
-  if (!rec) return null;
-  if (rec.expiresAt < Date.now()) return null;   // the server refuses a lapsed token
-  return rec.userId;
+  if (rec) {
+    if (rec.expiresAt < Date.now()) return null; // the server refuses a lapsed token
+    return rec.userId;
+  }
+  /* A recovery link carries a token of its own. It is good for one act — the
+     password change — and for nothing else, so it is spent on use. */
+  const owner = Object.keys(SB.recoveries).find((id) => SB.recoveries[id] === tok);
+  return owner || null;
 }
 
 // The trigger the schema installs on auth.users: sign-up turns a waiting
@@ -107,7 +113,14 @@ window.fetch = function (url, opts) {
 
   /* ---- auth ---- */
   if (u.indexOf('/auth/v1/signup') === 0) {
-    if (SB.users[body.email]) return reply(400, { message: 'User already registered' });
+    /* What Supabase actually answers: 422, and the sentence under `msg` rather
+       than `message`. The stand-in used to say 400 with `message`, which the
+       client happened to read — so the client's failure to read a real reply
+       was invisible here and reached a student as the words "HTTP 422". */
+    if (SB.users[body.email]) {
+      return reply(422, { code: 422, error_code: 'user_already_exists',
+                          msg: 'User already registered' });
+    }
     const user = { id: 'user-' + (++SB.n), email: body.email, password: body.password };
     SB.users[body.email] = user;
     claimEnrolment(user);                       // the trigger
@@ -126,12 +139,20 @@ window.fetch = function (url, opts) {
     const email = Object.keys(SB.users).find((e) => SB.users[e].id === userId);
     return reply(200, Object.assign(issue(userId), { user: { id: userId, email } }));
   }
+  if (u.indexOf('/auth/v1/recover') === 0) {
+    const user = SB.users[String(body.email || '').toLowerCase()];
+    /* 200 whether or not the address is known. Anything else would let somebody
+       test addresses against the Republic's roster from the sign-in screen. */
+    if (user) SB.recoveries[user.id] = 'recovery-' + (++SB.n);
+    return reply(200, {});
+  }
   if (u.indexOf('/auth/v1/logout') === 0) return reply(204);
   if (u.indexOf('/auth/v1/user') === 0) {
     if (!who) return reply(401, { message: 'invalid claim: missing sub claim' });
     if (opts.method === 'PUT') {
       const email = Object.keys(SB.users).find((e) => SB.users[e].id === who);
       SB.users[email].password = body.password;
+      delete SB.recoveries[who];                 // one link, one use
       return reply(200, { id: who, email });
     }
     const email = Object.keys(SB.users).find((e) => SB.users[e].id === who);
@@ -487,6 +508,46 @@ const FILES = [
     check('and they can sign in again', !!back, 'still locked out after being added back');
   }
 
+  /* ---------------- a forgotten password ----------------
+     There was no way back. Nobody in the council can look a password up or set
+     one for somebody else — that needs a key this app deliberately does not
+     carry — and there was no reset either, so an officer who forgot theirs was
+     offered "Set your password", which failed because the address already had
+     an account. That was the end of the road, and a real officer sat at it. */
+  console.log('\n--- a forgotten password can be reset ---');
+  {
+    const email = 'forgetful@filamer.edu.ph';
+    SB.users[email] = { id: 'u-forget', password: 'the-old-one', email: email };
+    SB.enrolments[email] = {
+      email: email, full_name: 'Forgetful One', position: 'Senator',
+      unit_id: NAT, access: 'officer', event_ids: []
+    };
+    claimEnrolment(SB.users[email]);
+    await Auth.signOut();
+
+    await Auth.sendReset(email);
+    check('asking for a link makes one', !!SB.recoveries['u-forget']);
+
+    // The same answer for an address nobody has, so the door cannot be used to
+    // test who is enrolled.
+    const beforeUnknown = Object.keys(SB.recoveries).length;
+    let refused = false;
+    try { await Auth.sendReset('nobody@example.com'); } catch (e) { refused = true; }
+    check('and an address nobody has is answered the same way',
+      !refused && Object.keys(SB.recoveries).length === beforeUnknown);
+
+    const token = SB.recoveries['u-forget'];
+    await Auth.finishReset(token, 'a-brand-new-one');
+    check('the new password takes', SB.users[email].password === 'a-brand-new-one');
+    check('and the link cannot be used twice', !SB.recoveries['u-forget']);
+
+    check('the old password no longer works', await (async () => {
+      try { await Auth.signIn(email, 'the-old-one'); return false; } catch (e) { return true; }
+    })());
+    check('and the new one does', !!(await Auth.signIn(email, 'a-brand-new-one')));
+    await Auth.signOut();
+  }
+
   /* ---------------- leaving a shared computer ----------------
      A council runs on the library PC and the org room laptop. Signing out has
      to take the council's work with it, or the next person to sign in opens the
@@ -646,9 +707,20 @@ const FILES = [
     await new Promise((r) => setTimeout(r, 60));
     check('a claimed address cannot be re-claimed',
       SB.users['newbie@filamer.edu.ph'].password === 'a-real-password');
-    check('and it says the address already has one',
-      /already has a password/i.test(dlg2.querySelector('[data-err]').textContent));
-    dlg2.querySelector('[data-close]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    /* This used to end here, with a sentence saying the address already had a
+       password and nothing to do about it. The person standing at that message
+       is nearly always somebody who has forgotten theirs, so they are handed
+       the way out instead of the fact. */
+    check('the dead end is gone', !ftDialog());
+    const fp = [...D.querySelectorAll('.modal-backdrop')]
+      .find((m) => m.querySelector('#fp-email'));
+    check('and the forgotten-password form opens instead', !!fp);
+    check('with the address already filled in',
+      fp && fp.querySelector('#fp-email').value === 'newbie@filamer.edu.ph',
+      fp && fp.querySelector('#fp-email').value);
+
+    fp.querySelector('[data-close]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 30));
     check('closing it leaves you at the door, not inside',
       !Auth.signedIn() && !!D.querySelector('.gate-card'));
 

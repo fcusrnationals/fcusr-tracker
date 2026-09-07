@@ -62,6 +62,10 @@
         U.esc(busy ? 'One moment…' : 'Sign in') +
       '</button>' +
 
+      (offline ? '' :
+        '<button type="button" class="btn btn-ghost btn-block" data-forgot ' +
+        'style="margin-top:8px">Forgot your password?</button>') +
+
       '<p class="gate-foot">' +
         'First time here? Use the address a national executive enrolled you with. ' +
         'You will be asked to choose your password once you do.' +
@@ -157,9 +161,129 @@
             close();
             onDone();
           }).catch(function (e) {
-            fail(e && e.alreadyClaimed
-              ? 'This address already has a password. Close this and check the one you typed.'
-              : (e && e.message) || 'That could not be set.');
+            /* The dead end this used to be. The address has an account, so
+               there is nothing to set — and the person standing here is almost
+               always somebody who has forgotten theirs. Hand them the way out
+               rather than the fact. */
+            if (e && e.alreadyClaimed) {
+              close();
+              return forgot(email);
+            }
+            fail((e && e.message) || 'That could not be set.');
+          });
+        }
+
+        go.addEventListener('click', submit);
+        [a, b].forEach(function (el) {
+          el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submit(); });
+        });
+      }
+    });
+  }
+
+  /* Nobody in the council can look a password up or set one for somebody else,
+     so the only way back is a link sent to the address itself. Before this
+     there was no way back at all: an officer who forgot theirs was offered
+     "Set your password", which failed because the address already had an
+     account, and that was the end of it. */
+  function forgot(prefill) {
+    var working = false;
+    UI.modal({
+      title: 'Forgotten password',
+      body:
+        '<p class="small">We will email a link to the address below. Open it on this ' +
+        'phone or computer and you can choose a new password.</p>' +
+        '<div class="field" style="margin-top:14px"><label for="fp-email">Email</label>' +
+        '<input type="email" id="fp-email" inputmode="email" autocapitalize="off" ' +
+        'spellcheck="false" data-autofocus value="' + U.esc(prefill || '') + '"></div>' +
+        '<div class="error-text" data-err hidden></div>' +
+        '<p class="small muted">Use the address you were enrolled with. Nobody here can ' +
+        'see or set your password &mdash; not even the President &mdash; which is why it ' +
+        'has to go to your inbox.</p>',
+      footer: '<button type="button" class="btn" data-close>Close</button>' +
+        '<button type="button" class="btn btn-primary" data-go>Send the link</button>',
+      onMount: function (root, close) {
+        var input = root.querySelector('#fp-email');
+        var err = root.querySelector('[data-err]');
+        var go = root.querySelector('[data-go]');
+
+        go.addEventListener('click', function () {
+          if (working) return;
+          var addr = (input.value || '').trim();
+          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
+            err.hidden = false;
+            err.textContent = 'That email address does not look right.';
+            return;
+          }
+          working = true;
+          go.disabled = true;
+          go.textContent = 'Sending\u2026';
+          Auth.sendReset(addr).then(function () {
+            close();
+            /* Deliberately the same words whether or not the address is one we
+               know. Saying "no such account" would let anybody test addresses
+               against the Republic's roster. */
+            UI.modal({
+              title: 'Check your email',
+              body: '<p class="small">If ' + U.esc(addr) + ' has an account, a link is on ' +
+                'its way. It expires after an hour, and it only works once.</p>' +
+                '<p class="small muted">Nothing in your inbox after a few minutes? Look in ' +
+                'spam, then ask a national executive &mdash; the address may not be enrolled.</p>',
+              footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
+            });
+          }).catch(function (e) {
+            working = false;
+            go.disabled = false;
+            go.textContent = 'Send the link';
+            err.hidden = false;
+            err.textContent = (e && e.message) || 'That could not be sent.';
+          });
+        });
+      }
+    });
+  }
+
+  /* Where the emailed link lands. The token in it is good for exactly one act
+     and is never kept. */
+  function chooseNew(token, onDone) {
+    var working = false;
+    UI.modal({
+      title: 'Choose a new password',
+      dismissible: false,
+      body:
+        '<p class="small">This link is good once. Choose the password you will use from ' +
+        'now on.</p>' +
+        '<div class="field" style="margin-top:14px"><label for="np-a">New password</label>' +
+        '<input type="password" id="np-a" autocomplete="new-password" data-autofocus></div>' +
+        '<div class="field"><label for="np-b">Type it again</label>' +
+        '<input type="password" id="np-b" autocomplete="new-password"></div>' +
+        '<div class="error-text" data-err hidden></div>',
+      footer: '<button type="button" class="btn btn-primary" data-go>Set it</button>',
+      onMount: function (root, close) {
+        var a = root.querySelector('#np-a');
+        var b = root.querySelector('#np-b');
+        var err = root.querySelector('[data-err]');
+        var go = root.querySelector('[data-go]');
+
+        function fail(msg) {
+          working = false; go.disabled = false; go.textContent = 'Set it';
+          err.hidden = false; err.textContent = msg;
+        }
+
+        function submit() {
+          if (working) return;
+          var pw = a.value || '';
+          if (pw.length < 8) return fail('Too short \u2014 use at least eight characters.');
+          if (pw !== (b.value || '')) return fail('The two do not match.');
+          working = true; err.hidden = true;
+          go.disabled = true; go.textContent = 'One moment\u2026';
+          Auth.finishReset(token, pw).then(function () {
+            close();
+            UI.toast('Password changed. Sign in with it now.');
+            if (onDone) onDone();
+          }).catch(function (e) {
+            fail((e && e.message) ||
+              'That link has expired or was already used. Ask for another.');
           });
         }
 
@@ -213,6 +337,13 @@
       });
     }
 
+    var forgotBtn = root.querySelector('[data-forgot]');
+    if (forgotBtn) {
+      forgotBtn.addEventListener('click', function () {
+        forgot((email && email.value) || '');
+      });
+    }
+
     var go = root.querySelector('.gate-go');
     if (go) go.addEventListener('click', submit);
     [email, pass].forEach(function (el) {
@@ -227,5 +358,6 @@
   // Called on sign-out so the next person does not land in the last one's state.
   function reset() { busy = false; problem = ''; }
 
-  global.ViewSignIn = { render: render, checking: checking, mount: mount, card: card, reset: reset };
+  global.ViewSignIn = { render: render, checking: checking, mount: mount, card: card,
+    reset: reset, forgot: forgot, chooseNew: chooseNew };
 })(window);

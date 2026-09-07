@@ -402,6 +402,41 @@
     });
   }
 
+  /* ---------- forgotten passwords ----------
+
+     Nobody in the council can look a password up or set one for somebody else:
+     that needs a key this app deliberately does not carry. So the only way back
+     in is a link sent to the address itself.
+
+     Before this there was no way back at all. An officer who forgot theirs was
+     offered "Set your password", which then failed because the address already
+     had an account — and that was the end of it. */
+  function sendReset(email) {
+    return Backend.sendReset(String(email || '').trim().toLowerCase());
+  }
+
+  /* The link Supabase sends comes back to the site with its token in the URL
+     fragment — the same place this app keeps its routes. Read once, on arrival,
+     and wiped from the address bar immediately: a recovery token in a URL is
+     one screenshot or one shared link away from being somebody else's. */
+  function recoveryToken() {
+    var h = String(global.location.hash || '');
+    if (h.indexOf('access_token=') < 0 || h.indexOf('type=recovery') < 0) return '';
+    var m = h.match(/access_token=([^&]+)/);
+    var token = m ? decodeURIComponent(m[1]) : '';
+    if (token) {
+      try {
+        global.history.replaceState(null, '',
+          global.location.pathname + global.location.search + '#/overview');
+      } catch (e) { global.location.hash = '#/overview'; }
+    }
+    return token;
+  }
+
+  function finishReset(token, password) {
+    return Backend.finishReset(token, password);
+  }
+
   global.Auth = {
     current: current, signedIn: signedIn, isNational: isNational,
     isExecutive: isExecutive, isVolunteer: isVolunteer,
@@ -413,6 +448,7 @@
     signIn: signIn, signUp: signUp, signOut: signOut,
     restore: restore, resume: resume, adopt: adopt, settled: settled,
     promptSignIn: promptSignIn, requireExecutive: requireExecutive,
-    changePassword: changePassword, isOffline: isOffline
+    changePassword: changePassword, isOffline: isOffline,
+    sendReset: sendReset, finishReset: finishReset, recoveryToken: recoveryToken
   };
 })(window);

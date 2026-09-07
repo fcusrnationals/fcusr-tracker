@@ -36,6 +36,8 @@
       return Promise.resolve(session.profile);
     },
     signUp: function () { return localDriver.signIn(); },
+    sendReset: function () { return Promise.resolve(true); },
+    finishReset: function () { return Promise.resolve(true); },
     signOut: function () { session = null; return Promise.resolve(); },
     restore: function () { return Promise.resolve(session ? session.profile : null); },
     whoami: function () { return Promise.resolve(session ? session.profile : null); },
@@ -139,10 +141,16 @@
         var data = null;
         try { data = t ? JSON.parse(t) : null; } catch (e) { data = t; }
         if (!r.ok) {
-          var msg = (data && (data.message || data.error_description || data.error || data.hint)) ||
+          /* Supabase Auth does not answer in the same shape PostgREST does: it
+             puts the sentence in `msg` and the reason in `error_code`. Neither
+             was read, so "User already registered" reached a student as the
+             words "HTTP 422" — with a button underneath that could not work. */
+          var msg = (data && (data.message || data.msg || data.error_description ||
+                              data.error || data.hint)) ||
             ('HTTP ' + r.status);
           var err = new Error(msg);
           err.status = r.status;
+          if (data && data.error_code) err.code = data.error_code;
           throw err;
         }
         return data;
@@ -202,11 +210,40 @@
     /* Each person sets their own password, on an address an officer has already
        enrolled. Signing up grants nothing by itself: without a waiting enrolment
        the database makes no profile, and the app has nothing to show. */
+    /* Forgotten passwords. Nobody in the council can look one up or set one for
+       somebody else — that needs a key this app deliberately does not carry — so
+       the only way back in is a link sent to the address itself.
+
+       redirect_to must be listed in Supabase → Authentication → URL
+       Configuration, or the link lands nowhere. */
+    sendReset: function (email) {
+      var back = location.origin + location.pathname;
+      return sbRaw('/auth/v1/recover?redirect_to=' + encodeURIComponent(back), {
+        method: 'POST', auth: false, body: { email: email }
+      });
+    },
+
+    /* Finishing one: the link comes back carrying a token that is good for this
+       one act. It is not a session and is not kept. */
+    finishReset: function (token, password) {
+      return sbRaw('/auth/v1/user', {
+        method: 'PUT', auth: false,
+        headers: { Authorization: 'Bearer ' + token },
+        body: { password: password }
+      });
+    },
+
     signUp: function (email, password) {
       return sbRaw('/auth/v1/signup', {
         method: 'POST', auth: false, body: { email: email, password: password }
       }).catch(function (err) {
-        if (err && /already/i.test(err.message || '')) err.alreadyClaimed = true;
+        /* Signing up an address that already has an account. Supabase says so
+           with 422 and user_already_exists; older versions said it in words.
+           Matching only the words meant this went unrecognised. */
+        if (err && (err.status === 422 || err.code === 'user_already_exists' ||
+                    /already/i.test(err.message || ''))) {
+          err.alreadyClaimed = true;
+        }
         throw err;
       }).then(function (res) {
         if (!res.access_token) {
@@ -505,6 +542,16 @@
     },
     whoami: function () { return driver().whoami(); },
     units: function () { return driver().units(); },
+    sendReset: function (email) {
+      var d = driver();
+      return d.sendReset ? d.sendReset(email)
+        : Promise.reject(new Error('Password resets need the online version.'));
+    },
+    finishReset: function (token, pw) {
+      var d = driver();
+      return d.finishReset ? d.finishReset(token, pw)
+        : Promise.reject(new Error('Password resets need the online version.'));
+    },
     remove: function (email) {
       var d = driver();
       return d.remove ? d.remove(email) : d.withdraw(email);
