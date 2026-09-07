@@ -1638,12 +1638,17 @@
   }
 
   function stats(list) {
-    var s = { total: list.length, done: 0, pending: 0, overdue: 0, dueThisWeek: 0, blocked: 0 };
+    var s = { total: list.length, done: 0, pending: 0, overdue: 0, dueThisWeek: 0,
+              blocked: 0, unassigned: 0 };
     list.forEach(function (t) {
       if (t.status === 'Done') s.done++; else s.pending++;
       if (isOverdue(t)) s.overdue++;
       if (isDueThisWeek(t)) s.dueThisWeek++;
       if (t.status === 'On hold') s.blocked++;
+      /* Work nobody has taken. Finished work does not count: a task that got
+         done without ever being assigned needs nobody now, and counting it
+         would send an officer looking for a problem that has already gone. */
+      if (!t.assigneeId && t.status !== 'Done') s.unassigned++;
     });
     s.percent = U.pct(s.done, s.total);
     return s;

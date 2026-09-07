@@ -965,8 +965,43 @@ console.log('\n--- an unassigned task says so in red ---');
   check('and so is the heading the tasks are grouped under',
     /\.group-title\.unassigned\s*\{[^}]*--st-overdue-fg/.test(css));
 
+  /* The row is only half of it. An officer looking for unclaimed work would
+     otherwise have to open every activity in turn, which is how a task sits
+     unclaimed until the week it was due. */
+  const before = S.eventStats(ev.id).unassigned;
+  const extra = S.addTask({ kind: 'event', eventId: ev.id, title: 'Also nobody\u2019s' });
+  check('the event counts what nobody has taken',
+    S.eventStats(ev.id).unassigned === before + 1,
+    before + ' \u2192 ' + S.eventStats(ev.id).unassigned);
+
+  /* Finished work does not count. A task that got done without ever being
+     assigned needs nobody now, and counting it sends somebody looking for a
+     problem that has already gone. */
+  S.updateTask(extra.id, { status: 'Done' });
+  check('and stops counting it once it is done',
+    S.eventStats(ev.id).unassigned === before,
+    String(S.eventStats(ev.id).unassigned));
+
+  S.deleteTask(extra.id);
   S.deleteTask(held.id);
   S.deleteTask(loose.id);
+}
+
+/* ---------------- a letter nobody is carrying ---------------- */
+console.log('\n--- a letter nobody is carrying says so in red ---');
+{
+  const S = window.Store;
+  const l = S.letters()[0];
+  if (l) {
+    S.updateLetter(l.id, { inChargeId: '', inChargeName: '' });
+    goto('#/letters');
+    const html = window.document.getElementById('view').innerHTML;
+    check('the carrier reads Unassigned, in red',
+      /<span class="unassigned">Unassigned<\/span>/.test(html),
+      html.slice(0, 120));
+  } else {
+    check('there is a letter to check', false, 'the fixture has none');
+  }
 }
 
 console.log('\n--- console cleanliness ---');

@@ -122,6 +122,11 @@
         '<span class="sep">·</span>' + s.done + ' of ' + s.total + ' done</span></span>' +
       '<span class="er-chips">' +
         (s.overdue ? '<span class="chip st-overdue"><span class="dot"></span>' + s.overdue + ' overdue</span>' : '') +
+        /* Work inside this event that nobody has taken. Without it the only way
+           to find out was to open every activity in turn, which is how a task
+           sits unclaimed until the week it was due. */
+        (s.unassigned ? '<span class="chip st-overdue"><span class="dot"></span>' +
+          s.unassigned + ' unassigned</span>' : '') +
         '<span class="chip ' + (e.status === 'Ongoing' ? 'st-in-progress' : e.status === 'Completed' ? 'st-done' : 'chip-plain') + '">' +
           U.esc(e.status) + '</span>' +
       '</span></button>';

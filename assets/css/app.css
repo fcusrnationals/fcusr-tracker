@@ -489,6 +489,7 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
    same kind of fact: something that stays wrong until a person acts. */
 .task-meta .unassigned { color: var(--st-overdue-fg); font-weight: 700; }
 .group-title.unassigned { color: var(--st-overdue-fg); }
+.er-meta .unassigned { color: var(--st-overdue-fg); font-weight: 700; }
 
 .task-right { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
 

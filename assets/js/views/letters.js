@@ -102,7 +102,11 @@
       '<span class="er-main">' +
       '<span class="er-title">' + U.esc(l.subject) + '</span>' +
       '<span class="er-meta">' + U.esc(Store.letterWhere(l)) +
-        '<span class="sep">·</span>' + U.esc(Store.letterInCharge(l)) +
+        // Nobody is carrying this one. Same red as everywhere else it is true.
+        '<span class="sep">·</span>' +
+        (l.inChargeId || l.inChargeName
+          ? U.esc(Store.letterInCharge(l))
+          : '<span class="unassigned">' + U.esc(Store.letterInCharge(l)) + '</span>') +
         (e ? '<span class="sep">·</span>' + U.esc(e.title) : '') +
       '</span></span>' +
       '<span class="er-chips">' +
