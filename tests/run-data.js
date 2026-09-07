@@ -756,6 +756,44 @@ console.log('\n--- letters survive a hostile file ---');
 }
 
 const failed = results.filter((r) => !r.pass);
+/* ---------------- reading back a save with no units in it ----------------
+   The colleges are seeded when the saved data has none: an old backup, a file
+   written before units were stored, anything partial. The list that remembers
+   which ones are already present was built from the SAVED units alone, and the
+   seeding did not tell it — so the top-up pass that exists to add colleges a
+   device predates could not see the sixteen just seeded, and added all sixteen
+   again. Every college twice, on a device that had done nothing wrong.
+
+   Adding a missing National unit had the same shape: put in without being
+   recorded, then put in again. */
+console.log('\n--- a save with no units does not double them ---');
+{
+  const cases = {
+    'no units key at all': { events: [], tasks: [], people: [] },
+    'an empty units list': { events: [], tasks: [], people: [], units: [] },
+    'units with no National among them': {
+      events: [], tasks: [], people: [],
+      units: [{ id: 'unit-cas', code: 'CAS', kind: 'province', name: 'CAS' }]
+    },
+    'a partial save from an older version': {
+      events: [], tasks: [], people: [], units: [], unitsSeed: 0
+    }
+  };
+
+  Object.keys(cases).forEach((label) => {
+    sb.window.localStorage.setItem('fcusr.tracker.v1', JSON.stringify(cases[label]));
+    vm.runInContext('Store.load();', sb);
+    const codes = vm.runInContext('Store.units().map(function (u) { return u.code; })', sb);
+    const dupes = [...new Set(codes.filter((c, i) => codes.indexOf(c) !== i))];
+    check(label + ': every college once', dupes.length === 0, 'twice: ' + dupes.join(', '));
+    check(label + ': and there is a National unit',
+      vm.runInContext("Store.units().some(function (u) { return u.kind === 'national'; })", sb));
+  });
+
+  sb.window.localStorage.removeItem('fcusr.tracker.v1');
+  vm.runInContext('Store.load(); Store._seedRehearsal();', sb);
+}
+
 console.log('\n========================================');
 console.log(results.length - failed.length + ' passed, ' + failed.length + ' failed');
 if (failed.length) {

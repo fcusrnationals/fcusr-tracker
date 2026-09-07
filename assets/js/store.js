@@ -871,6 +871,21 @@
       s.units.unshift(seedUnits()[0]);
     }
 
+    /* What is actually in the list now, rather than what arrived in the file.
+
+       seenUnit was built from the saved units alone, and the two lines above
+       add units without telling it. So a save with no units list — an old
+       backup, a file written before units were stored, anything partial — got
+       the sixteen colleges from the seed, and then the top-up below could not
+       see them and added all sixteen again. Every college twice, on a device
+       that had done nothing wrong.
+
+       Adding a missing National unit had the same shape: unshifted, unrecorded,
+       and then pushed a second time. Offices avoid both by topping up only when
+       nothing was seeded, which is the same fix said another way. */
+    seenUnit = {};
+    s.units.forEach(function (u) { seenUnit[u.id] = true; });
+
     // A device set up before a unit existed is topped up once.
     var seenSeed = typeof data.unitsSeed === 'number' ? data.unitsSeed : 0;
     if (seenSeed < UNIT_SEED_VERSION) {
