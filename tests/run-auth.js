@@ -48,7 +48,6 @@ const SB = {
   tokens: {},         // access token → { userId, expiresAt }
   refreshes: {},      // refresh token → userId
   requests: [],       // every call the client made
-  recoveries: {},     // user id → the one-shot token their reset link carries
   n: 0
 };
 
@@ -75,10 +74,7 @@ function bearerUser(headers) {
     if (rec.expiresAt < Date.now()) return null; // the server refuses a lapsed token
     return rec.userId;
   }
-  /* A recovery link carries a token of its own. It is good for one act — the
-     password change — and for nothing else, so it is spent on use. */
-  const owner = Object.keys(SB.recoveries).find((id) => SB.recoveries[id] === tok);
-  return owner || null;
+  return null;
 }
 
 // The trigger the schema installs on auth.users: sign-up turns a waiting
@@ -139,20 +135,12 @@ window.fetch = function (url, opts) {
     const email = Object.keys(SB.users).find((e) => SB.users[e].id === userId);
     return reply(200, Object.assign(issue(userId), { user: { id: userId, email } }));
   }
-  if (u.indexOf('/auth/v1/recover') === 0) {
-    const user = SB.users[String(body.email || '').toLowerCase()];
-    /* 200 whether or not the address is known. Anything else would let somebody
-       test addresses against the Republic's roster from the sign-in screen. */
-    if (user) SB.recoveries[user.id] = 'recovery-' + (++SB.n);
-    return reply(200, {});
-  }
   if (u.indexOf('/auth/v1/logout') === 0) return reply(204);
   if (u.indexOf('/auth/v1/user') === 0) {
     if (!who) return reply(401, { message: 'invalid claim: missing sub claim' });
     if (opts.method === 'PUT') {
       const email = Object.keys(SB.users).find((e) => SB.users[e].id === who);
       SB.users[email].password = body.password;
-      delete SB.recoveries[who];                 // one link, one use
       return reply(200, { id: who, email });
     }
     const email = Object.keys(SB.users).find((e) => SB.users[e].id === who);
@@ -201,6 +189,29 @@ window.fetch = function (url, opts) {
       }
     });
     return reply(200, body.p_email);
+  }
+  if (u.indexOf('/rest/v1/rpc/set_member_password') === 0) {
+    const actor = SB.profiles[who];
+    const actorUnit = actor && units.find((x) => x.id === actor.unit_id);
+    const email = String(body.p_email || '').toLowerCase().trim();
+    if (!actor || actor.access !== 'officer' || !actorUnit || actorUnit.kind !== 'national') {
+      return reply(403, { message: 'You may not set that member\'s password.' });
+    }
+    if (actor.email === email) return reply(400, { message: 'Use Change my password for your own.' });
+    if (!SB.users[email]) {
+      return reply(400, { message: 'Nobody has signed in with that address yet.' });
+    }
+    if (!body.p_password || String(body.p_password).length < 8) {
+      return reply(400, { message: 'A password must be at least eight characters.' });
+    }
+    SB.users[email].password = body.p_password;
+    /* Whoever was signed in as them is signed out. Setting a password and
+       leaving the old sessions alive would leave the person you just locked out
+       still inside until their token happened to lapse. */
+    Object.keys(SB.tokens).forEach((t) => {
+      if (SB.tokens[t].userId === SB.users[email].id) delete SB.tokens[t];
+    });
+    return reply(200, true);
   }
   if (u.indexOf('/rest/v1/rpc/remove_member') === 0 ||
       u.indexOf('/rest/v1/rpc/withdraw_member') === 0) {
@@ -448,6 +459,21 @@ const FILES = [
     })());
     check('you cannot remove yourself',
       !acc.querySelector('[data-remove="president@filamer.edu.ph"]'));
+
+    /* Where an executive goes when somebody has forgotten theirs. Offered only
+       for people who have actually signed in: a waiting enrolment has no
+       account yet, so there is no password to set — they choose their own. */
+    /* Enrolled as Rhea.Solis@… and listed as rhea.solis@… — the address is
+       folded to lower case on the way in, and the server folds again before it
+       matches, so neither the button nor the function cares how it was typed. */
+    check('somebody with an account can be given a new password',
+      !!acc.querySelector('[data-setpw="rhea.solis@filamer.edu.ph"]'),
+      [...acc.querySelectorAll('[data-setpw]')]
+        .map((b) => b.getAttribute('data-setpw')).join(', ') || 'none offered');
+    check('a waiting enrolment is not offered one',
+      !acc.querySelector('[data-setpw="waiting.one@filamer.edu.ph"]'));
+    check('and you are not offered it on yourself',
+      !acc.querySelector('[data-setpw="president@filamer.edu.ph"]'));
     check('and the word is Remove, not Withdraw',
       !/Withdraw/.test(acc.innerHTML), 'the roster still says Withdraw');
 
@@ -523,12 +549,11 @@ const FILES = [
   }
 
   /* ---------------- a forgotten password ----------------
-     There was no way back. Nobody in the council can look a password up or set
-     one for somebody else — that needs a key this app deliberately does not
-     carry — and there was no reset either, so an officer who forgot theirs was
-     offered "Set your password", which failed because the address already had
-     an account. That was the end of the road, and a real officer sat at it. */
-  console.log('\n--- a forgotten password can be reset ---');
+     There is no emailed link and deliberately so: sending mail needs a sender
+     configured in Supabase, and without one that button only reports an error —
+     which is exactly what this council got when they tried it. What a council
+     has instead is an executive who sets a password and says it out loud. */
+  console.log('\n--- an executive sets a forgotten password ---');
   {
     const email = 'forgetful@filamer.edu.ph';
     SB.users[email] = { id: 'u-forget', password: 'the-old-one', email: email };
@@ -539,21 +564,37 @@ const FILES = [
     claimEnrolment(SB.users[email]);
     await Auth.signOut();
 
-    await Auth.sendReset(email);
-    check('asking for a link makes one', !!SB.recoveries['u-forget']);
+    /* A volunteer must not be able to set anybody's password. This is the whole
+       weight of the feature: whoever can call it can set a password and then
+       sign in as that person. */
+    const vol = 'helper@filamer.edu.ph';
+    SB.users[vol] = { id: 'u-helper', password: 'helperpass', email: vol };
+    SB.enrolments[vol] = {
+      email: vol, full_name: 'Helper One', position: '', unit_id: NAT,
+      access: 'volunteer', event_ids: []
+    };
+    claimEnrolment(SB.users[vol]);
+    await Auth.signIn(vol, 'helperpass');
+    let stopped = false;
+    try { await Auth.setMemberPassword(email, 'not-your-place'); }
+    catch (e) { stopped = true; }
+    check('a volunteer cannot set anybody\u2019s password', stopped);
+    check('and the password is untouched', SB.users[email].password === 'the-old-one');
+    await Auth.signOut();
 
-    // The same answer for an address nobody has, so the door cannot be used to
-    // test who is enrolled.
-    const beforeUnknown = Object.keys(SB.recoveries).length;
-    let refused = false;
-    try { await Auth.sendReset('nobody@example.com'); } catch (e) { refused = true; }
-    check('and an address nobody has is answered the same way',
-      !refused && Object.keys(SB.recoveries).length === beforeUnknown);
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    let tooShort = false;
+    try { await Auth.setMemberPassword(email, 'short'); } catch (e) { tooShort = true; }
+    check('a password under eight characters is refused', tooShort);
 
-    const token = SB.recoveries['u-forget'];
-    await Auth.finishReset(token, 'a-brand-new-one');
-    check('the new password takes', SB.users[email].password === 'a-brand-new-one');
-    check('and the link cannot be used twice', !SB.recoveries['u-forget']);
+    let ownAccount = false;
+    try { await Auth.setMemberPassword('president@filamer.edu.ph', 'sneaky-one'); }
+    catch (e) { ownAccount = true; }
+    check('and you cannot use it on your own account', ownAccount);
+
+    await Auth.setMemberPassword(email, 'a-brand-new-one');
+    check('the executive sets it', SB.users[email].password === 'a-brand-new-one');
+    await Auth.signOut();
 
     check('the old password no longer works', await (async () => {
       try { await Auth.signIn(email, 'the-old-one'); return false; } catch (e) { return true; }
@@ -727,11 +768,11 @@ const FILES = [
        the way out instead of the fact. */
     check('the dead end is gone', !ftDialog());
     const fp = [...D.querySelectorAll('.modal-backdrop')]
-      .find((m) => m.querySelector('#fp-email'));
-    check('and the forgotten-password form opens instead', !!fp);
-    check('with the address already filled in',
-      fp && fp.querySelector('#fp-email').value === 'newbie@filamer.edu.ph',
-      fp && fp.querySelector('#fp-email').value);
+      .find((m) => /forgotten password/i.test(m.textContent));
+    check('and it says what to do instead', !!fp);
+    check('which is to ask an executive, naming where they do it',
+      fp && /national executive/i.test(fp.textContent) && /Set password/i.test(fp.textContent),
+      fp && fp.textContent.replace(/\s+/g, ' ').slice(0, 110));
 
     fp.querySelector('[data-close]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 30));
@@ -759,9 +800,19 @@ const FILES = [
   /* ---------------- the anon key is never the credential ---------------- */
   console.log('\n--- what actually goes over the wire ---');
   check('every call carries the project key', SB.requests.length > 0);
-  check('no password was ever sent to anything but the auth endpoint',
-    SB.requests.filter((r) => /password|signup/.test(JSON.stringify(r)))
-      .every((r) => r.url.indexOf('/auth/v1/') === 0));
+  /* Passwords go to Supabase Auth and to exactly one other place: the function
+     an executive uses to set somebody's when they have forgotten it. There is
+     no way to do that without sending it once — it has to reach the server to
+     be hashed — and naming that one destination here is the point. Anything
+     else carrying a password is a leak, and this is what would say so. */
+  const PASSWORD_MAY_GO_TO = ['/auth/v1/', '/rest/v1/rpc/set_member_password'];
+  const carried = SB.requests.filter((r) => /password|signup/.test(JSON.stringify(r)));
+  check('a password is only ever sent where one has to be',
+    carried.every((r) => PASSWORD_MAY_GO_TO.some((ok) => r.url.indexOf(ok) === 0)),
+    carried.filter((r) => !PASSWORD_MAY_GO_TO.some((ok) => r.url.indexOf(ok) === 0))
+      .map((r) => r.url).join(', '));
+  check('and setting one for somebody else really did go over the wire',
+    carried.some((r) => r.url.indexOf('/rest/v1/rpc/set_member_password') === 0));
 
   /* ---------------- the page ships closed ----------------
    The tab bar, the search and the settings button are markup in index.html,

@@ -1849,6 +1849,72 @@
              button taken away — so the only way back was to enrol the address
              again, which did not work either. Now: Remove takes them off the
              list, and Add someone puts them back. */
+          /* Somebody has forgotten theirs. There is no emailed link — sending
+             mail needs a sender configured in Supabase, and without one that
+             button only reports an error. So the executive sets a password and
+             says it out loud, which is what happens in the office anyway. */
+          U.els('[data-setpw]', host).forEach(function (b) {
+            b.addEventListener('click', function () {
+              var email = b.getAttribute('data-setpw');
+              var name = b.getAttribute('data-name');
+              var working = false;
+
+              UI.modal({
+                title: 'Set a password for ' + name,
+                body:
+                  '<p class="small">They will be signed out everywhere and will use this ' +
+                  'from now on. Tell them what it is, and tell them to change it once they ' +
+                  'are in \u2014 Settings &rarr; Change my password.</p>' +
+                  '<div class="field" style="margin-top:14px"><label for="sp-a">New password</label>' +
+                  '<input type="text" id="sp-a" autocomplete="off" spellcheck="false" ' +
+                  'data-autofocus value="' + U.esc(suggestPassword()) + '"></div>' +
+                  '<div class="hint">Shown as plain text on purpose: you have to be able to ' +
+                  'read it out. At least eight characters.</div>' +
+                  '<div class="error-text" data-err hidden></div>' +
+                  '<p class="small muted">You cannot see the password they had. It is stored ' +
+                  'scrambled and nobody can read it back \u2014 not even you \u2014 which is ' +
+                  'why a new one has to be set rather than looked up.</p>',
+                footer: '<button type="button" class="btn" data-close>Close</button>' +
+                  '<button type="button" class="btn btn-primary" data-go>Set it</button>',
+                onMount: function (root2, close) {
+                  var input = root2.querySelector('#sp-a');
+                  var err = root2.querySelector('[data-err]');
+                  var go = root2.querySelector('[data-go]');
+                  go.addEventListener('click', function () {
+                    if (working) return;
+                    var pw = input.value || '';
+                    if (pw.length < 8) {
+                      err.hidden = false;
+                      err.textContent = 'Too short \u2014 use at least eight characters.';
+                      return;
+                    }
+                    working = true;
+                    go.disabled = true;
+                    go.textContent = 'One moment\u2026';
+                    Auth.setMemberPassword(email, pw).then(function () {
+                      close();
+                      UI.modal({
+                        title: 'Done',
+                        body: '<p class="small">' + U.esc(name) + ' can sign in with:</p>' +
+                          '<p class="strong" style="font-size:20px;letter-spacing:.5px;' +
+                          'margin:10px 0;word-break:break-all">' + U.esc(pw) + '</p>' +
+                          '<p class="small muted">This is the only time it is shown. Give it to ' +
+                          'them now, and ask them to change it once they are in.</p>',
+                        footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
+                      });
+                    }).catch(function (e) {
+                      working = false;
+                      go.disabled = false;
+                      go.textContent = 'Set it';
+                      err.hidden = false;
+                      err.textContent = (e && e.message) || 'That could not be set.';
+                    });
+                  });
+                }
+              });
+            });
+          });
+
           U.els('[data-remove]', host).forEach(function (b) {
             b.addEventListener('click', function () {
               var email = b.getAttribute('data-remove');
@@ -1942,6 +2008,15 @@
     return html;
   }
 
+  /* Something an officer can read down a phone line without spelling it. No
+     l/1/O/0, and a number on the end because eight characters is the floor. */
+  function suggestPassword() {
+    var words = ['filamer', 'republic', 'roxas', 'capiz', 'gazette', 'session',
+                 'quorum', 'charter', 'plenary', 'banner'];
+    var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
+    return pick(words) + '-' + pick(words) + '-' + (100 + Math.floor(Math.random() * 900));
+  }
+
   function row(p, waiting, mine) {
     var email = p.email || '';
     var name = p.full_name || email || 'Somebody';
@@ -1962,6 +2037,12 @@
           ? '<button type="button" class="btn btn-sm" data-copy-one="' + U.esc(email) +
             '" data-name="' + U.esc(name) + '">Copy invite</button>'
           : '') +
+        /* Only for somebody who has actually signed in. A waiting enrolment has
+           no account yet, so there is no password to set — they choose their
+           own the first time. */
+        (waiting ? '' :
+          '<button type="button" class="btn btn-sm" data-setpw="' + U.esc(email) +
+          '" data-name="' + U.esc(name) + '">Set password</button>') +
         '<button type="button" class="btn btn-sm btn-ghost" data-remove="' + U.esc(email) +
         '" data-name="' + U.esc(name) + '" data-waiting="' + (waiting ? '1' : '0') +
         '">Remove</button></span>') +

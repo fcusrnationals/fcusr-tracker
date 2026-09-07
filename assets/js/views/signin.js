@@ -181,117 +181,26 @@
     });
   }
 
-  /* Nobody in the council can look a password up or set one for somebody else,
-     so the only way back is a link sent to the address itself. Before this
-     there was no way back at all: an officer who forgot theirs was offered
-     "Set your password", which failed because the address already had an
-     account, and that was the end of it. */
+  /* There is no self-service reset and deliberately no emailed link: sending
+     mail needs a sender configured in Supabase, and until one is, that button
+     only reports an error. What a council has instead is an executive who can
+     set the password and say it out loud — which is what actually happens when
+     somebody has forgotten theirs. */
   function forgot(prefill) {
-    var working = false;
     UI.modal({
       title: 'Forgotten password',
       body:
-        '<p class="small">We will email a link to the address below. Open it on this ' +
-        'phone or computer and you can choose a new password.</p>' +
-        '<div class="field" style="margin-top:14px"><label for="fp-email">Email</label>' +
-        '<input type="email" id="fp-email" inputmode="email" autocapitalize="off" ' +
-        'spellcheck="false" data-autofocus value="' + U.esc(prefill || '') + '"></div>' +
-        '<div class="error-text" data-err hidden></div>' +
-        '<p class="small muted">Use the address you were enrolled with. Nobody here can ' +
-        'see or set your password &mdash; not even the President &mdash; which is why it ' +
-        'has to go to your inbox.</p>',
-      footer: '<button type="button" class="btn" data-close>Close</button>' +
-        '<button type="button" class="btn btn-primary" data-go>Send the link</button>',
-      onMount: function (root, close) {
-        var input = root.querySelector('#fp-email');
-        var err = root.querySelector('[data-err]');
-        var go = root.querySelector('[data-go]');
-
-        go.addEventListener('click', function () {
-          if (working) return;
-          var addr = (input.value || '').trim();
-          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
-            err.hidden = false;
-            err.textContent = 'That email address does not look right.';
-            return;
-          }
-          working = true;
-          go.disabled = true;
-          go.textContent = 'Sending\u2026';
-          Auth.sendReset(addr).then(function () {
-            close();
-            /* Deliberately the same words whether or not the address is one we
-               know. Saying "no such account" would let anybody test addresses
-               against the Republic's roster. */
-            UI.modal({
-              title: 'Check your email',
-              body: '<p class="small">If ' + U.esc(addr) + ' has an account, a link is on ' +
-                'its way. It expires after an hour, and it only works once.</p>' +
-                '<p class="small muted">Nothing in your inbox after a few minutes? Look in ' +
-                'spam, then ask a national executive &mdash; the address may not be enrolled.</p>',
-              footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
-            });
-          }).catch(function (e) {
-            working = false;
-            go.disabled = false;
-            go.textContent = 'Send the link';
-            err.hidden = false;
-            err.textContent = (e && e.message) || 'That could not be sent.';
-          });
-        });
-      }
-    });
-  }
-
-  /* Where the emailed link lands. The token in it is good for exactly one act
-     and is never kept. */
-  function chooseNew(token, onDone) {
-    var working = false;
-    UI.modal({
-      title: 'Choose a new password',
-      dismissible: false,
-      body:
-        '<p class="small">This link is good once. Choose the password you will use from ' +
-        'now on.</p>' +
-        '<div class="field" style="margin-top:14px"><label for="np-a">New password</label>' +
-        '<input type="password" id="np-a" autocomplete="new-password" data-autofocus></div>' +
-        '<div class="field"><label for="np-b">Type it again</label>' +
-        '<input type="password" id="np-b" autocomplete="new-password"></div>' +
-        '<div class="error-text" data-err hidden></div>',
-      footer: '<button type="button" class="btn btn-primary" data-go>Set it</button>',
-      onMount: function (root, close) {
-        var a = root.querySelector('#np-a');
-        var b = root.querySelector('#np-b');
-        var err = root.querySelector('[data-err]');
-        var go = root.querySelector('[data-go]');
-
-        function fail(msg) {
-          working = false; go.disabled = false; go.textContent = 'Set it';
-          err.hidden = false; err.textContent = msg;
-        }
-
-        function submit() {
-          if (working) return;
-          var pw = a.value || '';
-          if (pw.length < 8) return fail('Too short \u2014 use at least eight characters.');
-          if (pw !== (b.value || '')) return fail('The two do not match.');
-          working = true; err.hidden = true;
-          go.disabled = true; go.textContent = 'One moment\u2026';
-          Auth.finishReset(token, pw).then(function () {
-            close();
-            UI.toast('Password changed. Sign in with it now.');
-            if (onDone) onDone();
-          }).catch(function (e) {
-            fail((e && e.message) ||
-              'That link has expired or was already used. Ask for another.');
-          });
-        }
-
-        go.addEventListener('click', submit);
-        [a, b].forEach(function (el) {
-          el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submit(); });
-        });
-      }
+        '<p class="small">Ask a national executive. They can set a new password for ' +
+        (prefill ? U.esc(prefill) : 'your address') + ' in the app and tell you what it is, ' +
+        'and you can change it yourself once you are in.</p>' +
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-top:14px">' +
+        '<div class="strong" style="margin-bottom:4px">For the executive</div>' +
+        '<div class="small">Settings &rarr; People &rarr; Who can sign in &rarr; ' +
+        '<strong>Set password</strong> beside their name.</div></div>' +
+        '<p class="small muted">Nobody can look up the password you had. It is stored ' +
+        'scrambled, and not even the President can read it back \u2014 which is why a new ' +
+        'one has to be set rather than found.</p>',
+      footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
     });
   }
 
@@ -359,5 +268,5 @@
   function reset() { busy = false; problem = ''; }
 
   global.ViewSignIn = { render: render, checking: checking, mount: mount, card: card,
-    reset: reset, forgot: forgot, chooseNew: chooseNew };
+    reset: reset, forgot: forgot };
 })(window);

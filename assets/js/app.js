@@ -377,19 +377,9 @@
 
     Store.load();
 
-    /* Somebody arriving from a "forgotten password" email. The token rides in
-       the URL fragment, which is also where this app keeps its routes, so it is
-       read and wiped from the address bar before anything else looks at the
-       hash. Handled before resume(), because whoever was signed in on this
-       device is not necessarily the person holding the link. */
-    var recovery = global.Auth && Auth.recoveryToken ? Auth.recoveryToken() : '';
-
     // Picks the stored session back up, then quietly checks it with the backend.
     if (global.Auth) Auth.resume();
 
-    if (recovery && global.ViewSignIn) {
-      setTimeout(function () { ViewSignIn.chooseNew(recovery, function () { render(); }); }, 0);
-    }
     renderBrand();
     preloadSeal();
 

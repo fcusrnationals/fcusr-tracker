@@ -18,27 +18,28 @@
 -- ---------------------------------------------------------------------------
 -- WHAT REMOVE DOES NOW
 --
--- Deletes the login, the profile, the waiting enrolment, and their attachment
--- to any activity. The address is left completely free, so adding them again is
--- an ordinary first-time enrolment: they set a password and they are in.
+-- Nothing of the person is left: the login, the profile, the waiting enrolment,
+-- their attachment to any activity, and their entry in the directory. The
+-- address and the name are both completely free, so adding them again is an
+-- ordinary first day — a new entry, a password of their choosing, and work can
+-- be given to them afresh.
 --
--- THE COUNCIL'S WORK IS NOT TOUCHED. That is deliberate and it is worth being
--- exact about, because "delete everything about them" and "delete everything
--- they did" are very different acts and only the first is safe:
+-- WHAT STAYS is the council's own record, which is not the person's to take
+-- away with them:
 --
---   tasks      untouched. A task points at the directory entry, not the login,
---              so who did what survives a person losing their account.
---   letters    kept; whoever was carrying it becomes nobody, and the letter
---              shows as unassigned so somebody picks it up.
+--   tasks      kept, and now held by nobody. They show as unassigned, in red,
+--              which is the state that asks somebody to pick them up — and is
+--              how they get given to the person again if they come back.
+--   letters    kept; whoever was carrying it becomes nobody, same as above.
 --   events     kept; if they were the head, the event shows no head.
---   reports    untouched.
---   audit log  kept, with their name still written on what they did. The log
---              is the one thing that must survive the person.
---   directory  untouched. Their name still reads correctly on every task and
---              every report already filed.
+--   reports    kept. A filed accomplishment report is the council's, and a term
+--              cannot be made to un-happen by removing whoever typed it.
+--   audit log  kept, with their name still written on what they did. The log is
+--              the one thing that has to survive the person.
 --
--- This cannot be undone. Adding them back gives them a new account on the same
--- address, not the old one returned.
+-- This cannot be undone, and it is not a way to erase a term's work — it is a
+-- way to clear a person out cleanly. Adding them back gives a new account and a
+-- new directory entry on the same address, not the old ones returned.
 
 -- ------------------------------------------------------------- remove_member
 -- Deleting from auth.users needs rights the app does not have and must never
@@ -92,6 +93,24 @@ begin
   -- The waiting enrolment, whether or not they ever claimed it.
   delete from enrolments where lower(email) = clean_email;
 
+  /* The directory entry too, so nothing of theirs is left to trip over. Every
+     device has its own copy, so the removal is recorded as a deletion — that is
+     what carries it to the other phones instead of each of them putting the
+     person back on the next sync.
+
+     Their tasks and letters are not deleted. They lose their holder and show as
+     unassigned, in red, which is the state that asks somebody to pick them up.
+     If the person is enrolled again they come back as a fresh entry and can be
+     given the work again. */
+  insert into deletions (entity, entity_id, unit_id, deleted_at, deleted_by)
+  select 'person', pe.id, pe.unit_id, now(), coalesce(actor.full_name, '')
+  from people pe
+  where lower(coalesce(pe.body->>'email', '')) = clean_email
+  on conflict (entity, entity_id) do update
+    set deleted_at = excluded.deleted_at, deleted_by = excluded.deleted_by;
+
+  delete from people pe where lower(coalesce(pe.body->>'email', '')) = clean_email;
+
   /* The login. profiles and event_members cascade from it. If they were
      enrolled but never signed in there is no login and nothing to do here —
      deleting the enrolment above was the whole of it. */
@@ -117,6 +136,84 @@ end;
 $$;
 
 grant execute on function withdraw_member(text) to authenticated;
+
+-- --------------------------------------------------- a forgotten password
+-- No email. The council tried the emailed link and it did not send: an email
+-- sender has to be set up in Supabase first, and until it is, that route is a
+-- dead end dressed up as a feature.
+--
+-- So the executive sets one instead, in the app, and tells the person. It is
+-- how a council actually works — the person is standing in the office asking.
+--
+-- BE CLEAR ABOUT WHAT THIS GIVES AWAY. Whoever can call this can set anybody's
+-- password and could then sign in as them. That is real power and it is not
+-- pretended away here; it is the same power any administrator has. It is held
+-- to the National government, and to a Governor over their own council only,
+-- every use is written to the audit log, and nobody can use it on themselves —
+-- so it cannot be used quietly to take an account nobody is watching.
+--
+-- The password is hashed here. It is never stored as typed and never read back.
+
+create or replace function set_member_password(p_email text, p_password text)
+returns boolean
+language plpgsql security definer set search_path = public, extensions as $$
+declare
+  actor       profiles;
+  actor_kind  text;
+  target      profiles;
+  clean_email text;
+begin
+  select * into actor from profiles where id = auth.uid();
+  if actor is null or not actor.active then
+    raise exception 'Your account cannot set anybody''s password.';
+  end if;
+  select kind into actor_kind from units where id = actor.unit_id;
+
+  clean_email := lower(trim(p_email));
+  select * into target from profiles where lower(email) = clean_email;
+  if target.id is null then
+    raise exception 'Nobody has signed in with that address yet, so there is no password to set.';
+  end if;
+
+  if lower(actor.email) = clean_email then
+    raise exception 'Use Change my password for your own.';
+  end if;
+
+  if not (actor_kind = 'national' and actor.access = 'officer') then
+    if not actor.is_head or target.unit_id <> actor.unit_id then
+      raise exception 'You may not set that member''s password.';
+    end if;
+  end if;
+
+  if p_password is null or length(p_password) < 8 then
+    raise exception 'A password must be at least eight characters.';
+  end if;
+
+  update auth.users
+     set encrypted_password = crypt(p_password, gen_salt('bf')),
+         updated_at = now()
+   where id = target.id;
+
+  /* Whoever was signed in as them is signed out. Setting a password and leaving
+     the old sessions alive would mean the person you just locked out is still
+     inside until their token happens to lapse. */
+  begin
+    delete from auth.refresh_tokens where user_id = target.id::text;
+  exception when others then null;
+  end;
+  begin
+    delete from auth.sessions where user_id = target.id;
+  exception when others then null;
+  end;
+
+  insert into audit_log (actor_id, actor_name, action, entity, entity_id, detail)
+  values (actor.id, actor.full_name, 'set-password', 'profile', clean_email, '');
+
+  return true;
+end;
+$$;
+
+grant execute on function set_member_password(text, text) to authenticated;
 
 -- ------------------------------------------------------ enrolling, and meaning it
 -- Enrolling somebody is the act of saying they may sign in. It used to leave

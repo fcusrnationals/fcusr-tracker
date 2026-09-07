@@ -36,8 +36,7 @@
       return Promise.resolve(session.profile);
     },
     signUp: function () { return localDriver.signIn(); },
-    sendReset: function () { return Promise.resolve(true); },
-    finishReset: function () { return Promise.resolve(true); },
+    setPassword: function () { return Promise.resolve(true); },
     signOut: function () { session = null; return Promise.resolve(); },
     restore: function () { return Promise.resolve(session ? session.profile : null); },
     whoami: function () { return Promise.resolve(session ? session.profile : null); },
@@ -210,26 +209,18 @@
     /* Each person sets their own password, on an address an officer has already
        enrolled. Signing up grants nothing by itself: without a waiting enrolment
        the database makes no profile, and the app has nothing to show. */
-    /* Forgotten passwords. Nobody in the council can look one up or set one for
-       somebody else — that needs a key this app deliberately does not carry — so
-       the only way back in is a link sent to the address itself.
+    /* A forgotten password, set by an executive in the app.
 
-       redirect_to must be listed in Supabase → Authentication → URL
-       Configuration, or the link lands nowhere. */
-    sendReset: function (email) {
-      var back = location.origin + location.pathname;
-      return sbRaw('/auth/v1/recover?redirect_to=' + encodeURIComponent(back), {
-        method: 'POST', auth: false, body: { email: email }
-      });
-    },
+       There was an emailed link here. It does not work on this project and will
+       not until an email sender is configured in Supabase, so what it actually
+       gave a council was a button that reported an error. A council does not
+       need email for this anyway: the person is standing in the office asking.
 
-    /* Finishing one: the link comes back carrying a token that is good for this
-       one act. It is not a session and is not kept. */
-    finishReset: function (token, password) {
-      return sbRaw('/auth/v1/user', {
-        method: 'PUT', auth: false,
-        headers: { Authorization: 'Bearer ' + token },
-        body: { password: password }
+       The server decides whether the asker may. */
+    setPassword: function (email, password) {
+      return sbFetch('/rest/v1/rpc/set_member_password', {
+        method: 'POST',
+        body: { p_email: email, p_password: password }
       });
     },
 
@@ -542,15 +533,10 @@
     },
     whoami: function () { return driver().whoami(); },
     units: function () { return driver().units(); },
-    sendReset: function (email) {
+    setPassword: function (email, pw) {
       var d = driver();
-      return d.sendReset ? d.sendReset(email)
-        : Promise.reject(new Error('Password resets need the online version.'));
-    },
-    finishReset: function (token, pw) {
-      var d = driver();
-      return d.finishReset ? d.finishReset(token, pw)
-        : Promise.reject(new Error('Password resets need the online version.'));
+      return d.setPassword ? d.setPassword(email, pw)
+        : Promise.reject(new Error('Setting a password needs the online version.'));
     },
     remove: function (email) {
       var d = driver();
