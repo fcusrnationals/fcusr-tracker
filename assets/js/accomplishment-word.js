@@ -22,10 +22,14 @@
       .replace(/"/g, '&quot;');
   }
 
-  /* A floating, movable picture. `wIn` is the width in inches; Word sizes the box
-     from that and keeps the picture's own proportions. */
-  /* A picture on its own. Nothing is written beneath it — the council does not
-     caption its documentation, and the PDF does not either. */
+  /* A picture on its own. `wIn` is the width in inches; Word sizes the box from
+     that and keeps the picture's own proportions.
+
+     Nothing is written beneath it — the council does not caption its
+     documentation and the PDF does not either. The captioning was taken out of
+     the signature and left behind in the body, so this threw "caption is not
+     defined" on any report with a picture in it: which is every real one. The
+     only draft it could export was an empty one. */
   function pictureBox(dataUrl, wIn, hIn) {
     var wPt = Math.round(wIn * 72), hPt = Math.round(hIn * 72);
     return '' +
@@ -38,9 +42,6 @@
         '<img src="' + dataUrl + '" width="' + Math.round(wIn * 96) + '" ' +
              'style="max-width:100%;height:auto" alt="">' +
         '<![endif]>' +
-        (caption
-          ? '<div style="font-size:9pt;color:#666;margin-top:3pt">' + esc(caption) + '</div>'
-          : '') +
       '</div>';
   }
 
