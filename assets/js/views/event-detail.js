@@ -126,7 +126,10 @@
         return '<div class="group" data-collapsed="' + isCollapsed + '" data-group="' + U.esc(g.key) + '">' +
           '<button type="button" class="group-head" data-toggle="' + U.esc(g.key) + '" aria-expanded="' + !isCollapsed + '">' +
             UI.icon('chevronDown', 'caret') +
-            '<span class="group-title">' + U.esc(g.name) +
+            /* The heading carries the name here, so the tasks under it do not
+               repeat it — which means this is the only place the pile nobody
+               has taken can be marked. */
+            '<span class="group-title' + (g.id ? '' : ' unassigned') + '">' + U.esc(g.name) +
               (g.position ? ' <span class="muted small">' + U.esc(g.position) + '</span>' : '') + '</span>' +
             '<span class="group-meta">' + gs.done + ' of ' + gs.total + ' done' +
               (gs.overdue ? ' · <span class="late">' + gs.overdue + ' overdue</span>' : '') + '</span>' +

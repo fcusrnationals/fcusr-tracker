@@ -485,6 +485,10 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
 }
 .task-meta .sep { opacity: .5; margin: 0 5px; }
 .task-meta .late { color: var(--st-overdue-fg); font-weight: 700; }
+/* Nobody is holding this one. Same red as an overdue date, because it is the
+   same kind of fact: something that stays wrong until a person acts. */
+.task-meta .unassigned { color: var(--st-overdue-fg); font-weight: 700; }
+.group-title.unassigned { color: var(--st-overdue-fg); }
 
 .task-right { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
 

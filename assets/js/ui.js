@@ -145,7 +145,14 @@
           U.esc(task.title) + '</span>' +
         (parts.length
           ? '<span class="task-meta">' + parts.map(function (part) {
-              if (typeof part === 'string') return U.esc(part);
+              /* A task nobody holds is the one thing on this row that will not
+                 fix itself. Marked here rather than at each caller, so a list
+                 added later cannot quietly leave it out. */
+              if (typeof part === 'string') {
+                return !task.assigneeId && part === Store.personName('')
+                  ? '<span class="unassigned">' + U.esc(part) + '</span>'
+                  : U.esc(part);
+              }
               return '<span class="' + part.cls + '">' + U.esc(part.text) + '</span>';
             }).join('<span class="sep">·</span>') + '</span>'
           : '') +

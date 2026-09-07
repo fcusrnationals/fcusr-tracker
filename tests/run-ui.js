@@ -936,6 +936,39 @@ console.log('\n--- signatories ---');
   S.deleteLetter(made.id);
 }
 
+/* ---------------- a task nobody is holding ----------------
+   Everything else on a task row describes work in progress. "Unassigned" is
+   the one thing on it that will not fix itself, and it was set in the same
+   grey as the due date beside it. */
+console.log('\n--- an unassigned task says so in red ---');
+{
+  const S = window.Store;
+  const ev = S.events()[0];
+  const held = S.addTask({ kind: 'event', eventId: ev.id, title: 'Held by somebody',
+    assigneeId: (S.people()[0] || {}).id || '', dueDate: '2026-10-01' });
+  const loose = S.addTask({ kind: 'event', eventId: ev.id, title: 'Held by nobody',
+    dueDate: '2026-10-01' });
+
+  const looseRow = window.UI.taskRow(loose, [S.personName(loose.assigneeId)]);
+  const heldRow = window.UI.taskRow(held, [S.personName(held.assigneeId)]);
+
+  check('the unassigned label is marked',
+    /<span class="unassigned">Unassigned<\/span>/.test(looseRow), looseRow.slice(0, 160));
+  check('and a person\u2019s name is left alone',
+    !/class="unassigned"/.test(heldRow), heldRow.slice(0, 160));
+
+  // The colour has to actually be defined, or the class marks nothing.
+  const css = require('fs').readFileSync(
+    require('path').join(__dirname, '..', 'assets', 'css', 'app.css'), 'utf8');
+  check('the class is given the overdue red',
+    /\.task-meta \.unassigned\s*\{[^}]*--st-overdue-fg/.test(css));
+  check('and so is the heading the tasks are grouped under',
+    /\.group-title\.unassigned\s*\{[^}]*--st-overdue-fg/.test(css));
+
+  S.deleteTask(held.id);
+  S.deleteTask(loose.id);
+}
+
 console.log('\n--- console cleanliness ---');
 check('no console errors across the walk-through', errors.length === 0, errors.slice(0, 4).join(' | '));
 
