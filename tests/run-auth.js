@@ -207,10 +207,16 @@ window.fetch = function (url, opts) {
     const actor = SB.profiles[who];
     if (!actor || actor.access !== 'officer') return reply(403, { message: 'You may not remove anyone.' });
     const email = String(body.p_email || '').toLowerCase().trim();
-    if (actor.email === email) return reply(400, { message: 'You cannot withdraw your own access.' });
+    if (actor.email === email) return reply(400, { message: 'You cannot remove your own access.' });
+    /* Remove means remove. The login goes, and profiles cascades from it, which
+       is what leaves the address free for an ordinary first-time enrolment
+       afterwards. Half-removing somebody is what made this impossible to undo
+       from inside the app. The council's work is untouched: a task points at
+       the directory entry, not at the login. */
     delete SB.enrolments[email];
+    delete SB.users[email];
     Object.keys(SB.profiles).forEach((k) => {
-      if (SB.profiles[k].email === email) SB.profiles[k].active = false;
+      if (SB.profiles[k].email === email) delete SB.profiles[k];
     });
     return reply(200, true);
   }
@@ -485,27 +491,35 @@ const FILES = [
 
     await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
     await Backend.remove(email);
-    check('removing switches them off', SB.profiles[uid].active === false);
 
-    let refused = '';
-    try { await Auth.signIn(email, 'returnerpass'); }
-    catch (e) { refused = e.message || ''; }
-    check('and the door refuses them', !!refused, refused);
-    check('in words that say what to do about it', /add you again/i.test(refused), refused);
+    /* Remove means remove. Half-removing somebody — switching them off and
+       leaving the login, the profile and the enrolment standing — is what made
+       this impossible to undo: enrolling them again reported success and they
+       still could not get in, and no screen in the app could put it right. */
+    check('the account is gone', !SB.profiles[uid]);
+    check('the login is gone', !SB.users[email]);
+    check('and so is the enrolment', !SB.enrolments[email]);
 
     // The executive puts them back the only way the app offers: enrol again.
-    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
     await Backend.enrol({
       email: email, full_name: 'Returner One', position: 'Senator',
       unit_id: NAT, access: 'officer', eventIds: []
     });
-    check('enrolling them again switches them back on',
-      SB.profiles[uid].active === true,
-      'still inactive — they were told it worked and it did not');
     await Auth.signOut();
 
-    const back = await Auth.signIn(email, 'returnerpass');
-    check('and they can sign in again', !!back, 'still locked out after being added back');
+    /* An ordinary first day. The address has no account, so the door refuses
+       the old password and offers to set a new one — which is exactly the path
+       somebody enrolled for the first time takes. */
+    let refused = false;
+    try { await Auth.signIn(email, 'returnerpass'); } catch (e) { refused = !!e.badCredentials; }
+    check('the old password is not still lying around', refused);
+
+    const back = await Auth.signUp(email, 'a-fresh-start');
+    check('setting a new one lets them in', !!back && Auth.signedIn(),
+      'still locked out after being added back');
+    check('and they come back as who they were enrolled as',
+      Auth.current().name === 'Returner One', Auth.current() && Auth.current().name);
+    await Auth.signOut();
   }
 
   /* ---------------- a forgotten password ----------------

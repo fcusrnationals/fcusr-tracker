@@ -1859,10 +1859,13 @@
                 message: waiting
                   ? 'The enrolment for ' + email + ' is removed, so nobody can claim it. ' +
                     'Use this when an address was wrong or the person is no longer coming in.'
-                  : email + ' will not be able to sign in. Their tasks and everything they ' +
-                    'filed stay exactly where they are.',
-                detail: 'You can add them again at any time with Add someone \u2014 the same ' +
-                  'address, and they are back.',
+                  : 'Their account and sign-in for ' + email + ' are deleted. Their tasks, ' +
+                    'letters and everything they filed stay exactly where they are, and ' +
+                    'their name still reads correctly on all of it.',
+                detail: waiting
+                  ? 'You can enrol the address again at any time.'
+                  : 'This cannot be undone. Adding them again gives them a new account on the ' +
+                    'same address \u2014 they choose a password as if it were their first day.',
                 confirmLabel: 'Remove'
               }).then(function (ok) {
                 if (!ok) return;
