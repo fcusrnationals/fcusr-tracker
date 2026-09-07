@@ -530,6 +530,23 @@ const FILES = [
     check('and the row says she cannot sign in, rather than saying nothing',
       /cannot sign in/i.test(txt2()), txt2().slice(0, 140));
 
+    /* The screen was fixed; the list people actually file was not. It grouped
+       waiting from one table and accounts from another, so she was printed
+       twice in two sections that contradicted each other. A roster an adviser
+       files has to say one thing, and the same thing the screen said. */
+    const printed = window.Forms.asText
+      ? window.Forms.asText({ pending: Object.keys(SB.enrolments).map((k) => SB.enrolments[k]),
+                              roster: Object.keys(SB.profiles).map((k) => SB.profiles[k]) })
+      : '';
+    if (printed) {
+      check('the downloaded list names her once, not twice',
+        (printed.match(/Angel Rutor/g) || []).length === 1,
+        (printed.match(/Angel Rutor/g) || []).length + ' times');
+      check('and says she cannot sign in rather than leaving her out',
+        /Angel Rutor[^\n]*CANNOT SIGN IN/.test(printed),
+        (printed.split('\n').find((l) => /Angel/.test(l)) || 'not listed at all'));
+    }
+
     delete SB.profiles['p-angel'];
     delete SB.users['angel@filamer.edu.ph'];
     delete SB.enrolments['angel@filamer.edu.ph'];

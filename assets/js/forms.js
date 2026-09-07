@@ -2140,23 +2140,29 @@
       '</div>';
   }
 
+  /* The same grouping the screen uses. It used to do its own — waiting from one
+     table, accounts from another — so somebody in both appeared twice, and
+     anybody switched off appeared in neither. A list that disagrees with the
+     screen it was printed from is worse than no list. */
   function asText(last) {
+    var all = merge(last.pending, last.roster);
+    var waiting = all.filter(function (p) { return p.waiting; });
+    var accounts = all.filter(function (p) { return p.hasAccount; });
+    var line = function (p) {
+      return '  ' + (p.full_name || '—') + '  —  ' + (p.position || 'No position') +
+        '  —  ' + (p.email || '') +
+        (p.hasAccount && !p.active ? '  —  CANNOT SIGN IN' : '');
+    };
+
     var lines = ['FCUSR Task Tracker — who can sign in', U.fmtDate(U.today()), ''];
-    if (last.pending.length) {
-      lines.push('WAITING TO SIGN IN (' + last.pending.length + ')');
-      last.pending.forEach(function (e) {
-        lines.push('  ' + (e.full_name || '—') + '  —  ' + (e.position || 'No position') +
-          '  —  ' + (e.email || ''));
-      });
+    if (waiting.length) {
+      lines.push('WAITING TO SIGN IN (' + waiting.length + ')');
+      waiting.forEach(function (e) { lines.push(line(e)); });
       lines.push('');
     }
-    var active = last.roster.filter(function (p) { return p.active !== false; });
-    lines.push('SIGNED IN (' + active.length + ')');
-    if (!active.length) lines.push('  nobody yet');
-    active.forEach(function (p) {
-      lines.push('  ' + (p.full_name || '—') + '  —  ' + (p.position || 'No position') +
-        '  —  ' + (p.email || ''));
-    });
+    lines.push('HAS AN ACCOUNT (' + accounts.length + ')');
+    if (!accounts.length) lines.push('  nobody yet');
+    accounts.forEach(function (p) { lines.push(line(p)); });
     return lines.join('\n') + '\n';
   }
 
@@ -2279,6 +2285,7 @@
   }
 
   global.Forms = {
+    mergeRoster: merge, asText: asText,
     unitForm: unitForm,
     feedbackForm: feedbackForm, waiveFeedbackForm: waiveFeedbackForm,
     officeForm: officeForm, letterForm: letterForm,

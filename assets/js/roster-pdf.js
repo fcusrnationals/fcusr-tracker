@@ -64,9 +64,22 @@
       doc.text(Store.unitName(unitId) + '  ·  ' + U.fmtDate(U.today()), A4.w / 2, y, { align: 'center' });
       y += 10;
 
-      var active = (data.roster || []).filter(function (p) { return p.active !== false; });
-      var gone = (data.roster || []).filter(function (p) { return p.active === false; });
-      var waiting = data.pending || [];
+      /* The same grouping the screen uses, from the same function.
+
+         This sheet used to do its own: waiting from one table, accounts from
+         another. Somebody enrolled again over an account they already had was
+         therefore printed twice, in two sections that contradicted each other —
+         and anybody switched off was printed under "Withdrawn" while also
+         sitting in "Waiting". A roster an adviser files has to say one thing. */
+      var all = (global.Forms && Forms.mergeRoster)
+        ? Forms.mergeRoster(data.pending, data.roster)
+        : (data.roster || []).map(function (p) {
+            return { email: p.email, full_name: p.full_name, position: p.position,
+                     units: p.units, hasAccount: true, active: p.active !== false,
+                     waiting: false };
+          });
+      var active = all.filter(function (p) { return p.hasAccount; });
+      var waiting = all.filter(function (p) { return p.waiting; });
 
       function table(title, note, rows, head) {
         if (!rows.length) return;
@@ -118,9 +131,14 @@
         y = (doc.lastAutoTable && doc.lastAutoTable.finalY) + 9;
       }
 
-      table('Signed in', 'Holding an account they can use today.',
+      /* Somebody who cannot sign in is printed with the others and said so on
+         their own row, rather than filed into a section of their own. Being
+         unable to sign in is a fact about a person, not a different kind of
+         person. */
+      table('Has an account', 'Holding an account on this system.',
         active.map(function (p) {
-          return [p.full_name || '—', p.position || '', unitOf(p), p.email || ''];
+          return [p.full_name || '—', p.position || '', unitOf(p),
+                  (p.email || '') + (p.active ? '' : '  (cannot sign in)')];
         }), ['Name', 'Position', 'Unit', 'Email']);
 
       table('Waiting to sign in',
@@ -129,12 +147,7 @@
           return [e.full_name || '—', e.position || '', unitOf(e), e.email || ''];
         }), ['Name', 'Position', 'Unit', 'Email']);
 
-      table('Withdrawn', 'They cannot sign in. Their work is untouched.',
-        gone.map(function (p) {
-          return [p.full_name || '—', p.position || '', unitOf(p), p.email || ''];
-        }), ['Name', 'Position', 'Unit', 'Email']);
-
-      if (!active.length && !waiting.length && !gone.length) {
+      if (!active.length && !waiting.length) {
         doc.setFont(FONT, 'normal');
         doc.setFontSize(10);
         doc.setTextColor(C.muted[0], C.muted[1], C.muted[2]);

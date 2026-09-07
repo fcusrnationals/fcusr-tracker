@@ -973,6 +973,102 @@ function makeDevice(server, name) {
       all.map((d) => d.name + ': ' + d.errors.slice(0, 1).join('')).join(' | '));
   }
 
+  /* ---------------- a person removed on the server ----------------
+     Removing a member is the server's act now: it deletes the directory entry
+     and records the deletion. So no device performs the local deletePerson, and
+     every one of them arrives at the receiving path instead — which used to
+     remove the row and nothing else. Two phones then showed the same letter
+     differently, for ever, and neither was going to correct the other. */
+  console.log('\n--- somebody removed elsewhere is tidied up here ---');
+  {
+    const s8 = makeServer();
+    const A2 = makeDevice(s8, 'President');
+    const B2 = makeDevice(s8, 'Senator');
+    const unit = A2.S.nationalUnitId();
+
+    const per = A2.S.addPerson({ name: 'Rutor, Angel', unitId: unit, position: 'Senator' });
+    const ev2 = A2.S.addEvent({ title: 'General Assembly', unitId: unit, headId: per.id });
+    const tk = A2.S.addTask({ kind: 'event', eventId: ev2.id, title: 'Book the hall',
+      assigneeId: per.id, dueDate: '2026-10-01' });
+    const lt = A2.S.addLetter({ unitId: unit, subject: 'Request for the budget',
+      inChargeId: per.id,
+      route: [{ officeId: A2.S.officeByCode('PRES').id }] });
+
+    for (let i = 0; i < 2; i++) for (const d of [A2, B2]) await d.Sync.now();
+    check('the other phone has them', !!B2.S.person(per.id));
+    check('and the letter names who is carrying it',
+      B2.S.letterInCharge(B2.S.letter(lt.id)) === 'Rutor, Angel',
+      B2.S.letterInCharge(B2.S.letter(lt.id)));
+
+    /* What remove_member does: the row goes and a tombstone is written. Neither
+       device deletes anything itself — that is the whole point. */
+    delete s8.tables.people[per.id];
+    s8.tables.deletions['person:' + per.id] = {
+      entity: 'person', entity_id: per.id, unit_id: unit,
+      deleted_at: s8.now(), deleted_by: 'President'
+    };
+
+    for (const d of [A2, B2]) await d.Sync.now();
+
+    [['President', A2], ['Senator', B2]].forEach(([name, d]) => {
+      check(name + ': the person is gone', !d.S.person(per.id));
+      check(name + ': the task is held by nobody', d.S.task(tk.id).assigneeId === '',
+        d.S.task(tk.id).assigneeId);
+      check(name + ': the event has no head', d.S.event(ev2.id).headId === '');
+      check(name + ': the letter still says who was carrying it',
+        d.S.letterInCharge(d.S.letter(lt.id)) === 'Rutor, Angel',
+        d.S.letterInCharge(d.S.letter(lt.id)));
+    });
+
+    check('and both phones agree, which is the whole point',
+      A2.S.letterInCharge(A2.S.letter(lt.id)) === B2.S.letterInCharge(B2.S.letter(lt.id)));
+  }
+
+  /* ---------------- two devices agree about the given things ----------------
+     The colleges and the desks are written into the app, identical everywhere,
+     and nobody authors them. They used to be stamped with the moment each phone
+     was first opened, which claimed an edit that never happened and gave every
+     device a different date for the same row.
+
+     Merging is last-write-wins on that stamp and it is strictly-greater, so a
+     college renamed on one phone at the same millisecond as another phone's
+     first visit is judged "not newer" and dropped. That is a rename lost with
+     nothing said, and it is the signature of a sync failure that turned up
+     about one run in ten and could not be made to happen on demand.
+
+     A fixed date behind any real use closes it: an edit always wins, and two
+     untouched devices agree exactly. */
+  console.log('\n--- the given things are dated the same everywhere ---');
+  {
+    const s9 = makeServer();
+    const one = makeDevice(s9, 'One');
+    const two = makeDevice(s9, 'Two');
+
+    const stamps = (d) => d.S.units().map((u) => u.updatedAt);
+    check('every seeded unit carries one fixed date',
+      new Set(stamps(one)).size === 1, [...new Set(stamps(one))].join(', '));
+    check('and it is behind anything anybody could have done',
+      stamps(one)[0] < new Date().toISOString(), stamps(one)[0]);
+    check('two devices date them identically',
+      JSON.stringify(stamps(one)) === JSON.stringify(stamps(two)));
+    check('and the offices too',
+      JSON.stringify(one.S.offices().map((o) => o.updatedAt)) ===
+      JSON.stringify(two.S.offices().map((o) => o.updatedAt)));
+
+    /* The thing that was actually going wrong: an edit made now must beat a
+       seeded row on the other phone, whatever millisecond it lands in. */
+    const u1 = one.S.units().filter((u) => u.code === 'CN')[0];
+    one.S.updateUnit(u1.id, { trackerName: 'CN Governor' });
+    check('an edit is newer than the given date, always',
+      one.S.unit(u1.id).updatedAt > stamps(two)[0],
+      one.S.unit(u1.id).updatedAt + ' vs ' + stamps(two)[0]);
+
+    for (let i = 0; i < 2; i++) for (const d of [one, two]) await d.Sync.now();
+    const u2 = two.S.units().filter((u) => u.code === 'CN')[0];
+    check('so it reaches the other phone', u2 && u2.trackerName === 'CN Governor',
+      u2 && u2.trackerName);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

@@ -146,12 +146,30 @@
      somebody deliberately removed does not reappear at every load. */
   var UNIT_SEED_VERSION = 2;
 
+  /* When the seeded units and offices are dated.
+
+     Not "now". They are the same sixteen colleges and the same fifteen desks on
+     every device, written into this file rather than authored by anybody — so
+     stamping them with the moment a phone happened to be opened claims an
+     edit that never happened, and gives every device a different date for the
+     identical thing.
+
+     That is not tidiness. Merging is last-write-wins on this stamp, and it is
+     strictly-greater, so a college renamed on the President's phone at the same
+     millisecond as another phone's first visit was judged "not newer" and
+     thrown away. It cost that rename silently, and it is why the sync suite
+     failed about one run in ten on nothing but timing.
+
+     A fixed date behind any real use means an edit always wins, and two devices
+     that have never been touched agree exactly. */
+  var SEEDED_AT = '2020-01-01T00:00:00.000Z';
+
   function seedUnits() {
     return DEFAULT_UNITS.map(function (u) {
       return {
         id: 'unit-' + u[1].toLowerCase(),
         kind: u[0], code: u[1], name: u[2], trackerName: u[3], active: true,
-        createdAt: nowISO(), updatedAt: nowISO()
+        createdAt: SEEDED_AT, updatedAt: SEEDED_AT
       };
     });
   }
@@ -614,8 +632,10 @@
        failure people actually notice and cannot explain. Deleting is an explicit
        act by a person who could see the thing. It stands. */
     var found = false;
+    var removed = null;
     for (var i = 0; i < list.length; i++) {
       if (list[i].id !== rid) continue;
+      removed = list[i];
       list.splice(i, 1);
       found = true;
       break;
@@ -623,6 +643,30 @@
     if (kind === 'event') {
       state.tasks = state.tasks.filter(function (t) { return t.eventId !== rid; });
       state.reports = state.reports.filter(function (r) { return r.eventId !== rid; });
+    }
+    /* The same tidying deletePerson does, because otherwise the two devices show
+       different things for ever: the one that pressed the button kept the
+       carrier's name on a letter as plain text, and every other one was left
+       pointing at somebody who no longer exists and showed no name at all.
+
+       It matters more than it used to. Removing a member is done by the server
+       now, so no device performs deletePerson at all — every one of them arrives
+       here, and without this the name was simply lost everywhere.
+
+       updatedAt is deliberately not bumped. Every device does this same tidying
+       from the same tombstone and lands on the same answer, so there is nothing
+       to tell anybody about; bumping would have fifty phones push the same rows
+       at each other to say a thing they all already agree on. */
+    if (kind === 'person' && found) {
+      var gone = removed;
+      state.tasks.forEach(function (t) { if (t.assigneeId === rid) t.assigneeId = ''; });
+      state.events.forEach(function (e) { if (e.headId === rid) e.headId = ''; });
+      state.letters.forEach(function (l) {
+        if (l.inChargeId !== rid) return;
+        l.inChargeId = '';
+        if (!l.inChargeName && gone) l.inChargeName = gone.name;
+      });
+      if (lastPerson() === rid) setLastPerson('');
     }
     if (!state.deleted[kind]) state.deleted[kind] = {};
     state.deleted[kind][rid] = at || nowISO();
@@ -1861,7 +1905,7 @@
            applied; if it does not, the name on screen is somebody's decision
            and is left alone. */
         seededName: o[1],
-        createdAt: nowISO(), updatedAt: nowISO()
+        createdAt: SEEDED_AT, updatedAt: SEEDED_AT
       };
     });
   }
