@@ -170,11 +170,21 @@ window.fetch = function (url, opts) {
       full_name: body.p_full_name, position: body.p_position,
       unit_id: body.p_unit_id, access: body.p_access, event_ids: body.p_event_ids || []
     };
+    /* Enrolling is the act of saying somebody may sign in. The real function
+       used to leave `active` alone, so an address that had once been removed
+       could be enrolled over and over and still be refused at the door — and
+       this stand-in never set it either, so nothing here noticed. */
+    Object.keys(SB.profiles).forEach((k) => {
+      if (SB.profiles[k].email === String(body.p_email || '').toLowerCase().trim()) {
+        SB.profiles[k].active = true;
+      }
+    });
     return reply(200, body.p_email);
   }
-  if (u.indexOf('/rest/v1/rpc/withdraw_member') === 0) {
+  if (u.indexOf('/rest/v1/rpc/remove_member') === 0 ||
+      u.indexOf('/rest/v1/rpc/withdraw_member') === 0) {
     const actor = SB.profiles[who];
-    if (!actor || actor.access !== 'officer') return reply(403, { message: 'You may not withdraw anyone.' });
+    if (!actor || actor.access !== 'officer') return reply(403, { message: 'You may not remove anyone.' });
     const email = String(body.p_email || '').toLowerCase().trim();
     if (actor.email === email) return reply(400, { message: 'You cannot withdraw your own access.' });
     delete SB.enrolments[email];
@@ -409,22 +419,72 @@ const FILES = [
       const msg = window.Forms.personalMessage('Waiting One', 'waiting.one@filamer.edu.ph');
       return /waiting\.one@filamer\.edu\.ph/.test(msg) && !/password[^.]*:/i.test(msg);
     })());
-    check('you cannot withdraw yourself',
-      !acc.querySelector('[data-withdraw="president@filamer.edu.ph"]'));
+    check('you cannot remove yourself',
+      !acc.querySelector('[data-remove="president@filamer.edu.ph"]'));
+    check('and the word is Remove, not Withdraw',
+      !/Withdraw/.test(acc.innerHTML), 'the roster still says Withdraw');
 
-    // Withdrawing a waiting enrolment removes it so nobody can claim it.
+    // Removing a waiting enrolment takes it away so nobody can claim it.
     const before = SB.requests.length;
-    acc.querySelector('[data-withdraw="waiting.one@filamer.edu.ph"]')
+    acc.querySelector('[data-remove="waiting.one@filamer.edu.ph"]')
       .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 20));
     D.querySelector('.modal-backdrop [data-ok]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 80));
-    check('withdrawing calls the server', SB.requests.length > before &&
-      SB.requests.some((r) => /withdraw_member/.test(r.url)));
+    check('removing calls the server', SB.requests.length > before &&
+      SB.requests.some((r) => /remove_member/.test(r.url)));
     check('the enrolment is gone', !SB.enrolments['waiting.one@filamer.edu.ph']);
     check('and the list refreshed without it', !/Waiting One/.test(txt()), txt().slice(0, 90));
 
     D.querySelectorAll('.modal-backdrop').forEach((e) => e.remove());
+  }
+
+  /* ---------------- removed, then wanted back ----------------
+     The failure a council actually hits. Somebody is taken off the list — they
+     dropped the subject, or the address was wrong — and a week later they are
+     back. Removing set active = false; enrolling never set it true again. So
+     the executive enrolled them, was told it worked, saw them on the list, and
+     they still could not sign in: the door said their account had been
+     withdrawn, and there was nothing in the app that could undo it.
+
+     Nothing tested this because nothing ever enrolled the same address twice. */
+  console.log('\n--- somebody removed, then added back ---');
+  {
+    const email = 'returner@filamer.edu.ph';
+    const uid = 'u-returner';
+    SB.users[email] = { id: uid, password: 'returnerpass', email: email };
+    SB.enrolments[email] = {
+      email: email, full_name: 'Returner One', position: 'Senator',
+      unit_id: NAT, access: 'officer', event_ids: []
+    };
+    claimEnrolment(SB.users[email]);
+
+    check('they can sign in to begin with', !!(await Auth.signIn(email, 'returnerpass')));
+    await Auth.signOut();
+
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    await Backend.remove(email);
+    check('removing switches them off', SB.profiles[uid].active === false);
+
+    let refused = '';
+    try { await Auth.signIn(email, 'returnerpass'); }
+    catch (e) { refused = e.message || ''; }
+    check('and the door refuses them', !!refused, refused);
+    check('in words that say what to do about it', /add you again/i.test(refused), refused);
+
+    // The executive puts them back the only way the app offers: enrol again.
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    await Backend.enrol({
+      email: email, full_name: 'Returner One', position: 'Senator',
+      unit_id: NAT, access: 'officer', eventIds: []
+    });
+    check('enrolling them again switches them back on',
+      SB.profiles[uid].active === true,
+      'still inactive — they were told it worked and it did not');
+    await Auth.signOut();
+
+    const back = await Auth.signIn(email, 'returnerpass');
+    check('and they can sign in again', !!back, 'still locked out after being added back');
   }
 
   /* ---------------- leaving a shared computer ----------------

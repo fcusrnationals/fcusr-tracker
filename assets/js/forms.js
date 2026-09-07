@@ -1844,25 +1844,31 @@
             });
           });
 
-          U.els('[data-withdraw]', host).forEach(function (b) {
+          /* One word, one meaning. This used to be "Withdraw", and a withdrawn
+             person stayed on the list under a heading of their own with every
+             button taken away — so the only way back was to enrol the address
+             again, which did not work either. Now: Remove takes them off the
+             list, and Add someone puts them back. */
+          U.els('[data-remove]', host).forEach(function (b) {
             b.addEventListener('click', function () {
-              var email = b.getAttribute('data-withdraw');
+              var email = b.getAttribute('data-remove');
               var name = b.getAttribute('data-name');
               var waiting = b.getAttribute('data-waiting') === '1';
               UI.confirm({
-                title: 'Withdraw ' + name + '?',
+                title: 'Remove ' + name + '?',
                 message: waiting
                   ? 'The enrolment for ' + email + ' is removed, so nobody can claim it. ' +
                     'Use this when an address was wrong or the person is no longer coming in.'
-                  : email + ' will not be able to sign in again. Their tasks and everything ' +
-                    'they filed stay exactly where they are.',
-                detail: 'You can enrol the address again afterwards.',
-                confirmLabel: 'Withdraw'
+                  : email + ' will not be able to sign in. Their tasks and everything they ' +
+                    'filed stay exactly where they are.',
+                detail: 'You can add them again at any time with Add someone \u2014 the same ' +
+                  'address, and they are back.',
+                confirmLabel: 'Remove'
               }).then(function (ok) {
                 if (!ok) return;
                 b.disabled = true;
-                Backend.withdraw(email).then(function () {
-                  UI.toast(name + ' withdrawn.');
+                Backend.remove(email).then(function () {
+                  UI.toast(name + ' removed. Add them again any time.');
                   load();
                 }).catch(function (err) {
                   b.disabled = false;
@@ -1894,7 +1900,6 @@
 
   function view(pending, roster) {
     var active = roster.filter(function (p) { return p.active !== false; });
-    var gone = roster.filter(function (p) { return p.active === false; });
     var mine = (global.Auth && Auth.current()) ? Auth.current().email : '';
 
     /* Not styled as an alarm. On the first day of a term everybody is waiting,
@@ -1922,7 +1927,7 @@
         '</div></div>';
     }
 
-    html += '<div class="section"' + (gone.length ? ' style="margin-bottom:18px"' : '') + '>' +
+    html += '<div class="section">' +
       '<div class="section-head"><h2>Signed in' +
       (active.length ? ' <span class="chip chip-plain">' + active.length + '</span>' : '') +
       '</h2></div>';
@@ -1931,15 +1936,6 @@
       : '<p class="small muted" style="margin:0 2px">Nobody has set a password yet.</p>';
     html += '</div>';
 
-    if (gone.length) {
-      html += '<div class="section"><div class="section-head"><h2>Withdrawn ' +
-        '<span class="chip chip-plain">' + gone.length + '</span></h2></div>' +
-        '<p class="small muted" style="margin:0 2px 10px">They cannot sign in. Their work is ' +
-        'untouched, and enrolling the address again lets them back.</p>' +
-        '<div class="list">' + gone.map(function (p) { return row(p, false, mine); }).join('') +
-        '</div></div>';
-    }
-
     return html;
   }
 
@@ -1947,27 +1943,25 @@
     var email = p.email || '';
     var name = p.full_name || email || 'Somebody';
     var isMe = mine && email && mine.toLowerCase() === email.toLowerCase();
-    var withdrawn = !waiting && p.active === false;
 
     var meta = [p.position || 'No position'];
     if (p.units && p.units.name) meta.push(p.units.name);
 
     return '<div class="task"><span class="task-main" style="cursor:default">' +
       '<span class="task-title">' + U.esc(name) +
-        (isMe ? ' <span class="chip chip-plain">you</span>' : '') +
-        (withdrawn ? ' <span class="chip st-not-started">Withdrawn</span>' : '') + '</span>' +
+        (isMe ? ' <span class="chip chip-plain">you</span>' : '') + '</span>' +
       '<span class="task-meta">' + meta.map(U.esc).join('<span class="sep">·</span>') + '</span>' +
       '<span class="task-meta">' + U.esc(email) + '</span>' +
       '</span>' +
-      (isMe || withdrawn ? '' :
+      (isMe ? '' :
         '<span class="task-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
         (waiting
           ? '<button type="button" class="btn btn-sm" data-copy-one="' + U.esc(email) +
             '" data-name="' + U.esc(name) + '">Copy invite</button>'
           : '') +
-        '<button type="button" class="btn btn-sm btn-ghost" data-withdraw="' + U.esc(email) +
+        '<button type="button" class="btn btn-sm btn-ghost" data-remove="' + U.esc(email) +
         '" data-name="' + U.esc(name) + '" data-waiting="' + (waiting ? '1' : '0') +
-        '">Withdraw</button></span>') +
+        '">Remove</button></span>') +
       '</div>';
   }
 
@@ -1988,11 +1982,6 @@
       lines.push('  ' + (p.full_name || '—') + '  —  ' + (p.position || 'No position') +
         '  —  ' + (p.email || ''));
     });
-    var gone = last.roster.filter(function (p) { return p.active === false; });
-    if (gone.length) {
-      lines.push('', 'WITHDRAWN (' + gone.length + ')');
-      gone.forEach(function (p) { lines.push('  ' + (p.full_name || '—') + '  —  ' + (p.email || '')); });
-    }
     return lines.join('\n') + '\n';
   }
 

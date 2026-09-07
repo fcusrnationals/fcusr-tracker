@@ -49,6 +49,7 @@
     },
     pending: function () { return Promise.resolve([]); },
     withdraw: function () { return Promise.resolve(true); },
+    remove: function () { return Promise.resolve(true); },
     setHead: function () { return Promise.resolve(true); },
     // Offline there is nowhere to sync to, and saying so plainly here means the
     // sync layer needs no special case for it.
@@ -255,7 +256,7 @@
         p.unit_name = p.units ? p.units.name : '';
         p.unit_kind = p.units ? p.units.kind : '';
         if (p.active === false) {
-          throw new Error('That account has been withdrawn. Speak to a national executive.');
+          throw new Error('That account has been removed. Ask a national executive to add you again.');
         }
         // A volunteer's reach is the activities they were taken on for, so those
         // come back with the profile rather than being asked for separately.
@@ -374,6 +375,22 @@
       });
     },
 
+    /* Removing somebody. remove_member is the same act under a name that means
+       what it does; withdraw_member is what older databases call it, and the
+       site updates the moment it is deployed rather than the moment the SQL is
+       run — so a 404 falls back rather than telling an executive the removal
+       failed. */
+    remove: function (email) {
+      return sbFetch('/rest/v1/rpc/remove_member', {
+        method: 'POST', body: { p_email: email }
+      }).catch(function (err) {
+        if (!err || err.status !== 404) throw err;
+        return sbFetch('/rest/v1/rpc/withdraw_member', {
+          method: 'POST', body: { p_email: email }
+        });
+      });
+    },
+
     withdraw: function (email) {
       return sbFetch('/rest/v1/rpc/withdraw_member', {
         method: 'POST', body: { p_email: email }
@@ -433,6 +450,7 @@
     whoami: function () { return gsCall('whoami').then(function (r) { return r.profile; }); },
     pending: function () { return Promise.resolve([]); },
     withdraw: function (email) { return gsCall('withdraw', { email: email }); },
+    remove: function (email) { return gsCall('withdraw', { email: email }); },
     units: function () { return gsCall('units').then(function (r) { return r.units; }); },
     roster: function () { return gsCall('roster').then(function (r) { return r.roster; }); },
     enrol: function (m) { return gsCall('enrol', m).then(function (r) { return r.id; }); },
@@ -487,6 +505,10 @@
     },
     whoami: function () { return driver().whoami(); },
     units: function () { return driver().units(); },
+    remove: function (email) {
+      var d = driver();
+      return d.remove ? d.remove(email) : d.withdraw(email);
+    },
     changed: function (t, since, limit, column) {
       var d = driver();
       return d.changed ? d.changed(t, since, limit, column) : Promise.resolve([]);
