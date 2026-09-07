@@ -1313,6 +1313,48 @@ function makeDevice(server, name) {
       JSON.stringify(sR.requests.slice(before).filter((r) => r.op === 'upsert')));
   }
 
+  /* ---------------- pictures a deletion leaves behind ----------------
+     Photographs and scans live in IndexedDB under the report's id, and they are
+     the only large thing this app keeps. Deleting an activity HERE has always
+     freed them. A deletion arriving from another device freed nothing — so an
+     activity cleared out by the President left its scans and its eight
+     photographs on every other phone in the Republic, for ever, with nothing
+     left anywhere that names them. A term of that is tens of megabytes. */
+  console.log('\n--- a deletion from elsewhere takes the pictures with it ---');
+  {
+    const sP = makeServer();
+    const A3 = makeDevice(sP, 'President');
+    const B3 = makeDevice(sP, 'Senator');
+    const unit = A3.S.nationalUnitId();
+
+    // Both phones remember which prefixes were asked to be freed.
+    [A3, B3].forEach((d) => {
+      d.freed = [];
+      d.w.AssetDB = {
+        delPrefix: (pfx) => { d.freed.push(pfx); return Promise.resolve(); },
+        del: () => Promise.resolve(), getMany: () => Promise.resolve([]),
+        put: () => Promise.resolve(), get: () => Promise.resolve(null)
+      };
+    });
+
+    const ev6 = A3.S.addEvent({ title: 'Leadership Camp', unitId: unit });
+    const rep = A3.S.saveReport(ev6.id, {
+      description: 'Written up, with the scans and photographs attached.'
+    });
+    for (let i = 0; i < 2; i++) for (const d of [A3, B3]) await d.Sync.now();
+    check('the other phone has the report', !!B3.S.report(ev6.id));
+
+    A3.S.deleteEvent(ev6.id);
+    check('deleting it here frees its pictures',
+      A3.freed.some((p) => p === rep.id + ':'), JSON.stringify(A3.freed));
+
+    for (let i = 0; i < 2; i++) for (const d of [A3, B3]) await d.Sync.now();
+    check('and the other phone lets go of them too',
+      B3.freed.some((p) => p === rep.id + ':'),
+      B3.freed.length ? JSON.stringify(B3.freed) : 'nothing freed — they are stranded');
+    check('with the report itself gone', !B3.S.report(ev6.id));
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

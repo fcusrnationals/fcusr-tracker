@@ -1074,6 +1074,35 @@ console.log('\n--- the report wizard says whether it is finished ---');
     /Export/.test(D.querySelector('[data-step="8"]').textContent),
     D.querySelector('[data-step="8"]').textContent);
 
+  /* Pictures go in one at a time. A failure on the fifth of eight used to
+     redraw the four that made it and save none of them — on screen, in the
+     draft in memory, and written down nowhere. A reload then lost four uploads
+     and left their images in storage with nothing naming them. */
+  {
+    let n = 0;
+    window.AssetDB.addFile = function (reportId) {
+      n += 1;
+      if (n === 3) return Promise.reject(new Error('the file could not be read'));
+      return Promise.resolve({ id: reportId + ':img' + n, dataUrl: 'data:image/jpeg;base64,QUJD' });
+    };
+    st.step = 2;                                    // Photos
+    st.draft.photos = [];
+    D.querySelector('[data-step="2"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await sleep(40);
+
+    const saved = () => {
+      const raw = JSON.parse(window.localStorage.getItem('fcusr.tracker.v1') || '{}');
+      const r = (raw.reports || []).filter((x) => x.eventId === ev.id)[0];
+      return r ? (r.photos || []).length : 0;
+    };
+
+    await window.AccomplishmentUI._addFiles('photos', [{}, {}, {}, {}]);
+    await sleep(60);
+    check('the pictures that went in are kept on screen',
+      st.draft.photos.length === 2, String(st.draft.photos.length));
+    check('and written down, not just drawn', saved() === 2, String(saved()));
+  }
+
   D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
 }
 

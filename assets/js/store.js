@@ -640,9 +640,25 @@
       found = true;
       break;
     }
+    /* Pictures live in IndexedDB under the report's id, and they are the only
+       large thing this app keeps. Deleting something HERE has always freed
+       them; a deletion arriving from another device freed nothing, so an
+       activity cleared out by the President left its scans and its eight
+       photographs on every other phone in the Republic, for ever, with no
+       record of them anywhere to find them by.
+
+       A term of activities is tens of megabytes of that. */
+    var orphaned = [];
     if (kind === 'event') {
       state.tasks = state.tasks.filter(function (t) { return t.eventId !== rid; });
-      state.reports = state.reports.filter(function (r) { return r.eventId !== rid; });
+      state.reports = state.reports.filter(function (r) {
+        if (r.eventId === rid) { orphaned.push(r.id); return false; }
+        return true;
+      });
+    }
+    if (kind === 'report' && removed) orphaned.push(removed.id);
+    if (orphaned.length && global.AssetDB) {
+      orphaned.forEach(function (id) { global.AssetDB.delPrefix(id + ':'); });
     }
     /* The same tidying deletePerson does, because otherwise the two devices show
        different things for ever: the one that pressed the button kept the

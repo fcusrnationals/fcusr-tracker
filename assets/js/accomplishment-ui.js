@@ -519,8 +519,9 @@
 
     var reportId = state.draft.id || (state.draft.id = U.uid('rep'));
     var queue = Array.prototype.slice.call(files);
+    var before = slotData(slot).ids.length;
 
-    queue.reduce(function (chain, f) {
+    return queue.reduce(function (chain, f) {
       return chain.then(function () {
         return AssetDB.addFile(reportId, f, { maxDim: 1600, quality: 0.82 }).then(function (out) {
           state.cache[out.id] = out.dataUrl;
@@ -537,8 +538,18 @@
       UI.toast('Added.');
     }).catch(function (err) {
       state.busy = false;
-      UI.toast(err.message || 'That image could not be added.', 'error');
+      /* Pictures are added one at a time, so a failure on the fifth of eight
+         leaves four already in the draft. This used to redraw them and not save
+         them: on screen, in the draft in memory, and written down nowhere — so
+         a reload lost four uploads and left their images in storage with
+         nothing naming them. Whatever did get in is kept. */
+      var added = slotData(slot).ids.length - before;
+      persist();
       render();
+      UI.toast(added > 0
+        ? U.plural(added, 'image') + ' added, then one would not go in \u2014 ' +
+          (err.message || 'it could not be read') + '. The rest are kept.'
+        : (err.message || 'That image could not be added.'), 'error');
     });
   }
 
@@ -850,5 +861,7 @@
     });
   }
 
-  global.AccomplishmentUI = { open: open };
+  // _addFiles is exposed for the suite: adding pictures is where a partial
+  // failure quietly lost work, and it cannot be driven through a file input.
+  global.AccomplishmentUI = { open: open, _addFiles: addFiles };
 })(window);
