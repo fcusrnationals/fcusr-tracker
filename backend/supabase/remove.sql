@@ -194,6 +194,15 @@ begin
          updated_at = now()
    where id = target.id;
 
+  /* And switch the account back on. Setting somebody's password is the act of
+     saying "this person may sign in" — leaving them switched off would mean the
+     button appears to work and does not, which is the exact fault this whole
+     round of work was about. An officer withdrawn under the old rules is
+     switched off, and this is the button their executive reaches for. */
+  update profiles
+     set active = true, updated_at = now()
+   where id = target.id and active = false;
+
   /* Whoever was signed in as them is signed out. Setting a password and leaving
      the old sessions alive would mean the person you just locked out is still
      inside until their token happens to lapse. */

@@ -205,6 +205,11 @@ window.fetch = function (url, opts) {
       return reply(400, { message: 'A password must be at least eight characters.' });
     }
     SB.users[email].password = body.p_password;
+    /* And back on. Setting a password is the act of saying somebody may sign
+       in; leaving them switched off would make the button a lie. */
+    Object.keys(SB.profiles).forEach((k) => {
+      if (SB.profiles[k].email === email) SB.profiles[k].active = true;
+    });
     /* Whoever was signed in as them is signed out. Setting a password and
        leaving the old sessions alive would leave the person you just locked out
        still inside until their token happened to lapse. */
@@ -449,7 +454,7 @@ const FILES = [
     check('the list opens', !!acc, txt().slice(0, 70));
     check('it names the person who has not signed in', /Waiting One/.test(txt()));
     check('and says they are waiting', /Waiting to sign in/i.test(txt()));
-    check('the ones with accounts are listed apart', /Signed in/.test(txt()));
+    check('the ones with accounts are listed apart', /Has an account/.test(txt()));
     check('somebody who claimed theirs is on the signed-in side', /Rhea/.test(txt()));
     check('a waiting enrolment offers an invitation to send',
       !!acc.querySelector('[data-copy-one="waiting.one@filamer.edu.ph"]'));
@@ -474,6 +479,51 @@ const FILES = [
       !acc.querySelector('[data-setpw="waiting.one@filamer.edu.ph"]'));
     check('and you are not offered it on yourself',
       !acc.querySelector('[data-setpw="president@filamer.edu.ph"]'));
+
+    /* The case a real officer was stuck in.
+
+       Withdrawn under the old rules, which kept her account and deleted her
+       enrolment; then enrolled again, which made a fresh enrolment nobody had
+       claimed. Two lists, and she was in both — so she showed under "Waiting to
+       sign in", where Set password is deliberately not offered because somebody
+       waiting has no account to set one on. Except she had one. She had been
+       signing in for months, and there was no screen anywhere that could reach
+       her account.
+
+       Her profile was also switched off, and the list only showed people who
+       were switched on — so the row that could have explained it was not drawn
+       at all. */
+    SB.profiles['p-angel'] = {
+      id: 'p-angel', email: 'angel@filamer.edu.ph', full_name: 'Angel Rutor',
+      position: 'Senator', unit_id: NAT, access: 'officer', is_head: false,
+      active: false, units: units.find((u) => u.id === NAT)
+    };
+    SB.users['angel@filamer.edu.ph'] = { id: 'p-angel', password: 'forgotten', email: 'angel@filamer.edu.ph' };
+    SB.enrolments['angel@filamer.edu.ph'] = {
+      email: 'angel@filamer.edu.ph', full_name: 'Angel Rutor', position: 'Senator',
+      unit_id: NAT, access: 'officer', event_ids: []
+    };
+    await window.Forms.rosterList();
+    await new Promise((r) => setTimeout(r, 80));
+    const acc2 = [...D.querySelectorAll('.modal-backdrop')].pop();
+    const txt2 = () => acc2.textContent.replace(/\s+/g, ' ');
+
+    check('somebody re-enrolled over an existing account is shown once',
+      (txt2().match(/Angel Rutor/g) || []).length === 1,
+      (txt2().match(/Angel Rutor/g) || []).length + ' rows');
+    check('and her password can be set, which is the whole point',
+      !!acc2.querySelector('[data-setpw="angel@filamer.edu.ph"]'),
+      [...acc2.querySelectorAll('[data-setpw]')]
+        .map((b) => b.getAttribute('data-setpw')).join(', ') || 'none offered');
+    check('she is not filed away as somebody waiting for an invitation',
+      !acc2.querySelector('[data-copy-one="angel@filamer.edu.ph"]'));
+    check('and the row says she cannot sign in, rather than saying nothing',
+      /cannot sign in/i.test(txt2()), txt2().slice(0, 140));
+
+    delete SB.profiles['p-angel'];
+    delete SB.users['angel@filamer.edu.ph'];
+    delete SB.enrolments['angel@filamer.edu.ph'];
+    acc2.remove();
     check('and the word is Remove, not Withdraw',
       !/Withdraw/.test(acc.innerHTML), 'the roster still says Withdraw');
 
@@ -592,8 +642,12 @@ const FILES = [
     catch (e) { ownAccount = true; }
     check('and you cannot use it on your own account', ownAccount);
 
+    // Switched off, the way somebody withdrawn under the old rules is.
+    SB.profiles['u-forget'].active = false;
     await Auth.setMemberPassword(email, 'a-brand-new-one');
     check('the executive sets it', SB.users[email].password === 'a-brand-new-one');
+    check('and it switches the account back on, or the button is a lie',
+      SB.profiles['u-forget'].active === true);
     await Auth.signOut();
 
     check('the old password no longer works', await (async () => {

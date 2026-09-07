@@ -1863,8 +1863,9 @@
                 title: 'Set a password for ' + name,
                 body:
                   '<p class="small">They will be signed out everywhere and will use this ' +
-                  'from now on. Tell them what it is, and tell them to change it once they ' +
-                  'are in \u2014 Settings &rarr; Change my password.</p>' +
+                  'from now on. If their account was switched off, this switches it back on. ' +
+                  'Tell them what it is, and tell them to change it once they are in ' +
+                  '\u2014 Settings &rarr; Change my password.</p>' +
                   '<div class="field" style="margin-top:14px"><label for="sp-a">New password</label>' +
                   '<input type="text" id="sp-a" autocomplete="off" spellcheck="false" ' +
                   'data-autofocus value="' + U.esc(suggestPassword()) + '"></div>' +
@@ -1967,8 +1968,62 @@
         : '<p class="small muted">Nobody has been added yet.</p>');
   }
 
+  /* One person, one row.
+
+     These were two lists laid side by side — waiting enrolments from one table,
+     accounts from another — and somebody can be in both. An officer withdrawn
+     under the old rules kept their account while losing their enrolment; enrol
+     them again and they appear under "Waiting to sign in", which is where the
+     Set password button is deliberately not offered, because somebody waiting
+     has no account to set one on. Except she did have one. She had signed in
+     for months.
+
+     So it is not "waiting or not" that decides anything here. It is whether an
+     account exists, which is the only thing that says whether a password can be
+     set — and merging the two lists on the address is what makes that
+     answerable at all. */
+  function merge(pending, roster) {
+    var byEmail = {};
+    var key = function (e) { return String(e || '').trim().toLowerCase(); };
+
+    (roster || []).forEach(function (p) {
+      if (!key(p.email)) return;
+      byEmail[key(p.email)] = {
+        email: p.email, full_name: p.full_name, position: p.position,
+        units: p.units, access: p.access,
+        hasAccount: true, active: p.active !== false, waiting: false
+      };
+    });
+
+    (pending || []).forEach(function (e) {
+      var k = key(e.email);
+      if (!k) return;
+      if (byEmail[k]) {
+        /* Enrolled again over an account that already exists. They do not need
+           an invitation; they need their password set, or removing properly. */
+        byEmail[k].reEnrolled = true;
+        if (e.full_name) byEmail[k].full_name = e.full_name;
+        if (e.position) byEmail[k].position = e.position;
+        return;
+      }
+      byEmail[k] = {
+        email: e.email, full_name: e.full_name, position: e.position,
+        units: e.units, access: e.access,
+        hasAccount: false, active: true, waiting: true
+      };
+    });
+
+    return Object.keys(byEmail).map(function (k) { return byEmail[k]; })
+      .sort(function (x, y) {
+        return String(x.full_name || x.email).localeCompare(String(y.full_name || y.email));
+      });
+  }
+
   function view(pending, roster) {
-    var active = roster.filter(function (p) { return p.active !== false; });
+    var all = merge(pending, roster);
+    var waiting = all.filter(function (p) { return p.waiting; });
+    var accounts = all.filter(function (p) { return p.hasAccount; });
+    var canSignIn = accounts.filter(function (p) { return p.active; });
     var mine = (global.Auth && Auth.current()) ? Auth.current().email : '';
 
     /* Not styled as an alarm. On the first day of a term everybody is waiting,
@@ -1976,32 +2031,32 @@
        stop reading it. The count on the section below carries the urgency. */
     var html = '<div class="where-now" style="margin-bottom:16px">' +
       '<span class="wn-label">Where things stand</span>' +
-      '<span class="wn-line">' + U.plural(active.length, 'person', 'people') + ' can sign in' +
-      (pending.length ? ' · ' + pending.length + ' still to set a password' : '') + '</span>' +
-      (pending.length
+      '<span class="wn-line">' + U.plural(canSignIn.length, 'person', 'people') + ' can sign in' +
+      (waiting.length ? ' \u00b7 ' + waiting.length + ' still to set a password' : '') + '</span>' +
+      (waiting.length
         ? '<span class="wn-note">Nobody can be chased into a system they have not opened. ' +
           'Send them the link.</span>'
         : '') +
       '</div>';
 
-    if (pending.length) {
+    if (waiting.length) {
       html += '<div class="section" style="margin-bottom:18px">' +
         '<div class="section-head"><h2>Waiting to sign in ' +
-        '<span class="chip st-overdue"><span class="dot"></span>' + pending.length + '</span></h2></div>' +
+        '<span class="chip st-overdue"><span class="dot"></span>' + waiting.length + '</span></h2></div>' +
         '<p class="small muted" style="margin:0 2px 10px">Enrolled, but they have not opened the site ' +
-        'and set a password yet. Until they do there is no account — only your enrolment.</p>' +
+        'and set a password yet. Until they do there is no account &mdash; only your enrolment.</p>' +
         '<button type="button" class="btn btn-sm" style="margin-bottom:10px" data-copy-group>' +
         'Copy the message for the group chat</button>' +
-        '<div class="list">' + pending.map(function (e) { return row(e, true, mine); }).join('') +
+        '<div class="list">' + waiting.map(function (e) { return row(e, mine); }).join('') +
         '</div></div>';
     }
 
     html += '<div class="section">' +
-      '<div class="section-head"><h2>Signed in' +
-      (active.length ? ' <span class="chip chip-plain">' + active.length + '</span>' : '') +
+      '<div class="section-head"><h2>Has an account' +
+      (accounts.length ? ' <span class="chip chip-plain">' + accounts.length + '</span>' : '') +
       '</h2></div>';
-    html += active.length
-      ? '<div class="list">' + active.map(function (p) { return row(p, false, mine); }).join('') + '</div>'
+    html += accounts.length
+      ? '<div class="list">' + accounts.map(function (p) { return row(p, mine); }).join('') + '</div>'
       : '<p class="small muted" style="margin:0 2px">Nobody has set a password yet.</p>';
     html += '</div>';
 
@@ -2017,18 +2072,28 @@
     return pick(words) + '-' + pick(words) + '-' + (100 + Math.floor(Math.random() * 900));
   }
 
-  function row(p, waiting, mine) {
+  function row(p, mine) {
     var email = p.email || '';
     var name = p.full_name || email || 'Somebody';
     var isMe = mine && email && mine.toLowerCase() === email.toLowerCase();
+    var waiting = !!p.waiting;
 
     var meta = [p.position || 'No position'];
     if (p.units && p.units.name) meta.push(p.units.name);
 
+    /* Two states worth saying out loud, because both used to be invisible and
+       both are the reason somebody is standing in the office unable to get in. */
+    var note = '';
+    if (p.hasAccount && !p.active) {
+      note = ' <span class="chip st-overdue"><span class="dot"></span>cannot sign in</span>';
+    } else if (p.reEnrolled) {
+      note = ' <span class="chip chip-plain">enrolled again</span>';
+    }
+
     return '<div class="task"><span class="task-main" style="cursor:default">' +
       '<span class="task-title">' + U.esc(name) +
-        (isMe ? ' <span class="chip chip-plain">you</span>' : '') + '</span>' +
-      '<span class="task-meta">' + meta.map(U.esc).join('<span class="sep">·</span>') + '</span>' +
+        (isMe ? ' <span class="chip chip-plain">you</span>' : '') + note + '</span>' +
+      '<span class="task-meta">' + meta.map(U.esc).join('<span class="sep">\u00b7</span>') + '</span>' +
       '<span class="task-meta">' + U.esc(email) + '</span>' +
       '</span>' +
       (isMe ? '' :
@@ -2037,12 +2102,13 @@
           ? '<button type="button" class="btn btn-sm" data-copy-one="' + U.esc(email) +
             '" data-name="' + U.esc(name) + '">Copy invite</button>'
           : '') +
-        /* Only for somebody who has actually signed in. A waiting enrolment has
-           no account yet, so there is no password to set — they choose their
-           own the first time. */
-        (waiting ? '' :
-          '<button type="button" class="btn btn-sm" data-setpw="' + U.esc(email) +
-          '" data-name="' + U.esc(name) + '">Set password</button>') +
+        /* Offered on the one thing that decides it: whether an account exists.
+           It used to hang off "is this person in the waiting list", which put it
+           out of reach of exactly the people who needed it. */
+        (p.hasAccount
+          ? '<button type="button" class="btn btn-sm" data-setpw="' + U.esc(email) +
+            '" data-name="' + U.esc(name) + '">Set password</button>'
+          : '') +
         '<button type="button" class="btn btn-sm btn-ghost" data-remove="' + U.esc(email) +
         '" data-name="' + U.esc(name) + '" data-waiting="' + (waiting ? '1' : '0') +
         '">Remove</button></span>') +
