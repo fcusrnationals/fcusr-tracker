@@ -48,6 +48,7 @@ const SB = {
   tokens: {},         // access token → { userId, expiresAt }
   refreshes: {},      // refresh token → userId
   requests: [],       // every call the client made
+  missing: [],        // functions this database has not had installed yet
   n: 0
 };
 
@@ -190,6 +191,15 @@ window.fetch = function (url, opts) {
     });
     return reply(200, body.p_email);
   }
+  /* PostgREST answers a function it does not know with 404. A council running a
+     site newer than its database sees exactly this, and the app has to say so
+     rather than reach for whatever older function happens to still be there. */
+  const rpc = u.indexOf('/rest/v1/rpc/') === 0 ? u.slice('/rest/v1/rpc/'.length).split('?')[0] : '';
+  if (rpc && (SB.missing || []).indexOf(rpc) >= 0) {
+    return reply(404, { code: 'PGRST202',
+      message: 'Could not find the function public.' + rpc + ' in the schema cache' });
+  }
+
   if (u.indexOf('/rest/v1/rpc/set_member_password') === 0) {
     const actor = SB.profiles[who];
     const actorUnit = actor && units.find((x) => x.id === actor.unit_id);
@@ -655,6 +665,59 @@ const FILES = [
     })());
     check('and the new one does', !!(await Auth.signIn(email, 'a-brand-new-one')));
     await Auth.signOut();
+  }
+
+  /* ---------------- the site ahead of its database ----------------
+     The fault that cost a council a day, and it was not in the database.
+
+     Remove called remove_member and, when the database did not have it yet,
+     quietly called withdraw_member instead so that "something" happened.
+     withdraw_member is the OLD behaviour: it switches a person off and leaves
+     the account, the profile and everything else standing. So Remove reported
+     success, the person stayed on the list, and nothing anywhere said the
+     database was a step behind. The executive did the right thing four times
+     and watched it not work.
+
+     A missing function is said out loud now. Doing the old, broken thing
+     quietly is worse than failing. */
+  console.log('\n--- the site is ahead of its database ---');
+  {
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    const email = 'stranded@filamer.edu.ph';
+    SB.users[email] = { id: 'u-stranded', password: 'somepass', email: email };
+    SB.enrolments[email] = {
+      email: email, full_name: 'Stranded One', position: 'Senator',
+      unit_id: NAT, access: 'officer', event_ids: []
+    };
+    claimEnrolment(SB.users[email]);
+
+    // A database that has not had remove.sql run on it yet.
+    SB.missing = ['remove_member', 'set_member_password'];
+
+    let removeErr = null;
+    try { await Backend.remove(email); } catch (e) { removeErr = e; }
+    check('removing says the setup step is missing', !!(removeErr && removeErr.setupMissing),
+      removeErr && removeErr.message);
+    check('and it names the file to run',
+      !!removeErr && /remove\.sql/.test(removeErr.message), removeErr && removeErr.message);
+    check('and it did NOT quietly switch them off instead',
+      SB.profiles['u-stranded'] && SB.profiles['u-stranded'].active === true,
+      'the old behaviour ran behind the executive\u2019s back');
+    check('nor delete their enrolment behind the scenes', !!SB.enrolments[email]);
+
+    let pwErr = null;
+    try { await Auth.setMemberPassword(email, 'a-new-password'); } catch (e) { pwErr = e; }
+    check('setting a password says the same thing', !!(pwErr && pwErr.setupMissing),
+      pwErr && pwErr.message);
+    check('and the password was left alone', SB.users[email].password === 'somepass');
+
+    // With the file run, both work.
+    SB.missing = [];
+    await Auth.setMemberPassword(email, 'a-new-password');
+    check('once the file is run, setting a password works',
+      SB.users[email].password === 'a-new-password');
+    await Backend.remove(email);
+    check('and removing really removes', !SB.profiles['u-stranded'] && !SB.users[email]);
   }
 
   /* ---------------- leaving a shared computer ----------------

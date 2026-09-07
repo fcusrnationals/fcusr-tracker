@@ -1907,6 +1907,7 @@
                       working = false;
                       go.disabled = false;
                       go.textContent = 'Set it';
+                      if (e && e.setupMissing) { close(); return setupNeeded(); }
                       err.hidden = false;
                       err.textContent = (e && e.message) || 'That could not be set.';
                     });
@@ -1942,6 +1943,7 @@
                   load();
                 }).catch(function (err) {
                   b.disabled = false;
+                  if (err && err.setupMissing) return setupNeeded();
                   UI.toast(err.message || 'That could not be done.', 'error');
                 });
               });
@@ -2061,6 +2063,29 @@
     html += '</div>';
 
     return html;
+  }
+
+  /* The site is ahead of its database. Not a mistake anybody made at this
+     screen, and not something a toast should carry away after four seconds —
+     nothing on this page will work until somebody runs the file. */
+  function setupNeeded() {
+    UI.modal({
+      title: 'One setup step is missing',
+      body:
+        '<p class="small">The site has been updated but the database has not, so removing ' +
+        'somebody and setting a password cannot work yet. Nothing is broken and nothing has ' +
+        'been lost.</p>' +
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-top:14px">' +
+        '<div class="strong" style="margin-bottom:4px">What to do</div>' +
+        '<ol class="small" style="padding-left:18px;line-height:1.8;margin:0">' +
+        '<li>Open <strong>backend/supabase/remove.sql</strong> in the project.</li>' +
+        '<li>Copy all of it.</li>' +
+        '<li>Supabase &rarr; <strong>SQL Editor</strong> &rarr; New query &rarr; paste &rarr; ' +
+        '<strong>Run</strong>.</li>' +
+        '</ol></div>' +
+        '<p class="small muted">It only has to be done once, and it is safe to run twice.</p>',
+      footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
+    });
   }
 
   /* Something an officer can read down a phone line without spelling it. No

@@ -127,6 +127,18 @@
     return h;
   }
 
+  /* One sentence for the one situation that is nobody's mistake at the screen:
+     the site has been updated and the database has not. PostgREST answers a
+     function it does not know with 404, and until this said so plainly, that
+     404 was either swallowed or reported as a number. */
+  function notSetUp() {
+    var e = new Error('This needs one more setup step on the database. ' +
+      'Open backend/supabase/remove.sql in the project and run it in ' +
+      'Supabase \u2192 SQL Editor, then try again.');
+    e.setupMissing = true;
+    return e;
+  }
+
   function sbRaw(path, opts) {
     opts = opts || {};
     var headers = sbHeaders(opts.auth !== false);
@@ -221,6 +233,9 @@
       return sbFetch('/rest/v1/rpc/set_member_password', {
         method: 'POST',
         body: { p_email: email, p_password: password }
+      }).catch(function (err) {
+        if (err && err.status === 404) throw notSetUp();
+        throw err;
       });
     },
 
@@ -403,19 +418,23 @@
       });
     },
 
-    /* Removing somebody. remove_member is the same act under a name that means
-       what it does; withdraw_member is what older databases call it, and the
-       site updates the moment it is deployed rather than the moment the SQL is
-       run — so a 404 falls back rather than telling an executive the removal
-       failed. */
+    /* Removing somebody.
+
+       This used to fall back to withdraw_member when remove_member was not
+       there yet, so that a site deployed ahead of its database still did
+       something. That was a mistake and it cost a council a day: withdraw_member
+       is the OLD behaviour, which switches a person off and leaves everything
+       standing. So Remove reported success, the person stayed on the list, and
+       nothing anywhere said the database was a step behind.
+
+       A missing function is now said out loud. Doing the old, broken thing
+       quietly is worse than failing. */
     remove: function (email) {
       return sbFetch('/rest/v1/rpc/remove_member', {
         method: 'POST', body: { p_email: email }
       }).catch(function (err) {
-        if (!err || err.status !== 404) throw err;
-        return sbFetch('/rest/v1/rpc/withdraw_member', {
-          method: 'POST', body: { p_email: email }
-        });
+        if (err && err.status === 404) throw notSetUp();
+        throw err;
       });
     },
 
