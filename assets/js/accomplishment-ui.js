@@ -130,11 +130,20 @@
         '<span style="width:' + p.pct + '%"></span></div>' +
         '<span class="progress-label">' + p.done + ' of ' + p.total + ' done</span>' +
       '</div>' +
+      /* A tick means somebody did this. Minutes and Liquidation report themselves
+         as satisfied so they never hold a report back, and that put a green tick
+         on both before anybody had touched them — which tells an officer a
+         liquidation has been filed. They now say "optional" until there is
+         something in them, and tick like everything else once there is. */
       '<div class="wiz-steps">' + STEPS.map(function (s, i) {
-        var done = A.stepDone(state.draft, s.key);
-        var cls = 'wiz-step' + (i === state.step ? ' is-current' : '') + (done ? ' is-done' : '');
-        return '<button type="button" class="' + cls + '" data-step="' + i + '">' +
-          '<span class="n">' + (done ? '✓' : (i + 1)) + '</span>' + U.esc(s.label) + '</button>';
+        var filled = A.stepFilled(state.draft, s.key);
+        var optional = A.isOptional(s.key) && !filled;
+        var cls = 'wiz-step' + (i === state.step ? ' is-current' : '') +
+          (filled ? ' is-done' : '') + (optional ? ' is-optional' : '');
+        return '<button type="button" class="' + cls + '" data-step="' + i + '"' +
+          (optional ? ' title="Optional — leave it out if it does not apply"' : '') + '>' +
+          '<span class="n">' + (filled ? '\u2713' : optional ? '\u2013' : (i + 1)) + '</span>' +
+          U.esc(s.label) + '</button>';
       }).join('') + '</div></div>';
   }
 
@@ -151,8 +160,10 @@
         (has('upload')
           ? '<label class="btn btn-sm"><input type="file" accept="image/*" multiple hidden ' +
             'data-pick="' + U.esc(slot) + '">' + UI.icon('upload') + 'Upload file</label>' : '') +
-        '<button type="button" class="icon-btn" data-howto="' + U.esc(opts.howto || 'scan') + '" ' +
-          'aria-label="How this works">' + UI.icon('alert') + '</button>' +
+        /* Was an alert triangle with no words beside it, which reads as
+           something having gone wrong. It is a help button; it says so. */
+        '<button type="button" class="btn btn-sm btn-ghost" data-howto="' +
+          U.esc(opts.howto || 'scan') + '">How?</button>' +
       '</div>' +
       '<div class="up-grid" data-grid="' + U.esc(slot) + '"></div></div>';
   }
@@ -354,20 +365,27 @@
          app and the app keeps only a link, and being told that afterwards is
          being told too late. */
       (missing.length ? '' :
-        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin:0 0 14px">' +
-        '<div class="strong" style="margin-bottom:6px">What happens next</div>' +
+        '<div class="card" style="background:var(--st-done-bg);border-color:var(--st-done-bd);margin:0 0 14px">' +
+        '<div class="strong" style="margin-bottom:6px">Three steps, and the app walks you through them</div>' +
         '<ol class="small" style="padding-left:18px;line-height:1.8;margin:0">' +
-        '<li>The report is saved to this device as a file.</li>' +
-        '<li>You upload that file to the council\u2019s Google Drive.</li>' +
-        '<li>You paste the link back here, so anybody can find it later.</li>' +
-        '</ol></div>') +
+        '<li>Press the green button. The file saves to this device.</li>' +
+        '<li>Upload it to the council\u2019s Google Drive.</li>' +
+        '<li>Paste the link back here.</li>' +
+        '</ol>' +
+        '<p class="tiny muted" style="margin:8px 0 0">Step 2 and 3 open by themselves once ' +
+        'you press the button.</p></div>') +
 
+      /* The button says which of the two states it is in, rather than looking
+         the same either way and being quietly unclickable. A disabled button
+         with a hopeful label is a button people press over and over. */
       '<div class="row">' +
-        '<button type="button" class="btn ' + (missing.length ? '' : 'btn-go ') +
-        'btn-primary" data-export' + (missing.length ? ' disabled' : '') + '>' +
-        UI.icon('download') + 'Export the report (PDF)</button>' +
+        (missing.length
+          ? '<button type="button" class="btn btn-primary" data-export disabled>' +
+            U.plural(missing.length, 'section') + ' still to fill in</button>'
+          : '<button type="button" class="btn btn-go btn-primary" data-export>' +
+            UI.icon('download') + 'Ready \u2014 export the report (PDF)</button>') +
         '<button type="button" class="btn" data-export-word' + (missing.length ? ' disabled' : '') + '>' +
-        UI.icon('download') + 'Export as Word instead</button>' +
+        UI.icon('download') + 'Word version instead</button>' +
       '</div>' +
       '<p class="small muted" style="margin-top:10px">' +
         'The PDF is the one to file. The Word file has the same pages and can be edited if ' +
@@ -405,6 +423,28 @@
     liquidation: 'liquidation', signatories: 'cover', review: 'cover'
   };
 
+  /* A section only exists in the report once there is something in it, so while
+     a report is being filled in most of them are not there yet.
+
+     The preview used to fall back to page 1 without a word. Six of the nine
+     steps therefore showed the cover — under a heading that said "Preview of
+     this page" — for the whole time an officer was working, which is the whole
+     time they are on this screen. Nothing was broken and it looked broken, and
+     an officer with no reason to doubt the heading is being told their photos
+     went somewhere they did not.
+
+     So when a section is not in the document yet, say that, and say what puts
+     it there. */
+  var STEP_APPEARS = {
+    description: 'Write the summary and it appears here.',
+    program: 'Add the program flow and it appears here.',
+    photos: 'Add photos and they appear here.',
+    letters: 'Add a letter and it appears here.',
+    minutes: 'Choose where the minutes come from and they appear here.',
+    evaluation: 'Add the evaluation results and they appear here.',
+    liquidation: 'Add the liquidation and it appears here \u2014 leave it out if there was no money.'
+  };
+
   /* Whether this browser will show a PDF inside the page at all.
 
      Phones very often will not: a PDF in a frame is refused outright, or offered
@@ -424,7 +464,7 @@
     var inline = canShowPdfInline();
     return '<div class="wiz-preview">' +
       '<div class="row" style="justify-content:space-between;margin-bottom:8px">' +
-        '<span class="field-label" style="margin:0">Preview of this page</span>' +
+        '<span class="field-label" style="margin:0">Preview</span>' +
         '<button type="button" class="btn btn-sm" data-refresh-preview>Refresh</button>' +
       '</div>' +
       (inline
@@ -477,11 +517,22 @@
         if (mine !== pvSeq || !frameNow) return URL.revokeObjectURL(out.url);
         if (pvURL) URL.revokeObjectURL(pvURL);
         pvURL = out.url;
-        var key = STEP_PAGE[STEPS[state.step].key];
-        var page = out.pageMap[key] || 1;
+        var stepKey = STEPS[state.step].key;
+        var key = STEP_PAGE[stepKey];
+        var page = out.pageMap[key];
+
+        /* Not in the document yet. Showing the cover instead and saying nothing
+           is what made this look broken. */
+        if (page === undefined && STEP_APPEARS[stepKey]) {
+          frameNow.innerHTML = '<div class="pv-empty">' +
+            '<p class="small"><strong>This section is not in the report yet.</strong></p>' +
+            '<p class="small muted">' + U.esc(STEP_APPEARS[stepKey]) + '</p></div>';
+          return;
+        }
+
         if (canShowPdfInline()) {
           frameNow.innerHTML = '<iframe title="Report preview" src="' +
-            out.url + '#page=' + page + '&view=FitH&toolbar=0"></iframe>';
+            out.url + '#page=' + (page || 1) + '&view=FitH&toolbar=0"></iframe>';
         }
       }).catch(function (err) {
         var frameNow = rootEl && rootEl.querySelector('#pv-frame');
@@ -827,33 +878,28 @@
   function uploadWindow() {
     var d = state.draft;
     UI.modal({
-      title: 'Where the report will live',
+      title: 'Now put it on Drive',
       wide: true,
       body:
-        '<p class="small">The system stores the <strong>link</strong>, never the file itself. ' +
-        'That is deliberate: a finished report can run to hundreds of megabytes, and keeping ' +
-        'the files would fill any free account within a term. Keeping links costs nothing and ' +
-        'lasts for years.</p>' +
+        '<ol class="small" style="padding-left:18px;line-height:2;margin:0 0 4px">' +
+          '<li>Open <strong>Google Drive</strong> in the FCUSR\u2019s own account.</li>' +
+          '<li>Upload the file that just downloaded.</li>' +
+          '<li>Right-click it \u2192 <strong>Share</strong> \u2192 <strong>Copy link</strong>.</li>' +
+          '<li>Paste it in the box below.</li>' +
+        '</ol>' +
 
+        /* Kept, but after the steps and in three lines rather than fifteen. An
+           officer standing at a shared computer with the file already downloaded
+           needs the instruction first; the reasoning is for whoever wonders. */
         '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin:14px 0">' +
-          '<div class="strong" style="margin-bottom:6px">It follows that the file must not be deleted.</div>' +
+          '<div class="strong" style="margin-bottom:4px">Two things that matter</div>' +
           '<ul class="small" style="padding-left:18px;line-height:1.75;margin:0">' +
-            '<li>Upload it to a <strong>Google account owned by the FCUSR</strong>, not a personal one. ' +
-            'A personal account leaves with its owner and takes every report with it.</li>' +
-            '<li>Hand that account to next year\'s officers along with the office.</li>' +
-            '<li>Never delete or move the file. If the link stops working, the report is gone ' +
-            'from the archive even though this system still lists it.</li>' +
-            '<li>Set sharing to <strong>Anyone with the link can view</strong>, so officers and ' +
-            'the OSA can open it without asking for access each time.</li>' +
+            '<li>Use an account the <strong>FCUSR owns</strong>. A personal one leaves with ' +
+            'its owner and takes every report with it.</li>' +
+            '<li><strong>Never delete or move the file.</strong> This system keeps the link, ' +
+            'not the report \u2014 that is what makes it cost nothing and last for years.</li>' +
           '</ul>' +
         '</div>' +
-
-        '<ol class="small" style="padding-left:18px;line-height:1.8">' +
-          '<li>Open Google Drive in the FCUSR account.</li>' +
-          '<li>Upload the file you just downloaded.</li>' +
-          '<li>Right-click it, choose <strong>Share</strong>, then <strong>Copy link</strong>.</li>' +
-          '<li>Paste it below.</li>' +
-        '</ol>' +
 
         '<div class="field" style="margin-top:14px"><label for="drive">Drive link</label>' +
         '<input type="text" id="drive" data-autofocus placeholder="https://drive.google.com/…" ' +

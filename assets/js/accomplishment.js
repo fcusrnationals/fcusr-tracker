@@ -112,6 +112,27 @@
 
   /* ---------- completeness ---------- */
 
+  /* The two steps that do not apply to every activity. They report themselves as
+     satisfied so they never hold a report back — which is right — but that made
+     them draw a green tick in the step bar before anybody had touched them. An
+     officer reading a tick beside "Liquidation" is being told a liquidation has
+     been filed. */
+  var OPTIONAL = ['minutes', 'liquidation'];
+
+  function isOptional(key) { return OPTIONAL.indexOf(key) >= 0; }
+
+  /* Whether there is actually something in this step, as opposed to whether it
+     is holding the report back. The two are the same everywhere except the two
+     optional steps, and conflating them is what put the tick there. */
+  function stepFilled(d, key) {
+    if (key === 'minutes') {
+      return d.minutes.mode === 'tasks' ||
+        (d.minutes.mode === 'upload' && d.minutes.assets.length > 0);
+    }
+    if (key === 'liquidation') return d.liquidation.assets.length > 0;
+    return stepDone(d, key);
+  }
+
   function stepDone(d, key) {
     switch (key) {
       case 'description': return d.description.trim().length >= 20;
@@ -215,7 +236,7 @@
 
   global.Accomplishment = {
     A4: A4, BOX: BOX, STEPS: STEPS, MIN_PHOTOS: MIN_PHOTOS,
-    stepDone: stepDone, progress: progress, blockingReason: blockingReason,
+    stepDone: stepDone, stepFilled: stepFilled, isOptional: isOptional, progress: progress, blockingReason: blockingReason,
     draftFor: draftFor, loadLetterhead: loadLetterhead, loadPdfFonts: loadPdfFonts, howto: howto,
     _state: function () { return wiz; },
     _setState: function (s) { wiz = s; },

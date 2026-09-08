@@ -694,10 +694,67 @@ check('body text is justified at 12pt',
 
 console.log('\n--- filing the report ---');
 const uiSrc2 = fs.readFileSync(path.join(ROOT, 'assets/js/accomplishment-ui.js'), 'utf8');
+/* These test the substance, not the sentence. The wording was shortened once —
+   the instructions were fifteen lines of reasoning before the four steps an
+   officer standing at the computer actually needed — and three of these failed
+   on phrasing alone while every fact they guard was still on the screen. A test
+   that breaks on a rewrite it should not care about teaches people to change
+   the test. */
 check('an upload window follows the download', /function uploadWindow/.test(uiSrc2));
-check('it warns against a personal account', /owned by the FCUSR/.test(uiSrc2));
-check('it explains that only the link is kept', /never the file itself/.test(uiSrc2));
+check('it warns against a personal account',
+  /FCUSR\s*<\/strong>\s*owns|owned by the FCUSR|FCUSR\\u2019s own account/.test(uiSrc2) &&
+  /personal/.test(uiSrc2));
+check('it explains that only the link is kept',
+  /keeps the link|never the file itself/.test(uiSrc2));
 check('it insists the file is not deleted', /Never delete or move the file/.test(uiSrc2));
+check('and the steps come before the reasoning',
+  uiSrc2.indexOf('Open <strong>Google Drive</strong>') <
+  uiSrc2.indexOf('Two things that matter'),
+  'the reasoning is above the instructions again');
+
+/* ---------------- the preview while it is still being filled in ----------------
+   A section only exists in the document once there is something in it, so for
+   the whole time an officer is working most of them are not there. The preview
+   asked for the page of the section they were on, got nothing, and quietly
+   showed page 1 instead — under a heading that said "Preview of this page".
+
+   Six of the nine steps therefore showed the cover. Nothing was broken and it
+   looked broken, and an officer with no reason to doubt the heading is being
+   told their photos went somewhere they did not. */
+console.log('\n--- the preview says when a section is not there yet ---');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'assets/js/accomplishment-ui.js'), 'utf8');
+  check('there is a sentence for every section that can be empty',
+    ['description', 'program', 'photos', 'letters', 'minutes', 'evaluation', 'liquidation']
+      .every((k) => new RegExp(k + ':\\s*\'').test(src.slice(src.indexOf('STEP_APPEARS')))),
+    'STEP_APPEARS does not cover every step');
+  check('and a missing page is said, not silently swapped for the cover',
+    /page === undefined && STEP_APPEARS\[stepKey\]/.test(src));
+  check('the heading no longer promises a page it may not be showing',
+    !/Preview of this page/.test(src));
+
+  const css = fs.readFileSync(path.join(ROOT, 'assets/css/app.css'), 'utf8');
+  check('and the message has somewhere to be drawn', /\.pv-empty/.test(css));
+}
+
+/* The one fact the whole screen exists to establish, said where an officer is
+   actually standing: on the activity page, before they open the wizard at all. */
+console.log('\n--- ready to export is visible without opening the wizard ---');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'assets/js/views/event-detail.js'), 'utf8');
+  check('the activity page knows when the report is finished',
+    /var ready = p\.done === p\.total/.test(src));
+  check('and says so rather than counting sections at you',
+    /Ready to export/.test(src));
+  check('with the go colour on the button', /ready \? 'btn-go '/.test(src));
+
+  const css = fs.readFileSync(path.join(ROOT, 'assets/css/app.css'), 'utf8');
+  check('which is defined', /\.report-banner\.is-ready/.test(css));
+
+  // Two documents, two names. Both used to be called "Export PDF".
+  check('the task list is not called the same thing as the report',
+    /Task list \(PDF\)/.test(src) && !/>Export PDF/.test(src));
+}
 
 console.log('\n--- backend wiring ---');
 const Backend = window.Backend;

@@ -520,6 +520,20 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
   color: var(--st-overdue-fg);
 }
 
+/* Said in the frame where the page would have been, so it reads as an answer
+   rather than as a failure to draw something. */
+/* Finished. The same green as everywhere else that means "go", so an officer
+   scanning the activity page can tell finished from nearly without reading. */
+/* Not done, and not undone either. A step that does not apply to this activity
+   should not wear the same tick as one somebody filled in. */
+.wiz-step.is-optional { opacity: 0.72; }
+.wiz-step.is-optional .n { background: transparent; border: 1px dashed var(--line); color: var(--muted); }
+
+.report-banner.is-ready { border-color: var(--st-done-bd); background: var(--st-done-bg); }
+
+.pv-empty { padding: 22px 16px; text-align: center; }
+.pv-empty p { margin: 0 0 6px; }
+
 .btn.btn-go, .btn.btn-go:hover {
   background: var(--st-done-fg); border-color: var(--st-done-fg); color: #fff;
 }

@@ -47,7 +47,11 @@
       '<div class="page-head" style="margin-bottom:6px">' +
         '<h1 style="min-width:0">' + U.esc(e.title) + '</h1>' +
         '<div class="row" style="gap:6px;flex-wrap:nowrap">' +
-          '<button type="button" class="btn btn-primary" data-export>' + UI.icon('pdf') + 'Export PDF</button>' +
+          /* Not "Export PDF". There are two documents on this screen and that
+             label was on both: this one is the task list, the other is the
+             accomplishment report the OSA asks for. Two buttons with one name is
+             how somebody files the wrong thing. */
+          '<button type="button" class="btn" data-export>' + UI.icon('pdf') + 'Task list (PDF)</button>' +
           (mine
             ? '<button type="button" class="icon-btn" data-more aria-label="Event options" aria-haspopup="menu">' +
               UI.icon('more') + '</button>'
@@ -206,18 +210,27 @@
 
     // Overall progress: the tasks are 90% of the job, the report is the last 10%.
     var overall = Math.round(90 + (p.pct * 0.1));
-    return '<div class="report-banner">' +
+    /* Whether it is ready is the fact this card exists to carry, and it was not
+       carrying it: "6 of 6 sections filled in" is the same shape of sentence as
+       "3 of 6", and an officer scanning the page cannot tell finished from
+       nearly. Green, and it says the word. */
+    var ready = p.done === p.total && !filed;
+
+    return '<div class="report-banner' + (ready ? ' is-ready' : '') + '">' +
       '<div class="row" style="justify-content:space-between;gap:10px">' +
         '<div style="min-width:180px;flex:1">' +
           '<div class="rb-title">Accomplishment report</div>' +
           '<div class="rb-sub">' +
-            (filed ? 'Filed — the archive has the Drive link.'
+            (filed ? 'Filed \u2014 the archive has the Drive link.'
+                   : ready ? 'Ready to export. Everything the OSA asks for is filled in.'
                    : (p.done ? p.done + ' of ' + p.total + ' sections filled in.'
                              : 'Not started. This is the last thing left.')) +
           '</div>' +
         '</div>' +
-        '<button type="button" class="btn btn-primary" data-open-report>' + UI.icon('pdf') +
-        (p.done ? 'Continue report' : 'Start report') + '</button>' +
+        '<button type="button" class="btn ' + (ready ? 'btn-go ' : '') +
+        'btn-primary" data-open-report>' + UI.icon('pdf') +
+        (filed ? 'Open report' : ready ? 'Export it' : p.done ? 'Continue report' : 'Start report') +
+        '</button>' +
       '</div>' +
       '<div class="progress-row" style="margin-top:12px">' +
         '<div class="progress' + (overall === 100 ? ' is-complete' : '') + '" role="progressbar" ' +
