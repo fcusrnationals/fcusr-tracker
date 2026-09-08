@@ -1139,8 +1139,28 @@
     return p ? p.name : 'Unassigned';
   }
 
-  function addPerson(data) {
-    var p = cleanPerson({
+  /* One person, and the whole store written to disk and the whole app redrawn
+     after it. That is the right trade for somebody typing a name into a form.
+
+     It is the wrong trade a hundred and fifty times in a row. A college pasting
+     its roster in went through addPerson per line, so a 150-name list meant 150
+     full saves and 150 full redraws, each one a little slower than the last
+     because the thing being written keeps growing. What that looks like is the
+     app hanging on the one screen built for doing a lot at once. */
+  function addPeople(list) {
+    var made = [];
+    (list || []).forEach(function (data) {
+      var p = buildPerson(data);
+      if (!p) return;
+      state.people.push(p);
+      made.push(p);
+    });
+    if (made.length) commit();
+    return made;
+  }
+
+  function buildPerson(data) {
+    return cleanPerson({
       id: U.uid('per'),
       name: data.name, position: data.position, committee: data.committee,
       /* Whoever is adding them, not the National government by default. That
@@ -1154,6 +1174,10 @@
       active: data.active !== false,
       createdAt: nowISO(), updatedAt: nowISO()
     });
+  }
+
+  function addPerson(data) {
+    var p = buildPerson(data);
     if (!p) throw new Error('A person needs a name.');
     state.people.push(p);
     commit();
@@ -3276,7 +3300,7 @@
     people: people, person: person, personName: personName, personByEmail: personByEmail,
     assignable: assignable,
     volunteersFor: volunteersFor, removeVolunteerFrom: removeVolunteerFrom,
-    addPerson: addPerson, updatePerson: updatePerson, setPersonActive: setPersonActive,
+    addPerson: addPerson, addPeople: addPeople, updatePerson: updatePerson, setPersonActive: setPersonActive,
     deletePerson: deletePerson, personHolds: personHolds, unitHeads: unitHeads,
     reconcileDirectory: reconcileDirectory,
     duplicatePeopleCount: duplicatePeopleCount, mergeDuplicatePeople: mergeDuplicatePeople,

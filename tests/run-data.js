@@ -794,6 +794,41 @@ console.log('\n--- a save with no units does not double them ---');
   vm.runInContext('Store.load(); Store._seedRehearsal();', sb);
 }
 
+/* ---------------- a roster pasted in all at once ----------------
+   Adding one person writes the whole store to disk and redraws the whole app.
+   That is the right trade for somebody typing a name into a form, and the wrong
+   one a hundred and fifty times in a row — which is exactly what the bulk import
+   did, one addPerson per line. Each save is a little slower than the last
+   because the thing being written keeps growing, so what a college pasting its
+   roster in actually saw was the app hanging on the one screen built for doing
+   a lot at once. */
+console.log('\n--- a roster arrives in one write ---');
+{
+  const before = vm.runInContext('Store.people().length', sb);
+  let saves = 0;
+  const ls = sb.window.localStorage;
+  const realSet = ls.setItem.bind(ls);
+  ls.setItem = function () { saves++; return realSet.apply(null, arguments); };
+
+  const made = vm.runInContext(
+    "Store.addPeople(Array.apply(null, {length: 40}).map(function (x, i) {" +
+    "  return { name: 'Bulk Person ' + i, position: 'Member', unitId: Store.nationalUnitId() };" +
+    "})).length", sb);
+
+  ls.setItem = realSet;
+
+  check('everybody arrives', made === 40, made);
+  check('and is on the roster',
+    vm.runInContext('Store.people().length', sb) === before + 40);
+  check('written once, not once per name', saves === 1, saves + ' saves');
+
+  // A line with no name is skipped rather than throwing the whole paste away.
+  const mixed = vm.runInContext(
+    "Store.addPeople([{ name: 'Good One', unitId: Store.nationalUnitId() }," +
+    " { name: '   ', unitId: Store.nationalUnitId() }]).length", sb);
+  check('a blank line is dropped, not fatal', mixed === 1, mixed);
+}
+
 console.log('\n========================================');
 console.log(results.length - failed.length + ' passed, ' + failed.length + ' failed');
 if (failed.length) {

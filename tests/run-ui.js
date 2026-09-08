@@ -756,6 +756,27 @@ console.log('\n--- ready to export is visible without opening the wizard ---');
     /Task list \(PDF\)/.test(src) && !/>Export PDF/.test(src));
 }
 
+/* ---------------- a browser that will not store pictures ----------------
+   A private window, or a school machine locked down. What came back was the
+   browser's own word for it — "blocked", or a DOMException carrying no message
+   at all — and that was what an officer read as the reason their report would
+   not build.
+
+   Worse, the failure was remembered: the promise that failed was cached, so the
+   first refusal turned pictures off for the rest of the session even after
+   whatever caused it had gone. */
+console.log('\n--- pictures refused by the browser ---');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'assets/js/asset-db.js'), 'utf8');
+  check('the reason is said in words somebody can act on',
+    /private or incognito window/.test(src));
+  check('a browser that throws instead of reporting is caught too',
+    /try \{ req = global\.indexedDB\.open/.test(src));
+  check('and a refusal is not remembered for the whole session',
+    /dbPromise\.catch\(function \(\) \{ dbPromise = null; \}\)/.test(src),
+    'one failure would keep pictures off until the tab is closed');
+}
+
 console.log('\n--- backend wiring ---');
 const Backend = window.Backend;
 check('Supabase is the selected driver', Backend.config.driver === 'supabase');

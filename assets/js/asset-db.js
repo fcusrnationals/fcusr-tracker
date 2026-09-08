@@ -15,18 +15,41 @@
   var STORE = 'images';
   var dbPromise = null;
 
+  /* Said in words an officer can act on. What comes back from the browser is
+     "blocked", or a DOMException with no message at all, and that reaches the
+     screen as the reason a report will not build. */
+  function refused(cause) {
+    var e = new Error('This browser will not let the app store pictures. That is ' +
+      'usually a private or incognito window, or a browser set to block site data \u2014 ' +
+      'open the site in an ordinary window and try again.');
+    e.storageRefused = true;
+    e.cause = cause;
+    return e;
+  }
+
   function open() {
     if (dbPromise) return dbPromise;
     dbPromise = new Promise(function (resolve, reject) {
-      if (!global.indexedDB) return reject(new Error('This browser has no IndexedDB.'));
-      var req = global.indexedDB.open(DB_NAME, 1);
+      if (!global.indexedDB) return reject(refused('no indexedDB'));
+      var req;
+      /* Some browsers throw here rather than calling onerror — a locked-down
+         school machine, or a private window on an older Safari. */
+      try { req = global.indexedDB.open(DB_NAME, 1); }
+      catch (e) { return reject(refused(e && e.message)); }
       req.onupgradeneeded = function () {
         var db = req.result;
         if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
       };
       req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error); };
+      req.onerror = function () { reject(refused(req.error && req.error.message)); };
     });
+
+    /* A failure used to be remembered for ever: dbPromise held the rejection, so
+       the first refusal turned pictures off for the rest of the session even
+       once whatever caused it had gone. Forget it, and let the next attempt
+       actually try. */
+    dbPromise.catch(function () { dbPromise = null; });
+
     return dbPromise;
   }
 

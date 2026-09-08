@@ -1692,16 +1692,22 @@
           save.disabled = true;
           save.textContent = 'Adding\u2026';
 
-          var added = 0, invited = 0, failed = 0;
+          /* Everybody first, in one write. Going through addPerson per line saved
+             the whole store and redrew the whole app once per name, which is a
+             fair trade for one person typed into a form and a hang for a college
+             pasting its roster in. */
+          var added = Store.addPeople(good.map(function (r) {
+            return {
+              name: r.name, position: r.position, committee: r.committee,
+              email: r.email, unitId: unitId, access: 'officer'
+            };
+          })).length;
+
+          var invited = 0, failed = 0;
           var chain = Promise.resolve();
 
           good.forEach(function (r) {
             chain = chain.then(function () {
-              Store.addPerson({
-                name: r.name, position: r.position, committee: r.committee,
-                email: r.email, unitId: unitId, access: 'officer'
-              });
-              added++;
               if (!r.email || (global.Auth && Auth.isOffline())) return;
               return Backend.enrol({
                 email: r.email, full_name: r.name, position: r.position,
