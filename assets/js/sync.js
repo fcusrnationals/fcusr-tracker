@@ -254,7 +254,11 @@
      for ever would outlive the reason for it. */
   var unwritable = {};
 
-  function offer(table, rows) {
+  /* `keyOf` because not every table is keyed by `id`. Deletions are keyed by the
+     pair (entity, entity_id) and have no id column at all, so sending one would
+     be refused by the server for a completely different reason. */
+  function offer(table, rows, keyOf) {
+    var name = keyOf || function (r) { return table + ':' + r.id; };
     if (!rows.length) return Promise.resolve(0);
     return Backend.upsert(table, rows).then(function () { return rows.length; })
       .catch(function (err) {
@@ -269,7 +273,7 @@
             return Backend.upsert(table, [row]).then(function () { taken += 1; })
               .catch(function (e) {
                 if (e && (e.status === 401 || e.status === 403)) {
-                  unwritable[table + ':' + row.id] = 1;
+                  unwritable[name(row)] = 1;
                   refused += 1;
                   return;
                 }
@@ -305,25 +309,53 @@
       }
     });
 
+    /* Deletions go the same way, and this is where the red bar was coming from.
+
+       The records above were taught to survive a refusal; this was not, so one
+       tombstone the server would not take broke the whole round and every round
+       after it — the pill red, nothing sent, and the reason a row working
+       exactly as designed.
+
+       Two ordinary ways to earn that refusal. A volunteer is not an officer, so
+       deletions_write refuses every tombstone they hold. And an officer offering
+       back a tombstone the National government wrote is refused on the UPDATE's
+       USING clause, because the row already there belongs to another unit —
+       which is what "(USING expression) for table deletions" means, and a full
+       round offers everything the phone holds. */
     if (out.deletions.length) {
       chain = chain.then(function () {
-        return Backend.upsert('deletions', out.deletions.map(function (d) {
-          return {
-            entity: d.kind, entity_id: d.id, deleted_at: d.at,
-            deleted_by: (global.Auth && Auth.current() && Auth.current().name) || '',
-            unit_id: (global.Auth && Auth.myUnitId()) || null
-          };
-        }));
+        var rows = out.deletions
+          .filter(function (d) { return !unwritable['deletions:' + d.kind + ':' + d.id]; })
+          .map(function (d) {
+            return {
+              entity: d.kind, entity_id: d.id, deleted_at: d.at,
+              deleted_by: (global.Auth && Auth.current() && Auth.current().name) || '',
+              unit_id: (global.Auth && Auth.myUnitId()) || null
+            };
+          });
+        if (!rows.length) return null;
+        return offer('deletions', rows, function (r) {
+          return 'deletions:' + r.entity + ':' + r.entity_id;
+        });
       }).then(function () {
         var byTable = {};
         out.deletions.forEach(function (d) {
+          if (unwritable['deletions:' + d.kind + ':' + d.id]) return;
           var t = TABLES.filter(function (x) { return x.kind === d.kind; })[0];
           if (!t) return;
           (byTable[t.table] = byTable[t.table] || []).push(d.id);
         });
         var c = Promise.resolve();
         Object.keys(byTable).forEach(function (table) {
-          c = c.then(function () { return Backend.remove(table, byTable[table]); });
+          c = c.then(function () {
+            /* Removing the row itself can be refused for the same reasons, and
+               a deletion that cannot be carried out is not a reason to stop
+               carrying out the others. */
+            return Backend.remove(table, byTable[table]).catch(function (err) {
+              if (err && (err.status === 401 || err.status === 403)) { refused += 1; return; }
+              throw err;
+            });
+          });
         });
         return c;
       });

@@ -176,10 +176,30 @@ window.fetch = function (url, opts) {
     if (actorUnit.kind !== 'national' && actor.unit_id !== body.p_unit_id) {
       return reply(403, { message: 'You may not enrol members for that unit.' });
     }
-    SB.enrolments[body.p_email.toLowerCase().trim()] = {
+    const clean = body.p_email.toLowerCase().trim();
+    SB.enrolments[clean] = {
+      email: clean,
       full_name: body.p_full_name, position: body.p_position,
       unit_id: body.p_unit_id, access: body.p_access, event_ids: body.p_event_ids || []
     };
+
+    /* A login with no account behind it: they set a password before anybody
+       enrolled them. Updating profiles by email matches nothing, so the profile
+       is made here — otherwise the enrolment reports success and the person is
+       told to ask an executive for ever. */
+    const user = SB.users[clean];
+    if (user && !SB.profiles[user.id]) {
+      SB.profiles[user.id] = {
+        id: user.id, email: clean,
+        full_name: body.p_full_name || clean.split('@')[0],
+        position: body.p_position || '', unit_id: body.p_unit_id,
+        access: body.p_access, is_head: false, active: true,
+        units: units.find((u) => u.id === body.p_unit_id)
+      };
+      (body.p_event_ids || []).forEach((ev) =>
+        SB.members.push({ event_id: ev, profile_id: user.id }));
+      SB.enrolments[clean].claimed_at = new Date().toISOString();
+    }
     /* Enrolling is the act of saying somebody may sign in. The real function
        used to leave `active` alone, so an address that had once been removed
        could be enrolled over and over and still be refused at the door — and
@@ -381,7 +401,9 @@ const FILES = [
   const stranger = await Auth.signUp('random.person@gmail.com', 'letmein12345')
     .then(() => null, (e) => e.message);
   check('can make a login and still get nothing', !!stranger);
-  check('and is told plainly why', /enrolled/i.test(stranger || ''), stranger || '');
+  check('and is told plainly why', /enrol/i.test(stranger || ''), stranger || '');
+  check('and that their password is not the problem',
+    /password is set and it works/i.test(stranger || ''), stranger || '');
   check('no profile was created for them',
     !Object.keys(SB.profiles).some((k) => SB.profiles[k].email === 'random.person@gmail.com'));
   check('so the app does not consider them signed in', !Auth.signedIn());
@@ -735,6 +757,59 @@ const FILES = [
       SB.users[email].password === 'a-new-password');
     await Backend.remove(email);
     check('and removing really removes', !SB.profiles['u-stranded'] && !SB.users[email]);
+  }
+
+  /* ---------------- turning up before you were enrolled ----------------
+     The volunteer's trap, and the one a council hits most, because a volunteer
+     is the person handed the link casually and told to sign up.
+
+     A profile is made in one place only: the trigger that fires when a login is
+     created, and only if an enrolment is already sitting there. So somebody who
+     sets a password first gets a login and no profile. The executive then
+     enrols them — and enroll_member updates profiles by email, which matches
+     nothing, because there is no profile row to update. The enrolment is never
+     claimed either, since claiming only happens when a login is created and
+     theirs already exists.
+
+     They sign in with the password they set, and are told to ask a national
+     executive. Every time. The executive can see they did the right thing. */
+  console.log('\n--- somebody who set a password before being enrolled ---');
+  {
+    const email = 'eager@filamer.edu.ph';
+    await Auth.signOut();
+
+    // Step one: they open the site first and set a password. Nobody has enrolled
+    // them, so there is a login and nothing behind it.
+    let told = '';
+    try { await Auth.signUp(email, 'eagerpass'); } catch (e) { told = e.message || ''; }
+    check('the login is made', !!SB.users[email]);
+    check('but there is no account behind it yet',
+      !Object.keys(SB.profiles).some((k) => SB.profiles[k].email === email));
+    check('and they are told the password is fine, not that it failed',
+      /password is set and it works/i.test(told), told.slice(0, 90));
+    check('and told what is actually missing', /enrol/i.test(told));
+
+    // Step two: the executive does exactly what they were asked to do.
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    await Backend.enrol({
+      email: email, full_name: 'Eager Volunteer', position: 'Volunteer',
+      unit_id: NAT, access: 'volunteer', eventIds: []
+    });
+    await Auth.signOut();
+
+    check('enrolling them now makes the account',
+      Object.keys(SB.profiles).some((k) => SB.profiles[k].email === email),
+      'enrolling matched no profile row, so it did nothing at all');
+
+    // Step three: they come back with the password they already chose.
+    const back = await Auth.signIn(email, 'eagerpass').catch((e) => e.message);
+    check('and the password they already chose lets them in',
+      typeof back === 'object' && Auth.signedIn(),
+      typeof back === 'string' ? back : 'not signed in');
+    check('as the person they were enrolled as',
+      Auth.signedIn() && Auth.current().name === 'Eager Volunteer',
+      Auth.signedIn() ? Auth.current().name : '(nobody)');
+    await Auth.signOut();
   }
 
   /* ---------------- leaving a shared computer ----------------

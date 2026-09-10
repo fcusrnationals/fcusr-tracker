@@ -211,8 +211,9 @@
         return supabaseDriver.whoami();
       }).then(function (profile) {
         if (!profile) {
-          throw new Error('That login works, but nobody has enrolled this address yet. ' +
-            'Ask a national executive to enrol you, then sign in again.');
+          throw new Error('That password is right. What is missing is the enrolment: ' +
+            'a national executive has to add this address to the council first. Ask them, ' +
+            'then sign in again with this same password \u2014 you will not need a new one.');
         }
         return profile;
       });
@@ -243,12 +244,37 @@
       return sbRaw('/auth/v1/signup', {
         method: 'POST', auth: false, body: { email: email, password: password }
       }).catch(function (err) {
+        if (!err) throw err;
+
         /* Signing up an address that already has an account. Supabase says so
-           with 422 and user_already_exists; older versions said it in words.
-           Matching only the words meant this went unrecognised. */
-        if (err && (err.status === 422 || err.code === 'user_already_exists' ||
-                    /already/i.test(err.message || ''))) {
+           with user_already_exists, and older versions said it in words.
+
+           It also says 422 for a weak password, for a rejected address, and for
+           a project with sign-ups switched off — and this used to treat every
+           422 as "already registered". So a volunteer opening the site for the
+           first time, whose password Supabase would not accept, was told the
+           address already had one and sent to ask an executive for it. Which is
+           precisely the door they were standing at, and there was nothing on
+           the other side of it for them. */
+        if (err.code === 'user_already_exists' ||
+            /already\s+(registered|exists)/i.test(err.message || '')) {
           err.alreadyClaimed = true;
+          throw err;
+        }
+
+        /* The other 422s, said as the thing they are. Each one has something the
+           person in front of the screen can actually do. */
+        if (err.code === 'weak_password' || /password/i.test(err.message || '')) {
+          err.message = 'That password was refused: ' +
+            (err.message || 'it is not strong enough') +
+            '. Try a longer one, or add a number.';
+        } else if (err.code === 'signup_disabled' || /signups? not allowed|disabled/i.test(err.message || '')) {
+          err.message = 'New accounts are switched off on the council\u2019s database. ' +
+            'A national executive has to turn sign-ups back on in Supabase ' +
+            '(Authentication \u2192 Sign In / Providers \u2192 Allow new users to sign up).';
+          err.signupsOff = true;
+        } else if (err.code === 'email_address_invalid' || /email/i.test(err.message || '')) {
+          err.message = 'That email address was refused: ' + (err.message || 'it is not accepted') + '.';
         }
         throw err;
       }).then(function (res) {
@@ -261,8 +287,14 @@
         return supabaseDriver.whoami();
       }).then(function (profile) {
         if (!profile) {
-          throw new Error('This address has not been enrolled yet, so there is nothing to open. ' +
-            'Ask a national executive to enrol you first.');
+          /* They have just set a password and it worked. What is missing is the
+             enrolment, and saying "there is nothing to open" made that sound
+             like the password had failed too — so the next thing they did was
+             ask for a new one, which was never the problem. */
+          throw new Error('Your password is set and it works. What is missing is the ' +
+            'enrolment: a national executive has to add this address to the council first. ' +
+            'Ask them, then come back and sign in with the password you just chose \u2014 ' +
+            'you will not need a new one.');
         }
         return profile;
       });

@@ -1106,23 +1106,48 @@
      own. It is the unit that owns the activity, plus anybody taken on for this
      activity in particular — which is how somebody from a college comes to be
      working on a national event without leaving their college. */
+  /* Who this person may hand work to, on this activity.
+
+     It used to be "everybody in the unit that owns the activity", which is right
+     for the unit's own people and backwards for everybody else. A college helping
+     with a National activity was offered the National government's entire roster
+     — the Republic's executives, in a college officer's assignee picker — while
+     their own team, the people actually doing the work, were the ones missing.
+
+     A college's phone can still be holding those names from before the database
+     was tightened; sync adds and updates and never takes away, so a roster
+     downloaded once stays downloaded. Scoping here rather than trusting what
+     happens to be on the device is what makes the picker right on a phone that
+     has been signed in since before any of that. */
   function assignable(eventId) {
     var e = event(eventId);
-    var unitId = e ? e.unitId : nationalUnitId();
+    var evUnit = e ? e.unitId : nationalUnitId();
+    var myUnit = (global.Auth && Auth.signedIn() && Auth.myUnitId()) || '';
+    var national = !!(global.Auth && Auth.isNational && Auth.isNational());
+
     var seen = {};
     var out = [];
-
-    people({ activeOnly: true, unitId: unitId }).forEach(function (p) {
+    var add = function (p) {
+      if (seen[p.id]) return;
       seen[p.id] = true;
       out.push(p);
-    });
+    };
 
+    /* Your own people, always. This is the list a college officer wants and the
+       one they were not being given. */
+    if (myUnit) people({ activeOnly: true, unitId: myUnit }).forEach(add);
+
+    /* The activity's own unit as well — but only for somebody who belongs to it,
+       or for the National government, which oversees every unit. Otherwise a
+       college is being offered another unit's roster. */
+    if (national || !myUnit || evUnit === myUnit) {
+      people({ activeOnly: true, unitId: evUnit }).forEach(add);
+    }
+
+    // And anybody taken on for this activity in particular, wherever they are from.
     if (eventId) {
       people({ activeOnly: true }).forEach(function (p) {
-        if (seen[p.id]) return;
-        if ((p.eventIds || []).indexOf(eventId) < 0) return;
-        seen[p.id] = true;
-        out.push(p);
+        if ((p.eventIds || []).indexOf(eventId) >= 0) add(p);
       });
     }
     return out.sort(function (a, b) { return a.name.localeCompare(b.name); });

@@ -829,6 +829,69 @@ console.log('\n--- a roster arrives in one write ---');
   check('a blank line is dropped, not fatal', mixed === 1, mixed);
 }
 
+/* ---------------- who a college may hand work to ----------------
+   A college helping with a National activity was offered the National
+   government's entire roster — the Republic's executives sitting in a college
+   officer's assignee picker — while their own team, the people actually doing
+   the work, were the ones missing. The picker scoped itself to the unit that
+   OWNS the activity, which is right for that unit's own people and backwards
+   for everybody else.
+
+   It matters more than it looks. A college's phone can still be holding those
+   names from before the database was tightened: syncing adds and updates and
+   never takes away, so a roster downloaded once stays downloaded. Scoping here
+   is what makes the picker right on a phone that has been signed in since
+   before any of that. */
+console.log('\n--- a college is offered its own people ---');
+{
+  vm.runInContext("Store.load(); Store._seedRehearsal();", sb);
+
+  const cn = vm.runInContext(
+    "Store.units().filter(function (u) { return u.code === 'CN'; })[0].id", sb);
+  const nat = vm.runInContext('Store.nationalUnitId()', sb);
+
+  vm.runInContext(
+    "Store.addPerson({ name: 'CN Own Officer', unitId: '" + cn + "', position: 'Senator' });" +
+    "Store.addPerson({ name: 'National Executive', unitId: '" + nat + "', position: 'President' });", sb);
+
+  const natEvent = vm.runInContext(
+    "Store.addEvent({ title: 'National General Assembly', unitId: '" + nat + "' }).id", sb);
+
+  // Signed in as an officer of the college, not of the Republic.
+  sb.window.Auth = {
+    signedIn: function () { return true; },
+    myUnitId: function () { return cn; },
+    isNational: function () { return false; }
+  };
+
+  let names = vm.runInContext(
+    "Store.assignable('" + natEvent + "').map(function (p) { return p.name; })", sb);
+  check('their own people are offered', names.indexOf('CN Own Officer') >= 0, names.join(', '));
+  check('the National government is not', names.indexOf('National Executive') < 0,
+    'a college officer was offered: ' + names.join(', '));
+
+  // Somebody taken on for that activity in particular is still offered, wherever
+  // they are from — that is what being enrolled into an activity means.
+  vm.runInContext(
+    "Store.addPerson({ name: 'Lent To Nationals', unitId: '" + nat + "'," +
+    " eventIds: ['" + natEvent + "'] });", sb);
+  names = vm.runInContext(
+    "Store.assignable('" + natEvent + "').map(function (p) { return p.name; })", sb);
+  check('and anybody taken on for that activity still is',
+    names.indexOf('Lent To Nationals') >= 0, names.join(', '));
+
+  // The National government itself still sees everybody for its own activities.
+  sb.window.Auth.isNational = function () { return true; };
+  sb.window.Auth.myUnitId = function () { return nat; };
+  names = vm.runInContext(
+    "Store.assignable('" + natEvent + "').map(function (p) { return p.name; })", sb);
+  check('the National government still sees its own roster',
+    names.indexOf('National Executive') >= 0, names.join(', '));
+
+  delete sb.window.Auth;
+  vm.runInContext("Store.load(); Store._seedRehearsal();", sb);
+}
+
 console.log('\n========================================');
 console.log(results.length - failed.length + ' passed, ' + failed.length + ' failed');
 if (failed.length) {

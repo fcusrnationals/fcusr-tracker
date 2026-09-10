@@ -1364,6 +1364,62 @@ function makeDevice(server, name) {
     check('with the report itself gone', !B3.S.report(ev6.id));
   }
 
+  /* ---------------- a tombstone the server will not take ----------------
+     What a college actually saw: a red bar reading
+
+       new row violates row-level security policy (USING expression)
+       for table "deletions"
+
+     Records were taught to survive a refusal. Deletions were not — they went
+     straight to the server outside that path, so one tombstone the server would
+     not take broke the whole round and every round after it.
+
+     Two ordinary ways to earn it. A volunteer is not an officer, so the policy
+     refuses every tombstone they hold. And an officer offering back a tombstone
+     the National government wrote is refused on the UPDATE's USING clause,
+     because the row already there belongs to another unit — which is the exact
+     wording above, and a full round offers back everything the phone holds. */
+  console.log('\n--- a refused tombstone does not stop the round ---');
+  {
+    const sT = makeServer();
+    const G3 = makeDevice(sT, 'CN officer');
+    const unit = G3.S.nationalUnitId();
+
+    const keep = G3.S.addEvent({ title: 'CN Nurses Week', unitId: unit });
+    const doomed = G3.S.addEvent({ title: 'Something deleted', unitId: unit });
+    await G3.Sync.now();
+    G3.S.deleteEvent(doomed.id);
+
+    // The server refuses tombstones from this device, the way it refuses a
+    // volunteer's and a college's over a national row.
+    sT.refuseWrite = function (table) { return table === 'deletions'; };
+
+    const st = await G3.Sync.now();
+    check('the round does not fault', !st.error, st.error);
+    check('and it is not the red bar a college was looking at',
+      !/row-level security/i.test(st.error || ''), st.error);
+    check('the refusal is counted', st.last && st.last.refused > 0,
+      st.last && st.last.refused);
+
+    // Their own work still gets through, which is the whole point.
+    const later = G3.S.addEvent({ title: 'Filed after the refusal', unitId: unit });
+    const st2 = await G3.Sync.now();
+    check('the round after it is clean too', !st2.error, st2.error);
+    check('and work made afterwards still reaches the server',
+      !!sT.tables.events[later.id],
+      Object.keys(sT.tables.events).length + ' events on the server');
+    check('the activity they kept is there as well', !!sT.tables.events[keep.id]);
+
+    /* And it is not asking about the same tombstone one row at a time for ever.
+       Finding out which row a refusal was about costs a request per row. */
+    const before = sT.requests.length;
+    await G3.Sync.now({ full: true });
+    const singles = sT.requests.slice(before)
+      .filter((r) => r.op === 'upsert' && r.table === 'deletions').length;
+    check('and it stops offering the refused tombstone', singles === 0,
+      singles + ' further offers of a tombstone already refused');
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));
