@@ -220,6 +220,49 @@ window.fetch = function (url, opts) {
       message: 'Could not find the function public.' + rpc + ' in the schema cache' });
   }
 
+  /* create_member: the account is made when somebody is added, with a password
+     the executive hands over. An address that already has a login is treated as
+     a password reissue — which is exactly what the people left waiting need. */
+  if (u.indexOf('/rest/v1/rpc/create_member') === 0) {
+    const actor = SB.profiles[who];
+    if (!actor || actor.access !== 'officer') return reply(403, { message: 'You may not add members.' });
+    const email = String(body.p_email || '').toLowerCase().trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return reply(400, { message: 'That does not look like an email address.' });
+    }
+    if (!body.p_password || String(body.p_password).length < 8) {
+      return reply(400, { message: 'A password must be at least eight characters.' });
+    }
+    const had = !!SB.users[email];
+    const id = had ? SB.users[email].id : 'user-' + (++SB.n);
+    SB.users[email] = { id: id, email: email, password: body.p_password };
+    SB.profiles[id] = {
+      id: id, email: email, full_name: body.p_full_name || email.split('@')[0],
+      position: body.p_position || '', unit_id: body.p_unit_id,
+      access: body.p_access || 'officer', is_head: !!body.p_is_head, active: true,
+      units: units.find((x) => x.id === body.p_unit_id)
+    };
+    // Nobody is ever "waiting" again: the account exists the moment they do.
+    SB.enrolments[email] = {
+      email: email, full_name: body.p_full_name || '', position: body.p_position || '',
+      unit_id: body.p_unit_id, access: body.p_access || 'officer',
+      event_ids: body.p_event_ids || [], claimed_at: new Date().toISOString()
+    };
+    return reply(200, email);
+  }
+
+  if (u.indexOf('/rest/v1/rpc/waiting_members') === 0) {
+    const actor = SB.profiles[who];
+    if (!actor) return reply(403, { message: 'no' });
+    return reply(200, Object.keys(SB.enrolments)
+      .filter((e) => !SB.users[e])
+      .map((e) => ({
+        email: e, full_name: SB.enrolments[e].full_name, position: SB.enrolments[e].position,
+        unit_id: SB.enrolments[e].unit_id, access: SB.enrolments[e].access,
+        event_ids: SB.enrolments[e].event_ids || [], is_head: false
+      })));
+  }
+
   if (u.indexOf('/rest/v1/rpc/set_member_password') === 0) {
     const actor = SB.profiles[who];
     const actorUnit = actor && units.find((x) => x.id === actor.unit_id);
@@ -918,6 +961,91 @@ const FILES = [
     await Auth.signOut();
   }
 
+  /* ---------------- the account exists before the person does ----------------
+     The gap this closes: an enrolment is the executive's decision, an account
+     was the person's to create later, and everything went wrong in between.
+     Withdrawn and unable to return, enrolled again and still refused, sitting
+     in "Waiting to sign in" with an account months old, a volunteer told to ask
+     for a password that had never been made. Create the account when the person
+     is added and there is no later for the two to disagree in. */
+  console.log('\n--- adding somebody makes their account ---');
+  {
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    const email = 'fresh@filamer.edu.ph';
+
+    await Backend.createMember({
+      email: email, password: 'given-to-them-1',
+      full_name: 'Fresh Officer', position: 'Senator',
+      unit_id: NAT, access: 'officer', eventIds: []
+    });
+    check('the login exists straight away', !!SB.users[email]);
+    check('so does the profile', Object.keys(SB.profiles).some((k) => SB.profiles[k].email === email));
+    check('and nobody is left waiting for it',
+      !!SB.enrolments[email] && !!SB.enrolments[email].claimed_at);
+
+    await Auth.signOut();
+    const who2 = await Auth.signIn(email, 'given-to-them-1');
+    check('they sign in with the password they were handed', !!who2);
+    check('with no first-time screen in the way', Auth.signedIn());
+    check('as the officer they were added as', !Auth.isVolunteer());
+    await Auth.signOut();
+
+    // Too short is refused, rather than creating an account nobody can use.
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    let refused = null;
+    try {
+      await Backend.createMember({ email: 'x@filamer.edu.ph', password: 'short',
+        full_name: 'X', position: '', unit_id: NAT, access: 'officer', eventIds: [] });
+    } catch (e) { refused = e.message; }
+    check('a password too short is refused', !!refused && !SB.users['x@filamer.edu.ph'], refused);
+  }
+
+  /* ---------------- and the people already left waiting ----------------
+     Enrolled under the old way, sitting behind a first-visit screen that never
+     worked for them. Volunteers included — they come in through a different
+     door and do not all show on the roster, so the server is asked rather than
+     the screen read. */
+  console.log('\n--- everybody still waiting is let in ---');
+  {
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+
+    SB.enrolments['waiting.officer@filamer.edu.ph'] = {
+      email: 'waiting.officer@filamer.edu.ph', full_name: 'Waiting Officer',
+      position: 'Senator', unit_id: NAT, access: 'officer', event_ids: []
+    };
+    SB.enrolments['hidden.volunteer@filamer.edu.ph'] = {
+      email: 'hidden.volunteer@filamer.edu.ph', full_name: 'Hidden Volunteer',
+      position: 'Helper', unit_id: CN, access: 'volunteer', event_ids: []
+    };
+
+    const waiting = await Backend.waiting();
+    const emails = waiting.map((w) => w.email);
+    check('the officer waiting is found',
+      emails.indexOf('waiting.officer@filamer.edu.ph') >= 0);
+    check('and the volunteer, who is not on the roster',
+      emails.indexOf('hidden.volunteer@filamer.edu.ph') >= 0,
+      'volunteers are missed by the sweep');
+    check('and nobody who already has a login is in the list',
+      emails.indexOf('president@filamer.edu.ph') < 0);
+
+    for (const w of waiting) {
+      await Backend.createMember({
+        email: w.email, password: 'issued-' + w.email.split('@')[0],
+        full_name: w.full_name, position: w.position, unit_id: w.unit_id,
+        access: w.access, eventIds: w.event_ids, isHead: w.is_head
+      });
+    }
+    check('every one of them now has a login',
+      waiting.every((w) => !!SB.users[w.email]));
+    check('and none is still waiting', (await Backend.waiting()).length === 0);
+
+    await Auth.signOut();
+    check('the volunteer can sign in with what they were given',
+      !!(await Auth.signIn('hidden.volunteer@filamer.edu.ph', 'issued-hidden.volunteer')));
+    check('and is still a volunteer, not quietly promoted', Auth.isVolunteer());
+    await Auth.signOut();
+  }
+
   /* ---------------- leaving a shared computer ----------------
      A council runs on the library PC and the org room laptop. Signing out has
      to take the council's work with it, or the next person to sign in opens the
@@ -1016,9 +1144,19 @@ const FILES = [
     check('a malformed address is caught here', SB.requests.length === before);
     check('and it says so', /does not look right/i.test(txt()), txt().slice(0, 80));
 
-    /* ---- an address that has never had a password ----
-       The door must not report this as a bad password: it must stop the person
-       and make them set one, with no way past the dialog. */
+    /* ---- a password the door will not take ----
+
+       This used to be a whole flow. A refused pair could mean "wrong password"
+       or "this address has never had one", and the app guessed the second: it
+       opened a dialog that signed the person up with whatever they had typed.
+       When that sign-up failed for a reason nobody could read, a first-year
+       volunteer opening the site for the first time was told their address
+       already had a password and sent to ask an executive for one that had
+       never existed.
+
+       Accounts are made when an executive adds somebody now, so there is no
+       first visit to guess about. A refused password is a refused password, and
+       the answer is the short honest one. */
     SB.enrolments['newbie@filamer.edu.ph'] = {
       full_name: 'Newbie Officer', position: 'Secretary',
       unit_id: CN, access: 'officer', event_ids: []
@@ -1026,68 +1164,31 @@ const FILES = [
     D.querySelector('#gate-email').value = 'newbie@filamer.edu.ph';
     D.querySelector('#gate-pass').value = 'whatever-they-typed';
     D.querySelector('.gate-go').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 80));
 
-    const ftDialog = () => {
-      const f = D.querySelector('#ft-a');
-      return f ? f.closest('.modal-backdrop') : null;
-    };
-    const dlg = ftDialog();
-    check('a first sign-in is stopped and asked for a password', !!dlg);
-    check('and it is not signed in yet', !Auth.signedIn());
-    check('it offers no corner to escape through', !dlg.querySelector('.modal-head [data-close]'));
-    check('the dialog cannot be clicked away', (() => {
-      dlg.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true }));
-      return !!ftDialog();
-    })());
-    check('nor pressed away', (() => {
-      D.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      return !!ftDialog();
-    })());
+    check('nothing tries to sign them up behind their back',
+      !SB.users['newbie@filamer.edu.ph'],
+      'an account was created from a guess at the door');
+    check('and they are not signed in', !Auth.signedIn());
+    check('the door says the password was not accepted',
+      /not accepted/i.test(txt()), txt().slice(0, 110));
+    check('and says who can fix it',
+      /national executive/i.test(txt()), txt().slice(0, 140));
+    check('and stays the door rather than opening a dialog',
+      !!D.querySelector('.gate-card') && !D.querySelector('.modal-backdrop'));
 
-    // Too short, and the two must agree.
-    D.querySelector('#ft-a').value = 'short';
-    D.querySelector('#ft-b').value = 'short';
-    dlg.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    check('a short password is refused', !SB.users['newbie@filamer.edu.ph']);
-    D.querySelector('#ft-a').value = 'a-real-password';
-    D.querySelector('#ft-b').value = 'a-real-passwrod';
-    dlg.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    check('and so is a mistyped repeat', !SB.users['newbie@filamer.edu.ph']);
-
-    D.querySelector('#ft-b').value = 'a-real-password';
-    dlg.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 60));
-    check('setting one claims the enrolment', !!SB.users['newbie@filamer.edu.ph']);
-    check('and lets them straight in', Auth.signedIn() && Auth.current().name === 'Newbie Officer');
-    check('the dialog is gone', !ftDialog());
-    check('and so is the door', !D.querySelector('.gate-card'));
-
-    // A wrong password on an address that DOES have one is still a wrong password.
-    await Auth.signOut();
-    window.App.render();
-    D.querySelector('#gate-email').value = 'newbie@filamer.edu.ph';
-    D.querySelector('#gate-pass').value = 'not-it';
-    D.querySelector('.gate-go').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 60));
-    const dlg2 = ftDialog();
-    D.querySelector('#ft-a').value = 'another-password';
-    D.querySelector('#ft-b').value = 'another-password';
-    dlg2.querySelector('[data-go]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 60));
-    check('a claimed address cannot be re-claimed',
-      SB.users['newbie@filamer.edu.ph'].password === 'a-real-password');
-    /* This used to end here, with a sentence saying the address already had a
-       password and nothing to do about it. The person standing at that message
-       is nearly always somebody who has forgotten theirs, so they are handed
-       the way out instead of the fact. */
-    check('the dead end is gone', !ftDialog());
+    /* Somebody who has forgotten theirs is told the same thing, in more detail,
+       from a button that is still worth having. */
+    D.querySelector('[data-forgot]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 40));
     const fp = [...D.querySelectorAll('.modal-backdrop')]
       .find((m) => /forgotten password/i.test(m.textContent));
-    check('and it says what to do instead', !!fp);
+    check('the forgotten-password button explains the way back', !!fp);
     check('which is to ask an executive, naming where they do it',
       fp && /national executive/i.test(fp.textContent) && /Set password/i.test(fp.textContent),
       fp && fp.textContent.replace(/\s+/g, ' ').slice(0, 110));
+    check('and it does not offer to email anything',
+      fp && !/email .*link|send .*link/i.test(fp.textContent));
 
     fp.querySelector('[data-close]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await new Promise((r) => setTimeout(r, 30));

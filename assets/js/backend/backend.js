@@ -131,9 +131,9 @@
      the site has been updated and the database has not. PostgREST answers a
      function it does not know with 404, and until this said so plainly, that
      404 was either swallowed or reported as a number. */
-  function notSetUp() {
+  function notSetUp(file) {
     var e = new Error('This needs one more setup step on the database. ' +
-      'Open backend/supabase/remove.sql in the project and run it in ' +
+      'Open backend/supabase/' + (file || 'remove.sql') + ' in the project and run it in ' +
       'Supabase \u2192 SQL Editor, then try again.');
     e.setupMissing = true;
     return e;
@@ -230,6 +230,36 @@
        need email for this anyway: the person is standing in the office asking.
 
        The server decides whether the asker may. */
+    /* Creating somebody's login outright, with a password the executive hands
+       them. Also the way a person left waiting is finally let in: the function
+       treats an address that already has a login as a password reissue, which is
+       exactly the right answer for somebody enrolled months ago who was never
+       told one. */
+    createMember: function (m) {
+      return sbFetch('/rest/v1/rpc/create_member', {
+        method: 'POST',
+        body: {
+          p_email: m.email, p_password: m.password,
+          p_full_name: m.full_name || '', p_position: m.position || '',
+          p_unit_id: m.unit_id, p_access: m.access || 'officer',
+          p_event_ids: m.eventIds || [], p_is_head: !!m.isHead
+        }
+      }).catch(function (err) {
+        if (err && err.status === 404) throw notSetUp('accounts.sql');
+        throw err;
+      });
+    },
+
+    /* Everybody enrolled who has no login — volunteers included, who come in
+       through a different door and do not always show on the roster. */
+    waiting: function () {
+      return sbFetch('/rest/v1/rpc/waiting_members', { method: 'POST', body: {} })
+        .catch(function (err) {
+          if (err && err.status === 404) throw notSetUp('accounts.sql');
+          throw err;
+        });
+    },
+
     setPassword: function (email, password) {
       return sbFetch('/rest/v1/rpc/set_member_password', {
         method: 'POST',
@@ -584,6 +614,15 @@
     },
     whoami: function () { return driver().whoami(); },
     units: function () { return driver().units(); },
+    createMember: function (m) {
+      var d = driver();
+      return d.createMember ? d.createMember(m)
+        : Promise.reject(new Error('Creating accounts needs the online version.'));
+    },
+    waiting: function () {
+      var d = driver();
+      return d.waiting ? d.waiting() : Promise.resolve([]);
+    },
     setPassword: function (email, pw) {
       var d = driver();
       return d.setPassword ? d.setPassword(email, pw)

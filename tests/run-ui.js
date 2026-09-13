@@ -804,6 +804,30 @@ console.log('\n--- the person form asks what somebody is ---');
     /Auth\.refresh\(\)/.test(sync));
 }
 
+/* ---------------- the account is made, not waited for ---------------- */
+console.log('\n--- adding somebody hands over a password ---');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'assets/js/forms.js'), 'utf8');
+  check('the person form creates the account', /Backend\.createMember\(/.test(src));
+  check('with a password generated for them', /var pw = suggestPassword\(\)/.test(src));
+  check('and shows it once, to hand over', /invitedDialog\(data\.name, addr, pw\)/.test(src));
+  check('there is a way to give everybody still waiting one',
+    /data-give-all/.test(src) && /Backend\.waiting\(\)/.test(src));
+  check('asked of the server, not read off the screen',
+    /Backend\.waiting\(\)/.test(src),
+    'volunteers do not all show on the roster, so the screen is the wrong source');
+  check('and one refusal does not lose the rest',
+    /failed\.push/.test(src) && /done\.push/.test(src));
+
+  const door = fs.readFileSync(path.join(ROOT, 'assets/js/views/signin.js'), 'utf8');
+  check('the door no longer signs anybody up on a guess',
+    !/function firstTime\(/.test(door));
+  check('a refused password says so, and who can fix it',
+    /not accepted/.test(door) && /national executive/.test(door));
+  check('the forgotten-password answer offers no email',
+    !/sendReset|recover/.test(door));
+}
+
 console.log('\n--- backend wiring ---');
 const Backend = window.Backend;
 check('Supabase is the selected driver', Backend.config.driver === 'supabase');

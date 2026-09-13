@@ -1409,17 +1409,41 @@
      enrolment form and the person form, so the instruction cannot be right in
      one and stale in the other — which is exactly what happened when the door
      stopped having a "Set my password" button and only one of them was updated. */
-  function invitedDialog(name, addr) {
+  /* What to send somebody, now that their account exists before they do
+     anything. There is no first-time screen to explain, because there is no
+     first time: the account is made when they are added and the password is the
+     one handed over. */
+  function invitedDialog(name, addr, password) {
+    var line = 'FCUSR Task Tracker\n' +
+      'https://fcusrnationals.github.io/fcusr-tracker/\n' +
+      'Email: ' + addr + '\n' +
+      'Password: ' + password + '\n' +
+      'Change it once you are in: Settings \u2192 Change my password.';
+
     UI.modal({
-      title: name + ' can now sign in',
-      body: '<p class="small">Send them the link to the tracker and this line:</p>' +
+      title: name + ' can sign in now',
+      body:
+        '<p class="small">Their account is made. Send them this \u2014 it is the whole of ' +
+        'what they need.</p>' +
         '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-        '<p class="small" style="margin:0">Open the site, type <strong>' + U.esc(addr) +
-        '</strong> and a password you will remember, then press <strong>Sign in</strong>. ' +
-        'It will ask you to set that password the first time.</p></div>' +
-        '<p class="small muted">Nobody else ever sees that password, and the address only ' +
-        'works because you have just enrolled it.</p>',
-      footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
+        '<div class="small" style="line-height:1.9">' +
+        '<div>Email: <strong>' + U.esc(addr) + '</strong></div>' +
+        '<div>Password: <strong style="font-size:16px;letter-spacing:.3px">' +
+        U.esc(password) + '</strong></div>' +
+        '</div></div>' +
+        '<button type="button" class="btn btn-block" style="margin-top:12px" data-copy-line>' +
+        'Copy the message to send them</button>' +
+        '<p class="small muted" style="margin-top:12px">This is the only time the password is ' +
+        'shown. If it is lost, set a new one from this list \u2014 nobody has to be added ' +
+        'again.</p>',
+      footer: '<button type="button" class="btn btn-primary" data-close>Done</button>',
+      onMount: function (root) {
+        var b = root.querySelector('[data-copy-line]');
+        if (b) b.addEventListener('click', function () {
+          UI.copyText(line).then(function () { UI.toast('Copied \u2014 send it to ' + name + '.'); })
+            .catch(function (e) { UI.toast(e.message, 'error'); });
+        });
+      }
     });
   }
 
@@ -1935,6 +1959,49 @@
             });
           });
 
+          /* Everybody still waiting, given an account and a password in one go.
+
+             These are people enrolled under the old way, where the account was
+             the person's to create on their first visit — and who therefore sat
+             waiting for a screen that never worked for them. Volunteers included,
+             who come in through a different door and do not all show on this
+             list, which is why the server is asked rather than the screen read. */
+          var giveAll = host.querySelector('[data-give-all]');
+          if (giveAll) giveAll.addEventListener('click', function () {
+            giveAll.disabled = true;
+            giveAll.textContent = 'Finding them\u2026';
+
+            Backend.waiting().then(function (rows) {
+              rows = rows || [];
+              if (!rows.length) {
+                giveAll.disabled = false;
+                giveAll.textContent = 'Give them all a password';
+                return UI.toast('Nobody is waiting \u2014 everyone enrolled has an account.');
+              }
+              return UI.confirm({
+                title: 'Give ' + U.plural(rows.length, 'person', 'people') + ' a password?',
+                message: 'Each one gets an account and a password you can hand over. ' +
+                  'Nobody has to set anything up on their first visit.',
+                detail: 'The passwords are shown once, on the next screen. Copy them before ' +
+                  'closing it \u2014 though a lost one can always be set again from this list.',
+                confirmLabel: 'Give them all a password',
+                tone: 'primary'
+              }).then(function (ok) {
+                if (!ok) {
+                  giveAll.disabled = false;
+                  giveAll.textContent = 'Give them all a password';
+                  return;
+                }
+                return issueAll(rows, giveAll);
+              });
+            }).catch(function (err) {
+              giveAll.disabled = false;
+              giveAll.textContent = 'Give them all a password';
+              if (err && err.setupMissing) return setupNeeded(err.message);
+              UI.toast(err.message || 'They could not be found.', 'error');
+            });
+          });
+
           U.els('[data-remove]', host).forEach(function (b) {
             b.addEventListener('click', function () {
               var email = b.getAttribute('data-remove');
@@ -2065,8 +2132,11 @@
         '<span class="chip st-overdue"><span class="dot"></span>' + waiting.length + '</span></h2></div>' +
         '<p class="small muted" style="margin:0 2px 10px">Enrolled, but they have not opened the site ' +
         'and set a password yet. Until they do there is no account &mdash; only your enrolment.</p>' +
-        '<button type="button" class="btn btn-sm" style="margin-bottom:10px" data-copy-group>' +
-        'Copy the message for the group chat</button>' +
+        '<div class="row" style="margin-bottom:10px">' +
+        '<button type="button" class="btn btn-sm btn-primary" data-give-all>' +
+        'Give them all a password</button>' +
+        '<button type="button" class="btn btn-sm" data-copy-group>' +
+        'Copy the message for the group chat</button></div>' +
         '<div class="list">' + waiting.map(function (e) { return row(e, mine); }).join('') +
         '</div></div>';
     }
@@ -2086,7 +2156,95 @@
   /* The site is ahead of its database. Not a mistake anybody made at this
      screen, and not something a toast should carry away after four seconds —
      nothing on this page will work until somebody runs the file. */
-  function setupNeeded() {
+  /* One at a time, so one refusal does not lose the rest — and so the list at the
+     end can say honestly which of them worked. */
+  function issueAll(rows, btn) {
+    var done = [];
+    var failed = [];
+    var chain = Promise.resolve();
+
+    rows.forEach(function (r, i) {
+      chain = chain.then(function () {
+        if (btn) btn.textContent = 'Giving ' + (i + 1) + ' of ' + rows.length + '\u2026';
+        var pw = suggestPassword();
+        return Backend.createMember({
+          email: r.email, password: pw,
+          full_name: r.full_name || '', position: r.position || '',
+          unit_id: r.unit_id, access: r.access || 'volunteer',
+          eventIds: r.event_ids || [], isHead: !!r.is_head
+        }).then(function () {
+          done.push({ name: r.full_name || r.email, email: r.email,
+                      password: pw, access: r.access || 'volunteer' });
+        }).catch(function (e) {
+          failed.push({ name: r.full_name || r.email, email: r.email,
+                        why: (e && e.message) || 'refused' });
+        });
+      });
+    });
+
+    return chain.then(function () {
+      if (btn) { btn.disabled = false; btn.textContent = 'Give them all a password'; }
+      passwordSheet(done, failed);
+    });
+  }
+
+  /* Shown once. Everything needed to hand each person their way in, in one
+     block somebody can copy into a group chat or read down a phone. */
+  function passwordSheet(done, failed) {
+    var lines = ['FCUSR Task Tracker — https://fcusrnationals.github.io/fcusr-tracker/', ''];
+    done.forEach(function (d) {
+      lines.push(d.name + '  —  ' + d.email + '  —  ' + d.password);
+    });
+    lines.push('', 'Change your password once you are in: Settings \u2192 Change my password.');
+
+    UI.modal({
+      title: U.plural(done.length, 'person', 'people') + ' can sign in now',
+      wide: true,
+      body:
+        (done.length
+          ? '<p class="small">Copy this before closing. It is the only time these are shown ' +
+            '\u2014 though any of them can be set again from this list afterwards.</p>' +
+            '<div class="list">' + done.map(function (d) {
+              return '<div class="task"><span class="task-main" style="cursor:default">' +
+                '<span class="task-title">' + U.esc(d.name) +
+                (d.access === 'volunteer'
+                  ? ' <span class="chip chip-plain">volunteer</span>' : '') + '</span>' +
+                '<span class="task-meta">' + U.esc(d.email) + '</span></span>' +
+                '<span class="task-right"><code style="font-size:14px">' +
+                U.esc(d.password) + '</code></span></div>';
+            }).join('') + '</div>' +
+            '<button type="button" class="btn btn-block btn-primary" style="margin-top:12px" ' +
+            'data-copy-sheet>Copy them all</button>'
+          : '<p class="small">Nobody was given a password.</p>') +
+
+        (failed.length
+          ? '<div class="gate-note" style="margin-top:14px">' + UI.icon('alert') +
+            '<span><strong>' + U.plural(failed.length, 'person', 'people') +
+            ' could not be given one.</strong><br>' +
+            failed.map(function (f) {
+              return U.esc(f.name) + ' \u2014 ' + U.esc(f.why);
+            }).join('<br>') + '</span></div>'
+          : ''),
+      footer: '<button type="button" class="btn btn-primary" data-close>Done</button>',
+      onMount: function (root) {
+        var b = root.querySelector('[data-copy-sheet]');
+        if (b) b.addEventListener('click', function () {
+          UI.copyText(lines.join('\n'))
+            .then(function () { UI.toast('Copied.'); })
+            .catch(function (e) { UI.toast(e.message, 'error'); });
+        });
+      }
+    });
+  }
+
+  /* Which file, taken from the message the backend put the name into, so this
+     does not have to be kept in step with it by hand. */
+  function fileOf(why) {
+    var m = /backend\/supabase\/([\w.-]+)/.exec(String(why || ''));
+    return m ? m[1] : 'remove.sql';
+  }
+
+  function setupNeeded(why) {
     UI.modal({
       title: 'One setup step is missing',
       body:
@@ -2096,7 +2254,7 @@
         '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-top:14px">' +
         '<div class="strong" style="margin-bottom:4px">What to do</div>' +
         '<ol class="small" style="padding-left:18px;line-height:1.8;margin:0">' +
-        '<li>Open <strong>backend/supabase/remove.sql</strong> in the project.</li>' +
+        '<li>Open <strong>backend/supabase/' + U.esc(fileOf(why)) + '</strong> in the project.</li>' +
         '<li>Copy all of it.</li>' +
         '<li>Supabase &rarr; <strong>SQL Editor</strong> &rarr; New query &rarr; paste &rarr; ' +
         '<strong>Run</strong>.</li>' +
@@ -2305,17 +2463,25 @@
             return UI.toast(isNew ? 'Person added.' : 'Person saved.');
           }
 
-          Backend.enrol({
-            email: addr, full_name: data.name, position: data.position,
+          /* The account is made here, with a password to hand over, rather than
+             left for the person to create on their first visit. That gap is
+             where every enrolment fault this council hit actually lived: an
+             enrolment and an account that could disagree, and a person stuck
+             between them with nobody able to see why. */
+          var pw = suggestPassword();
+          Backend.createMember({
+            email: addr, password: pw,
+            full_name: data.name, position: data.position,
             unit_id: data.unitId || Store.nationalUnitId(),
-            // What the form was told, not what this form used to assume.
             access: data.access,
-            eventIds: data.access === 'volunteer' ? (d.eventIds || []) : []
+            eventIds: data.access === 'volunteer' ? (d.eventIds || []) : [],
+            isHead: !!d.isHead
           }).then(function () {
             close();
-            invitedDialog(data.name, addr);
+            invitedDialog(data.name, addr, pw);
           }).catch(function (err) {
             close();
+            if (err && err.setupMissing) return setupNeeded(err.message);
             UI.toast(err.message || 'Saved here, but the account could not be created.', 'error');
           });
           return;

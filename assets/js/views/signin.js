@@ -67,8 +67,8 @@
         'style="margin-top:8px">Forgot your password?</button>') +
 
       '<p class="gate-foot">' +
-        'First time here? Use the address a national executive enrolled you with. ' +
-        'You will be asked to choose your password once you do.' +
+        'Your email and the password a national executive gave you. ' +
+        'You can change it once you are in.' +
       '</p>' +
 
       '</div>';
@@ -99,87 +99,20 @@
       '</div></div>';
   }
 
-  /* Shown when an address is used for the first time: the password the door was
-     given was not accepted, and no account has ever existed on that address, so
-     the only thing left to do is set one. It cannot be dismissed by clicking
-     away or pressing Escape — there is nothing behind it to go back to, and a
-     half-claimed enrolment is worse than none. */
-  function firstTime(email, typed, onDone) {
-    var working = false;
+  /* firstTime() was here, and it is gone.
 
-    UI.modal({
-      title: 'Set your password',
-      dismissible: false,
-      body:
-        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-        '<div class="strong" style="margin-bottom:3px">This is the first time ' +
-        U.esc(email) + ' has signed in.</div>' +
-        '<div class="small">Choose the password you will use from now on. ' +
-        'You cannot go any further until you do.</div></div>' +
+     It existed because a person created their own account on their first visit:
+     the door would try to sign them up with whatever they had typed. They do
+     not create their own accounts any more — an executive adds them, the account
+     is made then, and they are handed the password. There is no first visit left
+     to catch.
 
-        '<div class="field" style="margin-top:16px"><label for="ft-a">New password</label>' +
-        '<input type="password" id="ft-a" autocomplete="new-password" data-autofocus value="' +
-        U.esc(typed || '') + '">' +
-        '<div class="hint">At least eight characters. Nobody else — here or in the council — ' +
-        'ever sees it, and no executive can look it up.</div></div>' +
-
-        '<div class="field"><label for="ft-b">Type it again</label>' +
-        '<input type="password" id="ft-b" autocomplete="new-password"></div>' +
-
-        '<div class="error-text" data-err hidden></div>' +
-
-        '<p class="small muted">Signed in before? This address would already have a password, ' +
-        'so close this and check what you typed.</p>',
-      footer: '<button type="button" class="btn" data-close>Close</button>' +
-        '<button type="button" class="btn btn-primary" data-go>Set it and sign in</button>',
-      onMount: function (root, close) {
-        var a = root.querySelector('#ft-a');
-        var b = root.querySelector('#ft-b');
-        var err = root.querySelector('[data-err]');
-        var go = root.querySelector('[data-go]');
-
-        function fail(msg) {
-          working = false;
-          go.disabled = false;
-          go.textContent = 'Set it and sign in';
-          err.hidden = false;
-          err.textContent = msg;
-        }
-
-        function submit() {
-          if (working) return;
-          var pw = a.value || '';
-          if (pw.length < 8) return fail('Too short — use at least eight characters.');
-          if (pw !== (b.value || '')) return fail('The two do not match.');
-
-          working = true;
-          err.hidden = true;
-          go.disabled = true;
-          go.textContent = 'One moment…';
-
-          Auth.signUp(email, pw).then(function () {
-            close();
-            onDone();
-          }).catch(function (e) {
-            /* The dead end this used to be. The address has an account, so
-               there is nothing to set — and the person standing here is almost
-               always somebody who has forgotten theirs. Hand them the way out
-               rather than the fact. */
-            if (e && e.alreadyClaimed) {
-              close();
-              return forgot(email);
-            }
-            fail((e && e.message) || 'That could not be set.');
-          });
-        }
-
-        go.addEventListener('click', submit);
-        [a, b].forEach(function (el) {
-          el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submit(); });
-        });
-      }
-    });
-  }
+     It is worth saying what that guess cost, because it is why this is gone
+     rather than merely unused. A refused password could mean "wrong" or "no
+     account yet", and the app assumed the second. When the sign-up underneath
+     then failed for a reason nobody could read, a first-year volunteer opening
+     the site for the first time was told their address already had a password
+     and sent to ask an executive for one that had never existed. */
 
   /* There is no self-service reset and deliberately no emailed link: sending
      mail needs a sender configured in Supabase, and until one is, that button
@@ -234,14 +167,23 @@
 
       Auth.signIn(addr, pw).then(arrived).catch(function (err) {
         busy = false;
-        /* The pair was refused. Either the password is wrong or this address has
-           never had one — and the second is the common case on a system nobody
-           has used yet, so it is handled rather than reported. */
+        /* A refused pair is now simply a refused pair.
+
+           It used to mean "or this address has never had a password", because
+           people made their own accounts on their first visit — and that guess
+           was the start of the worst road in this app: a sign-up that failed for
+           a reason nobody could read, then an offer to email a link that could
+           not be sent, and a first-year volunteer told to ask an executive for a
+           password that had never existed.
+
+           Accounts are made when somebody is added now. There is no first visit
+           to handle, so the honest answer is the short one. */
         if (err && err.badCredentials && !Auth.isOffline()) {
-          if (opts.redraw) opts.redraw(); else App.render();
-          return firstTime(addr, pw, arrived);
+          problem = 'That password was not accepted. Ask a national executive to ' +
+            'set one for you \u2014 they can do it in a moment.';
+        } else {
+          problem = err.message || 'That did not work.';
         }
-        problem = err.message || 'That did not work.';
         if (opts.redraw) opts.redraw(); else App.render();
       });
     }
