@@ -222,7 +222,11 @@ grant execute on function create_member(text, text, text, text, uuid, text, uuid
 -- this to offer them all a password in one go.
 
 create or replace function waiting_members()
-returns table (email text, full_name text, position text, unit_id uuid, access text,
+/* "position" in quotes: it is a reserved word in Postgres — position(x in y) is
+   a built-in — and a bare one in a returns-table declaration is a syntax error.
+   It is fine as an ordinary column name everywhere else, which is why this was
+   the only place it bit. */
+returns table (email text, full_name text, "position" text, unit_id uuid, access text,
                event_ids uuid[], is_head boolean)
 language sql security definer set search_path = public, auth as $$
   select e.email, e.full_name, e.position, e.unit_id, e.access,
