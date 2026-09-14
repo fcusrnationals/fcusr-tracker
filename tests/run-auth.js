@@ -108,6 +108,16 @@ window.fetch = function (url, opts) {
 
   if (!(opts.headers || {}).apikey) return reply(401, { message: 'No API key.' });
 
+  /* A delete names its rows in the address. Real servers and proxies refuse an
+     address past a few thousand characters — this used to accept any length,
+     so a delete that could never reach the database looked fine here. */
+  if (opts.method === 'DELETE' && u.indexOf('/rest/v1/') === 0) {
+    if (url.length > 8000) return reply(414, { message: 'URI Too Long' });
+    const m = /id=in\.\(([^)]*)\)/.exec(decodeURIComponent(u));
+    SB.deleted = (SB.deleted || 0) + (m ? m[1].split(',').filter(Boolean).length : 0);
+    return reply(204);
+  }
+
   /* ---- auth ---- */
   if (u.indexOf('/auth/v1/signup') === 0) {
     /* What Supabase actually answers: 422, and the sentence under `msg` rather
@@ -671,7 +681,7 @@ const FILES = [
     await Auth.signOut();
 
     await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
-    await Backend.remove(email);
+    await Backend.removeMember(email);
 
     /* Remove means remove. Half-removing somebody — switching them off and
        leaving the login, the profile and the enrolment standing — is what made
@@ -790,7 +800,7 @@ const FILES = [
     SB.missing = ['remove_member', 'set_member_password'];
 
     let removeErr = null;
-    try { await Backend.remove(email); } catch (e) { removeErr = e; }
+    try { await Backend.removeMember(email); } catch (e) { removeErr = e; }
     check('removing says the setup step is missing', !!(removeErr && removeErr.setupMissing),
       removeErr && removeErr.message);
     check('and it names the file to run',
@@ -811,7 +821,7 @@ const FILES = [
     await Auth.setMemberPassword(email, 'a-new-password');
     check('once the file is run, setting a password works',
       SB.users[email].password === 'a-new-password');
-    await Backend.remove(email);
+    await Backend.removeMember(email);
     check('and removing really removes', !SB.profiles['u-stranded'] && !SB.users[email]);
   }
 
@@ -1092,6 +1102,24 @@ const FILES = [
       !!(await Auth.signIn('hidden.volunteer@filamer.edu.ph', 'issued-hidden.volunteer')));
     check('and is still a volunteer, not quietly promoted', Auth.isVolunteer());
     await Auth.signOut();
+  }
+
+  /* ---------------- a delete too big for one address ----------------
+     Every id rides in the address of the request. Three hundred of them is well
+     past what a server will accept, so deleting an activity with a long task
+     list — or a sync catching up on a month of deletions — failed outright. */
+  console.log('\n--- a delete of hundreds is sent in pieces ---');
+  {
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    const ids = [];
+    for (let i = 0; i < 300; i++) {
+      ids.push('aaaaaaaa-bbbb-4ccc-8ddd-' + String(i).padStart(12, '0'));
+    }
+    SB.deleted = 0;
+    let err = null;
+    try { await Backend.remove('tasks', ids); } catch (e) { err = e; }
+    check('three hundred rows can be deleted in one go', !err, err && err.message);
+    check('and every one of them was asked for', SB.deleted === 300, SB.deleted + ' of 300');
   }
 
   /* ---------------- leaving a shared computer ----------------

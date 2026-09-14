@@ -738,7 +738,9 @@
      record follows. */
   function applyRemoteTerm(t) {
     var clean = cleanTerm(t);
-    if (!clean.declaredAt) return false;
+    // A withdrawal carries a stamp and no date; a server that has never had a
+    // term carries neither, and is the only thing to ignore.
+    if (!clean.declaredAt && !clean.updatedAt) return false;
     state.term = clean;
     commit();
     return true;
@@ -2779,8 +2781,19 @@
     return state.term;
   }
 
+  /* Withdrawing a closing date has to travel like declaring one does.
+
+     It used to empty the term and stamp nothing, and both halves of syncing
+     ignore a term with no declared date — the push would not send it, and the
+     pull would not believe it. So a withdrawal stayed on the phone that made it,
+     and the next pull brought the old date straight back: the countdown
+     reappeared within twenty seconds of being taken down, on every device
+     including the one that took it down. A withdrawn term is now a term with a
+     stamp and no date, and syncs as the newer of the two. */
   function withdrawTerm() {
+    var prev = state.term.updatedAt;
     state.term = blankTerm();
+    state.term.updatedAt = bumpStamp(prev);
     commit();
   }
 

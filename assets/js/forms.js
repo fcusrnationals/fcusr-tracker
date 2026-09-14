@@ -2032,7 +2032,7 @@
               }).then(function (ok) {
                 if (!ok) return;
                 b.disabled = true;
-                Backend.remove(email).then(function () {
+                Backend.removeMember(email).then(function () {
                   UI.toast(name + ' removed. Add them again any time.');
                   load();
                 }).catch(function (err) {

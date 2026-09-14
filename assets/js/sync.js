@@ -376,9 +376,18 @@
             };
           });
         if (!rows.length) return null;
-        return offer('deletions', rows, function (r) {
-          return 'deletions:' + r.entity + ':' + r.entity_id;
-        });
+        // In batches, like records: one request per fifty tombstones.
+        var c = Promise.resolve();
+        for (var i = 0; i < rows.length; i += 50) {
+          (function (slice) {
+            c = c.then(function () {
+              return offer('deletions', slice, function (r) {
+                return 'deletions:' + r.entity + ':' + r.entity_id;
+              });
+            });
+          })(rows.slice(i, i + 50));
+        }
+        return c;
       }).then(function () {
         var byTable = {};
         out.deletions.forEach(function (d) {
@@ -445,7 +454,7 @@
   function pullTerm() {
     return Backend.changed('term', null, 1).then(function (rows) {
       var row = (rows || [])[0];
-      if (!row || !row.body || !row.body.declaredAt) return false;
+      if (!row || !row.body || (!row.body.declaredAt && !row.body.updatedAt)) return false;
       // Somebody's rehearsal, from a version that used to push it.
       if (row.body.declaredBy === 'Dry run') return false;
       var mine = Store.term();
@@ -460,7 +469,8 @@
 
   function pushTerm(since) {
     var t = Store.term();
-    if (!t.declaredAt) return Promise.resolve(0);
+    // Declared, or withdrawn — a withdrawal is stamped so it can travel.
+    if (!t.declaredAt && !t.updatedAt) return Promise.resolve(0);
     if (since && !newer(t.updatedAt || '', since)) return Promise.resolve(0);
     return Backend.upsert('term', [{ id: 1, body: t }]).then(function () { return 1; });
   }

@@ -864,6 +864,51 @@ console.log('\n--- the roster import gives the people it added a password ---');
     !/password you will remember|set that password the first time/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')));
 }
 
+/* ---------------- no object has the same key twice ----------------
+   In a JavaScript object the later of two identical keys silently replaces the
+   earlier. backend.js had `remove` twice — delete these rows, and remove this
+   member — and the member one, added later, won. Every deletion sync sent from
+   then on called remove_member with a table name, and deleted records never left
+   the server. Nothing warns about this, so the suite does. */
+console.log('\n--- no object defines the same key twice ---');
+{
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walk(path.join(d, e.name)) : /\.js$/.test(e.name) ? [path.join(d, e.name)] : []);
+  const dupes = [];
+  for (const f of walk(path.join(ROOT, 'assets/js'))) {
+    let s = fs.readFileSync(f, 'utf8');
+    s = s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+      .replace(/\/\/[^\n]*/g, (m) => ' '.repeat(m.length))
+      .replace(/'(?:[^'\\\n]|\\.)*'/g, (m) => "'" + ' '.repeat(Math.max(0, m.length - 2)) + "'")
+      .replace(/"(?:[^"\\\n]|\\.)*"/g, (m) => '"' + ' '.repeat(Math.max(0, m.length - 2)) + '"');
+    const st = []; let line = 1;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '\n') { line++; continue; }
+      if (c === '{') { st.push({}); continue; }
+      if (c === '}') { st.pop(); continue; }
+      if (/[A-Za-z_$]/.test(c) && (i === 0 || !/[\w$.]/.test(s[i - 1]))) {
+        const m = /^([A-Za-z_$][\w$]*)\s*:(?!:)/.exec(s.slice(i, i + 80));
+        if (m) {
+          let k = i - 1; while (k >= 0 && /\s/.test(s[k])) k--;
+          if (k >= 0 && (s[k] === '{' || s[k] === ',') && st.length && !/^(case|default)$/.test(m[1])) {
+            const top = st[st.length - 1];
+            if (top[m[1]]) dupes.push(path.relative(ROOT, f) + ' "' + m[1] + '" lines ' + top[m[1]] + ' and ' + line);
+            else top[m[1]] = line;
+          }
+          i += m[1].length - 1;
+        }
+      }
+    }
+  }
+  check('no object literal repeats a key', dupes.length === 0, dupes.join('; '));
+  check('removing a member and deleting rows are two different functions',
+    typeof window.Backend.removeMember === 'function' && typeof window.Backend.remove === 'function' &&
+    window.Backend.remove.length === 2 && window.Backend.removeMember.length === 1,
+    'remove(' + window.Backend.remove.length + ' args), removeMember(' +
+    (window.Backend.removeMember ? window.Backend.removeMember.length : 'missing') + ' args)');
+}
+
 console.log('\n--- backend wiring ---');
 const Backend = window.Backend;
 check('Supabase is the selected driver', Backend.config.driver === 'supabase');

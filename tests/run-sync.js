@@ -1812,6 +1812,39 @@ function makeDevice(server, name) {
       made.map((p) => p.name).join('|'));
   }
 
+  /* ---------------- withdrawing a closing date ----------------
+     Declaring a date travelled. Withdrawing one did not: it emptied the term and
+     stamped nothing, and both the push and the pull ignore a term with no date.
+     So the next pull brought the old date straight back, and the countdown was
+     up again within twenty seconds on every phone, including the one that took
+     it down. */
+  console.log('\n--- a withdrawn closing date stays withdrawn everywhere ---');
+  {
+    const sT = makeServer();
+    const Pw = makeDevice(sT, 'President');
+    const Gw = makeDevice(sT, 'Governor');
+    Pw.S.declareTerm('2026-10-06', { note: 'End of term', by: 'Arron' });
+    for (let i = 0; i < 2; i++) for (const d of [Pw, Gw]) await d.Sync.now();
+    check('both phones have the date', Gw.S.termStatus().endDate === '2026-10-06');
+
+    Pw.S.withdrawTerm();
+    await Pw.Sync.now();
+    check('withdrawing it holds on the phone that did it, after a sync',
+      !Pw.S.termStatus().declared, 'the old date came back: ' + Pw.S.termStatus().endDate);
+    await Gw.Sync.now();
+    check('and reaches the other phone', !Gw.S.termStatus().declared,
+      'still counting down to ' + Gw.S.termStatus().endDate);
+    await Pw.Sync.now({ full: true });
+    await Gw.Sync.now({ full: true });
+    check('and survives a full round on both', !Pw.S.termStatus().declared && !Gw.S.termStatus().declared);
+
+    // Declaring again afterwards still works.
+    Gw.S.declareTerm('2026-11-30', { note: 'Moved', by: 'Board' });
+    for (let i = 0; i < 2; i++) for (const d of [Gw, Pw]) await d.Sync.now();
+    check('and a new date declared afterwards travels', Pw.S.termStatus().endDate === '2026-11-30',
+      Pw.S.termStatus().endDate);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

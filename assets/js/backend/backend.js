@@ -50,7 +50,7 @@
     },
     pending: function () { return Promise.resolve([]); },
     withdraw: function () { return Promise.resolve(true); },
-    remove: function () { return Promise.resolve(true); },
+    removeMember: function () { return Promise.resolve(true); },
     setHead: function () { return Promise.resolve(true); },
     // Offline there is nowhere to sync to, and saying so plainly here means the
     // sync layer needs no special case for it.
@@ -407,12 +407,37 @@
       });
     },
 
+    /* Deleting rows, which is what syncing a deletion means. Removing a MEMBER is
+       removeMember below, and the two must never share a name.
+
+       They did. Member removal was added as a second `remove` in this same
+       object, and in a JavaScript object the later of two identical keys simply
+       replaces the earlier — silently, with no warning anywhere. So from that
+       day every deletion sync sent called remove_member with a table name for an
+       email address. For a national officer it quietly matched nobody; for a
+       Governor it was refused and the refusal swallowed. Deleted activities,
+       tasks and letters were never removed from the server at all: every device
+       hid them behind a tombstone, and they sat in the database regardless.
+
+       In batches. Every id goes into the address of the request, and a few
+       hundred of them is longer than an address is allowed to be — so deleting
+       an activity with a long task list, or a sync catching up on a month of
+       deletions, failed outright and left the rows on the server. */
     remove: function (table, ids) {
       if (!ids || !ids.length) return Promise.resolve(null);
-      return sbFetch('/rest/v1/' + table + '?id=in.(' + ids.map(encodeURIComponent).join(',') + ')', {
-        method: 'DELETE',
-        headers: { 'Prefer': 'return=minimal' }
-      });
+      var chain = Promise.resolve();
+      for (var i = 0; i < ids.length; i += 50) {
+        (function (slice) {
+          chain = chain.then(function () {
+            return sbFetch('/rest/v1/' + table + '?id=in.(' +
+              slice.map(encodeURIComponent).join(',') + ')', {
+              method: 'DELETE',
+              headers: { 'Prefer': 'return=minimal' }
+            });
+          });
+        })(ids.slice(i, i + 50));
+      }
+      return chain.then(function () { return null; });
     },
 
     /* The server's own clock.
@@ -491,7 +516,7 @@
 
        A missing function is now said out loud. Doing the old, broken thing
        quietly is worse than failing. */
-    remove: function (email) {
+    removeMember: function (email) {
       return sbFetch('/rest/v1/rpc/remove_member', {
         method: 'POST', body: { p_email: email }
       }).catch(function (err) {
@@ -559,7 +584,7 @@
     whoami: function () { return gsCall('whoami').then(function (r) { return r.profile; }); },
     pending: function () { return Promise.resolve([]); },
     withdraw: function (email) { return gsCall('withdraw', { email: email }); },
-    remove: function (email) { return gsCall('withdraw', { email: email }); },
+    removeMember: function (email) { return gsCall('withdraw', { email: email }); },
     units: function () { return gsCall('units').then(function (r) { return r.units; }); },
     roster: function () { return gsCall('roster').then(function (r) { return r.roster; }); },
     enrol: function (m) { return gsCall('enrol', m).then(function (r) { return r.id; }); },
@@ -628,9 +653,9 @@
       return d.setPassword ? d.setPassword(email, pw)
         : Promise.reject(new Error('Setting a password needs the online version.'));
     },
-    remove: function (email) {
+    removeMember: function (email) {
       var d = driver();
-      return d.remove ? d.remove(email) : d.withdraw(email);
+      return d.removeMember ? d.removeMember(email) : d.withdraw(email);
     },
     changed: function (t, since, limit, column) {
       var d = driver();
