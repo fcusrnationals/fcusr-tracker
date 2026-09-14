@@ -837,6 +837,19 @@ console.log('\n--- adding somebody hands over a password ---');
     !/sendReset|recover/.test(door));
 }
 
+/* ---------------- My tasks is the signed-in person's ---------------- */
+console.log('\n--- My tasks knows who is signed in ---');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'assets/js/views/mytasks.js'), 'utf8');
+  check('signed in, it is the person whose account it is',
+    /if \(signedIn\(\)\) \{[\s\S]*?Store\.personByEmail\(me\.email\)/.test(src),
+    'My tasks still asks a signed-in officer to pick their own name');
+  check('and there is no switching to somebody else\u2019s list',
+    /\(signedIn\(\) \? '' :\s*'<button type="button" class="btn btn-sm" data-switch>/.test(src));
+  check('a directive is headed Directives, not Event',
+    /eid === DIRECTIVES \? 'Directives'/.test(src) && !/e \? e\.title : 'Event'/.test(src));
+}
+
 console.log('\n--- backend wiring ---');
 const Backend = window.Backend;
 check('Supabase is the selected driver', Backend.config.driver === 'supabase');

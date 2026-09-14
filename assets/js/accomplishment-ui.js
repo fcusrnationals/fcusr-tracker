@@ -818,8 +818,6 @@
     var drive = host.querySelector('#drive');
     if (drive) drive.addEventListener('input', function () { state.draft.driveLink = drive.value.trim(); });
 
-    var prev = host.querySelector('[data-preview]');
-    if (prev) prev.addEventListener('click', function () { preview(); });
 
     var openUp = host.querySelector('[data-open-upload]');
     if (openUp) openUp.addEventListener('click', uploadWindow);
@@ -855,26 +853,6 @@
     });
   }
 
-  /* The preview is the real PDF, shown in a frame — not a mock-up of one. */
-  function preview() {
-    persist();
-    UI.toast('Building the preview…');
-    AccomplishmentPDF.previewURL(state.eventId, state.draft).then(function (out) {
-      UI.modal({
-        title: 'Preview · ' + out.pages + (out.pages === 1 ? ' page' : ' pages'),
-        wide: true,
-        body: '<iframe src="' + out.url + '" title="Report preview" ' +
-          'style="width:100%;height:70vh;border:1px solid var(--line);border-radius:10px"></iframe>',
-        footer: '<button type="button" class="btn btn-primary" data-close>Close</button>'
-      });
-    }).catch(function (err) {
-      UI.toast(err.message || 'The preview could not be built.', 'error');
-    });
-  }
-
-  /* Shown after the file is downloaded. The app keeps only a link, so the file
-     has to live somewhere that will outlast this year's officers — that is worth
-     spelling out rather than assuming. */
   function uploadWindow() {
     var d = state.draft;
     UI.modal({

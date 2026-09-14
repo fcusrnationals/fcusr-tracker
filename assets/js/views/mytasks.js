@@ -1,6 +1,8 @@
-/* My tasks — one officer's work.
-   Pick a name once; the device remembers it. A single segmented filter replaced
-   the four dropdowns that used to sit here. Sorting is always soonest first. */
+/* My tasks — the signed-in person's work.
+   With no server behind the tracker there is no login, and a name is picked once
+   and remembered; signed in, it is simply whoever is signed in. A single
+   segmented filter replaced the four dropdowns that used to sit here. Sorting is
+   always soonest first. */
 (function (global) {
   'use strict';
 
@@ -13,12 +15,50 @@
     done:    { label: 'Done',    test: function (t) { return t.status === 'Done'; }, empty: 'Nothing finished yet.' }
   };
 
+  /* Whether anybody is signed in to a real account, as opposed to the tracker
+     running on one device with no server behind it. */
+  function signedIn() {
+    return !!(global.Auth && Auth.signedIn() && !Auth.isOffline());
+  }
+
+  /* Whose tasks these are.
+
+     This screen was written before there were logins: "pick a name once; the
+     device remembers it". It never asked who was signed in. So every officer
+     opened their own task list to a dropdown asking them to find themselves; a
+     volunteer was handed their college's whole roster to choose from, and could
+     read anybody's work by choosing someone else; and on a shared computer the
+     remembered name outlived signing out, so the next officer to sign in opened
+     My tasks onto the previous one's tasks, under the previous one's name.
+
+     Signed in, the answer is the person signed in — matched to the directory by
+     the address their account was made with. The picker stays only for the
+     tracker running with no server, where there is nobody to be. */
   function currentPersonId() {
+    if (signedIn()) {
+      var me = Auth.current();
+      var p = me && me.email ? Store.personByEmail(me.email) : null;
+      return p ? p.id : '';
+    }
     var id = Store.lastPerson();
     return id && Store.person(id) ? id : '';
   }
 
   function render() {
+    var pid = currentPersonId();
+
+    if (signedIn() && !pid) {
+      /* Not "select your name". Somebody signed in is somebody; if this device
+         has no directory entry for them yet, that is either the first sync still
+         arriving or an entry nobody has made — and neither is fixed by choosing
+         a stranger from a list. */
+      return heading() + UI.empty('Your tasks will show here',
+        'Nothing is assigned to you on this device yet. If you have just signed in, give it ' +
+        'a few seconds to catch up. If it stays empty, ask whoever gives you work to check ' +
+        'you are in the directory under ' + U.esc(Auth.current().email) + '.',
+        '');
+    }
+
     var people = Store.people();
     if (!people.length) {
       return heading() + UI.empty('No one in the directory yet',
@@ -26,7 +66,6 @@
         '<a class="btn btn-primary" href="#/settings">Open settings</a>');
     }
 
-    var pid = currentPersonId();
     if (!pid) {
       return heading() +
         '<div class="person-bar" style="display:block">' +
@@ -49,7 +88,8 @@
       '<span class="sep"> · </span>' + s.pending + ' pending' +
       (s.overdue ? ' · <span style="color:var(--st-overdue-fg);font-weight:700">' + s.overdue + ' overdue</span>' : '') +
       '</div></div>' +
-      '<button type="button" class="btn btn-sm" data-switch>' + UI.icon('users') + 'Switch</button>' +
+      (signedIn() ? '' :
+        '<button type="button" class="btn btn-sm" data-switch>' + UI.icon('users') + 'Switch</button>') +
       '</div>';
 
     html += '<div class="segmented" role="group" aria-label="Filter tasks" style="margin-bottom:14px">' +
@@ -61,18 +101,27 @@
       }).join('') + '</div>';
 
     if (!all.length) {
-      return html + UI.empty('Nothing assigned yet',
-        person.name.split(' ')[0] + ' has no tasks. Open an event to assign one.',
-        '<a class="btn btn-primary" href="#/events">Go to events</a>');
+      return html + (signedIn()
+        ? UI.empty('Nothing assigned to you yet', 'When somebody gives you a task it appears here.', '')
+        : UI.empty('Nothing assigned yet',
+            person.name.split(' ')[0] + ' has no tasks. Open an event to assign one.',
+            '<a class="btn btn-primary" href="#/events">Go to events</a>'));
     }
     if (!list.length) return html + UI.empty('Nothing here', f.empty);
 
     // Grouped by event, because that is how the work is actually organised.
+    /* A directive belongs to no activity, so it was grouped under the empty id and
+       headed "Event" — which is exactly the thing it is not. They collect under
+       "Directives" at the top, because they are council-wide and usually matter
+       first. */
+    var DIRECTIVES = '__directives__';
     var groups = {}, order = [];
     list.forEach(function (t) {
-      if (!groups[t.eventId]) { groups[t.eventId] = []; order.push(t.eventId); }
-      groups[t.eventId].push(t);
+      var key = t.eventId || DIRECTIVES;
+      if (!groups[key]) { groups[key] = []; order.push(key); }
+      groups[key].push(t);
     });
+    order.sort(function (a, b) { return (a === DIRECTIVES ? -1 : 0) - (b === DIRECTIVES ? -1 : 0); });
 
     html += order.map(function (eid) {
       var e = Store.event(eid);
@@ -82,7 +131,9 @@
       return '<div class="group" data-collapsed="' + isCollapsed + '" data-group="' + U.esc(eid) + '">' +
         '<button type="button" class="group-head" data-toggle="' + U.esc(eid) + '" aria-expanded="' + !isCollapsed + '">' +
           UI.icon('chevronDown', 'caret') +
-          '<span class="group-title">' + U.esc(e ? e.title : 'Event') + '</span>' +
+          '<span class="group-title">' +
+            U.esc(eid === DIRECTIVES ? 'Directives' : (e ? e.title : 'An activity no longer here')) +
+          '</span>' +
           '<span class="group-meta">' + rows.length + (g.overdue ? ' · <span class="late">' + g.overdue + ' overdue</span>' : '') + '</span>' +
         '</button>' +
         '<div class="group-body"><div class="list">' +

@@ -892,6 +892,21 @@ console.log('\n--- a college is offered its own people ---');
   vm.runInContext("Store.load(); Store._seedRehearsal();", sb);
 }
 
+/* ---------------- signing out forgets whose task list was open ----------------
+   My tasks remembered a name outside the main record, and only a closing term
+   cleared it. On a shared computer the next officer to sign in opened somebody
+   else's task list under somebody else's name. */
+console.log('\n--- signing out forgets whose tasks were showing ---');
+{
+  vm.runInContext("Store.setLastPerson(Store.people()[0].id);", sb);
+  check('a name is remembered while somebody works',
+    !!vm.runInContext('Store.lastPerson()', sb));
+  vm.runInContext('Store.clearLocalCopy();', sb);
+  check('and forgotten when they sign out', vm.runInContext('Store.lastPerson()', sb) === '',
+    vm.runInContext('Store.lastPerson()', sb));
+  vm.runInContext('Store._seedRehearsal();', sb);
+}
+
 console.log('\n========================================');
 console.log(results.length - failed.length + ' passed, ' + failed.length + ' failed');
 if (failed.length) {

@@ -2921,6 +2921,10 @@
     state.units = keepUnits;
     state.offices = keepOffices;
     state.seeded = true;          // no rehearsal for whoever signs in next
+    /* And whose name My tasks was showing. It lived outside this record and was
+       only cleared when a term closed, so on a shared computer the next officer
+       to sign in opened somebody else's task list under somebody else's name. */
+    try { global.localStorage.removeItem(PERSON_KEY); } catch (e) { /* nothing to clear */ }
     commit();
 
     // Photographs are held outside this record and are the largest thing here.
