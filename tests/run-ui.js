@@ -850,6 +850,20 @@ console.log('\n--- My tasks knows who is signed in ---');
     /eid === DIRECTIVES \? 'Directives'/.test(src) && !/e \? e\.title : 'Event'/.test(src));
 }
 
+/* ---------------- a pasted roster makes accounts, for the right people ---------------- */
+console.log('\n--- the roster import gives the people it added a password ---');
+{
+  const src = fs.readFileSync(path.join(ROOT, 'assets/js/forms.js'), 'utf8');
+  const imp = src.slice(src.indexOf('var made = Store.addPeople('), src.indexOf('var made = Store.addPeople(') + 1800);
+  check('it creates accounts rather than bare enrolments', /issueAll\(withEmail/.test(imp) &&
+    !/Backend\.enrol\(/.test(imp), 'the import still makes no account');
+  check('only for the people it actually added, not every line pasted',
+    /var withEmail = made\.filter/.test(imp),
+    'people already in the directory would be re-enrolled as officers of this unit');
+  check('nothing anywhere still describes the first-time screen',
+    !/password you will remember|set that password the first time/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')));
+}
+
 console.log('\n--- backend wiring ---');
 const Backend = window.Backend;
 check('Supabase is the selected driver', Backend.config.driver === 'supabase');

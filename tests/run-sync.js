@@ -1749,6 +1749,69 @@ function makeDevice(server, name) {
       !why && S6.letter(l.id).stops[0].receivedBy === 'Mrs Ferrer', why);
   }
 
+  /* ---------------- the store holds its own rules ----------------
+     Every form checks its fields before saving. The store did not, so a pasted
+     roster, a restored backup and whatever is added next — none of which pass
+     through a form — could write things no form would allow. */
+  console.log('\n--- the store refuses what no form would allow ---');
+  {
+    const sI = makeServer();
+    const D7 = makeDevice(sI, 'Rules');
+    const S7 = D7.S;
+    const unit = S7.nationalUnitId();
+    const tries = (fn) => { try { return { r: fn() }; } catch (e) { return { err: e.message }; } };
+    const ev = S7.addEvent({ title: 'Rules', unitId: unit, dateStart: '2026-10-01' });
+
+    let x = tries(() => S7.addTask({ kind: 'event', eventId: ev.id, title: '   ' }));
+    check('a task with no title is refused', !!x.err, 'a blank task was made');
+    x = tries(() => S7.addTask({ kind: 'event', eventId: ev.id, title: 'bad date', dueDate: 'not-a-date' }));
+    check('a nonsense due date is not stored', !x.err && x.r.dueDate === '', x.r && x.r.dueDate);
+    x = tries(() => S7.addTask({ kind: 'event', eventId: ev.id, title: 'ghost',
+      assigneeId: '00000000-0000-4000-8000-000000000000' }));
+    check('a task is not given to somebody who is not there', !x.err && x.r.assigneeId === '');
+    const t = S7.addTask({ kind: 'event', eventId: ev.id, title: 'ok' });
+    x = tries(() => S7.updateTask(t.id, { title: '' }));
+    check('nor can an edit blank a title', !!x.err && S7.task(t.id).title === 'ok');
+
+    x = tries(() => S7.addEvent({ title: 'Backwards', unitId: unit, dateStart: '2026-10-10', dateEnd: '2026-10-01' }));
+    check('an activity cannot end before it starts', !!x.err, 'it was filed');
+    x = tries(() => S7.updateEvent(ev.id, { dateEnd: '2026-09-01' }));
+    check('nor be edited into ending before it starts', !!x.err && S7.event(ev.id).dateEnd === '');
+    check('an activity with no title is refused', !!tries(() => S7.addEvent({ title: ' ', unitId: unit })).err);
+
+    const e2 = S7.addEvent({ title: 'With a letter', unitId: unit, dateStart: '2026-10-01' });
+    const lt = S7.addLetter({ unitId: unit, eventId: e2.id, subject: 'for e2',
+      route: [{ officeId: S7.officeByCode('PRES').id }] });
+    S7.deleteEvent(e2.id);
+    check('deleting an activity keeps its letter', !!S7.letter(lt.id));
+    check('but no longer points it at the activity that is gone', S7.letter(lt.id).eventId === '',
+      S7.letter(lt.id).eventId);
+
+    /* One address, one person. My tasks finds the signed-in person by address,
+       and an account is made per address; a second entry sharing it had tasks
+       nobody would ever see. */
+    S7.addPerson({ name: 'First Reyes', unitId: unit, email: 'same@filamer.edu.ph' });
+    x = tries(() => S7.addPerson({ name: 'Second Reyes', unitId: unit, email: 'Same@Filamer.edu.ph' }));
+    check('two people cannot share an address', !!x.err, 'a second entry was made');
+    check('and the refusal names who holds it', /First Reyes/.test(x.err || ''), x.err);
+    const other = S7.addPerson({ name: 'Other', unitId: unit, email: 'other@filamer.edu.ph' });
+    x = tries(() => S7.updatePerson(other.id, { email: 'same@filamer.edu.ph' }));
+    check('nor can an edit take somebody else\u2019s', !!x.err &&
+      S7.person(other.id).email === 'other@filamer.edu.ph');
+    x = tries(() => S7.updatePerson(other.id, { email: 'other@filamer.edu.ph', position: 'Senator' }));
+    check('keeping your own address on an edit is fine', !x.err, x.err);
+
+    const made = S7.addPeople([
+      { name: 'New One', unitId: unit, email: 'new.one@filamer.edu.ph' },
+      { name: 'Already Here', unitId: unit, email: 'same@filamer.edu.ph' },
+      { name: 'New One Again', unitId: unit, email: 'new.one@filamer.edu.ph' },
+      { name: 'No Address', unitId: unit }
+    ]);
+    check('a pasted roster skips people already there, and repeats within it',
+      made.length === 2 && made.map((p) => p.name).join('|') === 'New One|No Address',
+      made.map((p) => p.name).join('|'));
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

@@ -540,12 +540,16 @@ const FILES = [
     check('and says they are waiting', /Waiting to sign in/i.test(txt()));
     check('the ones with accounts are listed apart', /Has an account/.test(txt()));
     check('somebody who claimed theirs is on the signed-in side', /Rhea/.test(txt()));
-    check('a waiting enrolment offers an invitation to send',
-      !!acc.querySelector('[data-copy-one="waiting.one@filamer.edu.ph"]'));
-    check('and the invitation carries the address, not a password', (() => {
-      const msg = window.Forms.personalMessage('Waiting One', 'waiting.one@filamer.edu.ph');
-      return /waiting\.one@filamer\.edu\.ph/.test(msg) && !/password[^.]*:/i.test(msg);
-    })());
+    /* There is no invitation without a password any more. "Copy invite" sent
+       instructions for a first-time screen that no longer exists; somebody who
+       followed them was told their password was not accepted. */
+    check('a waiting enrolment offers a password rather than an invitation',
+      !!acc.querySelector('[data-give-one="waiting.one@filamer.edu.ph"]') &&
+      !acc.querySelector('[data-copy-one]'),
+      'still offers the old invitation');
+    check('and nothing on the list describes the old first-time screen',
+      !/password you will remember|set that password the first time/i.test(acc.textContent));
+    check('and the group-chat invitation is gone too', !acc.querySelector('[data-copy-group]'));
     check('you cannot remove yourself',
       !acc.querySelector('[data-remove="president@filamer.edu.ph"]'));
 
@@ -599,8 +603,8 @@ const FILES = [
       !!acc2.querySelector('[data-setpw="angel@filamer.edu.ph"]'),
       [...acc2.querySelectorAll('[data-setpw]')]
         .map((b) => b.getAttribute('data-setpw')).join(', ') || 'none offered');
-    check('she is not filed away as somebody waiting for an invitation',
-      !acc2.querySelector('[data-copy-one="angel@filamer.edu.ph"]'));
+    check('she is not filed away as somebody waiting for a password',
+      !acc2.querySelector('[data-give-one="angel@filamer.edu.ph"]'));
     check('and the row says she cannot sign in, rather than saying nothing',
       /cannot sign in/i.test(txt2()), txt2().slice(0, 140));
 

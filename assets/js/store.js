@@ -662,6 +662,9 @@
         if (r.eventId === rid) { orphaned.push(r.id); return false; }
         return true;
       });
+      // Same as deleting here. Not bumped: every device arrives at the same
+      // answer from the same tombstone, and has nothing to tell anybody.
+      state.letters.forEach(function (l) { if (l.eventId === rid) l.eventId = ''; });
     }
     if (kind === 'report' && removed) orphaned.push(removed.id);
     if (orphaned.length && global.AssetDB) {
@@ -1179,11 +1182,32 @@
      full saves and 150 full redraws, each one a little slower than the last
      because the thing being written keeps growing. What that looks like is the
      app hanging on the one screen built for doing a lot at once. */
+  /* One address, one person.
+
+     My tasks finds the signed-in person by the address their account was made
+     with, and an account is made per address. Two directory entries sharing one
+     meant the second entry's tasks never appeared on that person's My tasks —
+     silently, and permanently. The directory accepted it from the form, from an
+     edit, and from a pasted roster containing somebody already there. */
+  function emailTaken(addr, exceptId) {
+    var want = email(addr);
+    if (!want) return null;
+    for (var i = 0; i < state.people.length; i++) {
+      var q = state.people[i];
+      if (q.id !== exceptId && q.email === want) return q;
+    }
+    return null;
+  }
+
   function addPeople(list) {
     var made = [];
+    var seen = {};
     (list || []).forEach(function (data) {
       var p = buildPerson(data);
       if (!p) return;
+      // Somebody already in the directory, or twice in the same paste.
+      if (p.email && (emailTaken(p.email) || seen[p.email])) return;
+      if (p.email) seen[p.email] = true;
       state.people.push(p);
       made.push(p);
     });
@@ -1211,6 +1235,11 @@
   function addPerson(data) {
     var p = buildPerson(data);
     if (!p) throw new Error('A person needs a name.');
+    var held = p.email ? emailTaken(p.email) : null;
+    if (held) {
+      throw new Error(p.email + ' is already in the directory as ' + held.name +
+        '. Edit that entry instead of adding a second one.');
+    }
     state.people.push(p);
     commit();
     return p;
@@ -1271,7 +1300,14 @@
     if ('position' in data) p.position = (data.position || '').trim();
     if ('committee' in data) p.committee = (data.committee || '').trim();
     if ('active' in data) p.active = !!data.active;
-    if ('email' in data) p.email = email(data.email);
+    if ('email' in data) {
+      var held = emailTaken(data.email, p.id);
+      if (held) {
+        throw new Error(email(data.email) + ' already belongs to ' + held.name +
+          ' in the directory.');
+      }
+      p.email = email(data.email);
+    }
     if ('unitId' in data && unit(data.unitId)) p.unitId = data.unitId;
     if ('access' in data) p.access = oneOf(data.access, ['officer', 'volunteer'], p.access);
     if ('eventIds' in data && Array.isArray(data.eventIds)) p.eventIds = data.eventIds.slice(0, 200);
@@ -1570,15 +1606,26 @@
     return null;
   }
 
+  /* The same reasoning as tasks. The event form already refuses a blank title
+     and an end before the start; the store did not, so anything arriving by
+     another route could file an activity that finishes before it begins. */
+  function checkEventDates(start, end) {
+    if (end && start && end < start) {
+      throw new Error('An activity cannot end before it starts.');
+    }
+  }
+
   function addEvent(data) {
+    if (!String(data.title || '').trim()) throw new Error('An activity needs a title.');
+    checkEventDates(dateOnly(data.dateStart), dateOnly(data.dateEnd));
     var e = {
       id: U.uid('evt'),
       // Unstated means the council's own: National work.
       unitId: unit(data.unitId) ? data.unitId : nationalUnitId(),
       title: (data.title || '').trim(),
       description: (data.description || '').trim(),
-      dateStart: data.dateStart || '',
-      dateEnd: data.dateEnd || '',
+      dateStart: dateOnly(data.dateStart),
+      dateEnd: dateOnly(data.dateEnd),
       venue: (data.venue || '').trim(),
       headId: data.headId || '',
       status: EVENT_STATUSES.indexOf(data.status) >= 0 ? data.status : 'Upcoming',
@@ -1595,12 +1642,18 @@
   function updateEvent(id, data) {
     var e = event(id);
     if (!e) return null;
+    if ('title' in data && !String(data.title || '').trim()) {
+      throw new Error('An activity needs a title.');
+    }
+    var start = 'dateStart' in data ? dateOnly(data.dateStart) : e.dateStart;
+    var end = 'dateEnd' in data ? dateOnly(data.dateEnd) : e.dateEnd;
+    checkEventDates(start, end);
     ['title', 'description', 'venue'].forEach(function (k) {
       if (k in data) e[k] = (data[k] || '').trim();
     });
-    ['dateStart', 'dateEnd', 'headId'].forEach(function (k) {
-      if (k in data) e[k] = data[k] || '';
-    });
+    e.dateStart = start;
+    e.dateEnd = end;
+    if ('headId' in data) e.headId = data.headId && person(data.headId) ? data.headId : '';
     if ('status' in data && EVENT_STATUSES.indexOf(data.status) >= 0) e.status = data.status;
     if ('unitId' in data && unit(data.unitId)) e.unitId = data.unitId;
     if ('feedbackLink' in data) e.feedbackLink = formLink(data.feedbackLink);
@@ -1672,6 +1725,14 @@
     state.reports = state.reports.filter(function (r) { return r.eventId !== id; });
 
     state.tasks = state.tasks.filter(function (t) { return t.eventId !== id; });
+
+    /* A letter is the council's correspondence, not the activity's, so it stays
+       — but it used to go on naming the activity that was deleted, and show a
+       blank where the title had been. It is simply unattached now. */
+    state.letters.forEach(function (l) {
+      if (l.eventId === id) { l.eventId = ''; l.updatedAt = bumpStamp(l.updatedAt); }
+    });
+
     tombstone('event', id);
     state.events = state.events.filter(function (e) { return e.id !== id; });
     commit();
@@ -1723,6 +1784,11 @@
     if (!isDirective && (!data.eventId || !event(data.eventId))) {
       throw new Error('A task must belong to an event.');
     }
+    /* The forms all check these first. The store checks them too, because a
+       roster import, a restored backup and whatever is added next do not go
+       through a form — and it was accepting a blank title, a due date of
+       "not-a-date", and a holder who does not exist. */
+    if (!String(data.title || '').trim()) throw new Error('A task needs a title.');
     var t = {
       id: U.uid('tsk'),
       kind: isDirective ? 'directive' : 'event',
@@ -1735,8 +1801,8 @@
         : '',
       title: (data.title || '').trim(),
       remarks: (data.remarks || '').trim(),
-      assigneeId: data.assigneeId || '',
-      dueDate: data.dueDate || '',
+      assigneeId: data.assigneeId && person(data.assigneeId) ? data.assigneeId : '',
+      dueDate: dateOnly(data.dueDate),
       priority: PRIORITIES.indexOf(data.priority) >= 0 ? data.priority : 'Medium',
       status: STATUSES.indexOf(data.status) >= 0 ? data.status : 'Not Started',
       blockedReason: (data.blockedReason || '').trim(),
@@ -1753,11 +1819,18 @@
   function updateTask(id, data) {
     var t = task(id);
     if (!t) return null;
+    if ('title' in data && !String(data.title || '').trim()) {
+      throw new Error('A task needs a title.');
+    }
     ['title', 'remarks', 'blockedReason'].forEach(function (k) {
       if (k in data) t[k] = (data[k] || '').trim();
     });
-    if ('assigneeId' in data) t.assigneeId = data.assigneeId || '';
-    if ('dueDate' in data) t.dueDate = data.dueDate || '';
+    // Nobody this device knows is the same as nobody: it reads as unassigned,
+    // in red, and can be given to somebody real.
+    if ('assigneeId' in data) {
+      t.assigneeId = data.assigneeId && person(data.assigneeId) ? data.assigneeId : '';
+    }
+    if ('dueDate' in data) t.dueDate = dateOnly(data.dueDate);
     if ('eventId' in data && event(data.eventId)) t.eventId = data.eventId;
     if ('priority' in data && PRIORITIES.indexOf(data.priority) >= 0) t.priority = data.priority;
     if ('status' in data && STATUSES.indexOf(data.status) >= 0) applyStatus(t, data.status);

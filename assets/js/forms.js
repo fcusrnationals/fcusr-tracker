@@ -1732,42 +1732,48 @@
              the whole store and redrew the whole app once per name, which is a
              fair trade for one person typed into a form and a hang for a college
              pasting its roster in. */
-          var added = Store.addPeople(good.map(function (r) {
+          /* Only the people this import actually added get an account.
+
+             It used to enrol every line of the paste, including people the
+             directory already held and so skipped — which quietly re-enrolled
+             an existing volunteer as an officer of this unit while their entry
+             still said volunteer. And it used the old enrolment, which made no
+             account at all, then told the executive to send people instructions
+             for a first-time screen that no longer exists. */
+          var made = Store.addPeople(good.map(function (r) {
             return {
               name: r.name, position: r.position, committee: r.committee,
               email: r.email, unitId: unitId, access: 'officer'
             };
-          })).length;
+          }));
+          var added = made.length;
+          var skipped = good.length - added;
+          var withEmail = made.filter(function (p) { return !!p.email; });
 
-          var invited = 0, failed = 0;
-          var chain = Promise.resolve();
-
-          good.forEach(function (r) {
-            chain = chain.then(function () {
-              if (!r.email || (global.Auth && Auth.isOffline())) return;
-              return Backend.enrol({
-                email: r.email, full_name: r.name, position: r.position,
-                unit_id: unitId, access: 'officer', eventIds: []
-              }).then(function () { invited++; })
-                .catch(function () { failed++; });
+          if (withEmail.length && !(global.Auth && Auth.isOffline())) {
+            close();
+            return issueAll(withEmail.map(function (p) {
+              return { email: p.email, full_name: p.name, position: p.position,
+                       unit_id: unitId, access: 'officer', event_ids: [], is_head: false };
+            }), null).then(function () {
+              if (skipped) {
+                UI.toast(U.plural(skipped, 'line') + ' skipped \u2014 already in the directory.');
+              }
             });
-          });
+          }
 
+          var chain = Promise.resolve();
+          var invited = 0, failed = 0;
           chain.then(function () {
             close();
             UI.modal({
               title: U.plural(added, 'person', 'people') + ' added to ' + u.name,
               body: '<p class="small">' +
-                (invited
-                  ? U.plural(invited, 'of them') + ' gave an email address, so ' +
-                    (invited === 1 ? 'that person' : 'they') + ' can sign in. Send them the link ' +
-                    'and this line:</p>' +
-                    '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-                    '<p class="small" style="margin:0">Open the site, type your Filamer email and a ' +
-                    'password you will remember, then press <strong>Sign in</strong>. It will ask ' +
-                    'you to set that password the first time.</p></div>'
-                  : 'None of them gave an email address, so they cannot sign in \u2014 they are ' +
-                    'people work can be assigned to. Add an address later and they can.</p>') +
+                'None of them gave an email address, so they cannot sign in \u2014 they are ' +
+                'people work can be assigned to. Give one an address later and they get a ' +
+                'password then.</p>' +
+                (skipped ? '<p class="small muted">' + U.plural(skipped, 'line') +
+                  ' skipped \u2014 already in the directory.</p>' : '') +
                 (failed ? '<p class="small error-text">' + U.plural(failed, 'account') +
                   ' could not be created on the server. They are in the list here; try enrolling ' +
                   'them again in a moment.</p>' : ''),
@@ -1796,22 +1802,13 @@
     return l ? (l.origin + l.pathname) : '';
   }
 
-  function groupMessage() {
-    return 'FCUSR Task Tracker — your account is ready.\n\n' +
-      'Open: ' + inviteLink() + '\n' +
-      'Type your Filamer email and a password you will remember, then press Sign in.\n\n' +
-      'The first time, it will ask you to set that password. Choose it yourself — ' +
-      'nobody in the council can see it, so do not send it to anyone.';
-  }
-
-  function personalMessage(name, email) {
-    return 'Hi ' + (name || 'there') + ' — your FCUSR Task Tracker account is ready.\n\n' +
-      'Open: ' + inviteLink() + '\n' +
-      'Email: ' + email + '\n' +
-      'Then type a password you will remember and press Sign in.\n\n' +
-      'It will ask you to set that password the first time. Choose it yourself — ' +
-      'nobody in the council can see it.';
-  }
+  /* groupMessage() and personalMessage() were here: the text copied from
+     "Copy the message for the group chat" and "Copy invite". Both told somebody
+     to open the site, type a password they would remember, and be asked to set
+     it the first time — a screen that no longer exists, because accounts are
+     made when a person is added. Anybody who followed them would have been told
+     their password was not accepted. There is no invitation without a password
+     now, so those buttons give one. */
 
   function rosterList() {
     var offline = !global.Auth || Auth.isOffline();
@@ -1871,18 +1868,30 @@
         }
 
         function wire() {
-          var g = host.querySelector('[data-copy-group]');
-          if (g) g.addEventListener('click', function () {
-            UI.copyText(groupMessage())
-              .then(function () { UI.toast('Message copied — paste it into the group chat.'); })
-              .catch(function (e) { UI.toast(e.message, 'error'); });
-          });
-
-          U.els('[data-copy-one]', host).forEach(function (b) {
+          /* One person at a time, from their row. What the server knows about them
+             — their unit, their activities — is asked for rather than guessed from
+             the row, which only carries a name and an address. */
+          U.els('[data-give-one]', host).forEach(function (b) {
             b.addEventListener('click', function () {
-              UI.copyText(personalMessage(b.getAttribute('data-name'), b.getAttribute('data-copy-one')))
-                .then(function () { UI.toast('Copied — send it to ' + b.getAttribute('data-name') + '.'); })
-                .catch(function (e) { UI.toast(e.message, 'error'); });
+              var addr = String(b.getAttribute('data-give-one') || '').toLowerCase();
+              b.disabled = true;
+              b.textContent = 'One moment\u2026';
+              Backend.waiting().then(function (rows) {
+                var mine = (rows || []).filter(function (r) {
+                  return String(r.email || '').toLowerCase() === addr;
+                });
+                if (!mine.length) {
+                  b.disabled = false;
+                  b.textContent = 'Give a password';
+                  return UI.toast('They already have an account \u2014 use Set password instead.');
+                }
+                return issueAll(mine, null).then(function () { load(); });
+              }).catch(function (err) {
+                b.disabled = false;
+                b.textContent = 'Give a password';
+                if (err && err.setupMissing) return setupNeeded(err.message);
+                UI.toast(err.message || 'That could not be done.', 'error');
+              });
             });
           });
 
@@ -2134,9 +2143,7 @@
         'and set a password yet. Until they do there is no account &mdash; only your enrolment.</p>' +
         '<div class="row" style="margin-bottom:10px">' +
         '<button type="button" class="btn btn-sm btn-primary" data-give-all>' +
-        'Give them all a password</button>' +
-        '<button type="button" class="btn btn-sm" data-copy-group>' +
-        'Copy the message for the group chat</button></div>' +
+        'Give them all a password</button></div>' +
         '<div class="list">' + waiting.map(function (e) { return row(e, mine); }).join('') +
         '</div></div>';
     }
@@ -2300,8 +2307,8 @@
       (isMe ? '' :
         '<span class="task-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
         (waiting
-          ? '<button type="button" class="btn btn-sm" data-copy-one="' + U.esc(email) +
-            '" data-name="' + U.esc(name) + '">Copy invite</button>'
+          ? '<button type="button" class="btn btn-sm btn-primary" data-give-one="' + U.esc(email) +
+            '" data-name="' + U.esc(name) + '">Give a password</button>'
           : '') +
         /* Offered on the one thing that decides it: whether an account exists.
            It used to hang off "is this person in the waiting list", which put it
@@ -2449,10 +2456,17 @@
           var accSel = root.querySelector('#f-access');
           data.access = accSel && accSel.value === 'volunteer' ? 'volunteer' : 'officer';
 
-          if (isNew) Store.addPerson(data);
-          else {
-            data.active = root.querySelector('#f-active').checked;
-            Store.updatePerson(personId, data);
+          /* The directory refuses a second entry for an address it already
+             holds, and says whose it is — shown on the field, rather than
+             leaving the dialog sitting there with nothing apparently happening. */
+          try {
+            if (isNew) Store.addPerson(data);
+            else {
+              data.active = root.querySelector('#f-active').checked;
+              Store.updatePerson(personId, data);
+            }
+          } catch (err) {
+            return showError(root, /already/.test(err.message) ? 'email' : 'name', err.message);
           }
 
           /* An address means an account. Enrolling records the decision; the
@@ -2535,7 +2549,6 @@
     eventForm: eventForm, taskForm: taskForm, personForm: personForm,
     rosterList: rosterList, unitPeopleForm: unitPeopleForm,
     importPeopleForm: importPeopleForm,
-    groupMessage: groupMessage, personalMessage: personalMessage,
     field: field, showError: showError, clearErrors: clearErrors
   };
 })(window);
