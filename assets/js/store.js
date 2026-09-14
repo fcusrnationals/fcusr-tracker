@@ -2486,11 +2486,43 @@
 
   /* ---------- recording the hand-over ---------- */
 
+  /* What a hand-over may be recorded against, checked where the record is kept
+     rather than trusted to the screen.
+
+     The screen only offers "Record hand-over" on the desk currently holding the
+     letter — but a dialog can be left open while the letter changes underneath
+     it: another officer's release arriving by sync, a withdrawal from another
+     phone. Pressing Save on that dialog used to go straight through, and the
+     store had no opinion. So it could:
+
+       receive a desk further down the route while an earlier one still held it
+       receive a desk that had already signed — wiping the signature, and turning
+         an approved letter back into one still routing
+       bring a withdrawn or declined letter back onto the route
+       record a letter coming back before the day it was handed in
+
+     Each of those is now refused with a sentence that says what happened, and
+     the dialog shows it. */
+  function onRoute(l, s, verb) {
+    if (l.status !== 'Routing') {
+      throw new Error('This letter is already ' + l.status.toLowerCase() +
+        ' \u2014 there is nothing to ' + verb + '. Close this and look again.');
+    }
+    if (s.releasedAt) {
+      throw new Error(stopName(s) + ' has already recorded its outcome. Close this and look again.');
+    }
+    if (currentStop(l) !== s) {
+      throw new Error('This letter is not with ' + stopName(s) + ' yet \u2014 it is ' +
+        letterWhere(l).charAt(0).toLowerCase() + letterWhere(l).slice(1) + '.');
+    }
+  }
+
   function receiveStop(lid, stopId, data) {
     var l = letter(lid);
     if (!l) return null;
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return null;
+    onRoute(l, s, 'record');
     var who = str(data.receivedBy, LIMITS.name);
     if (!who) throw new Error('Write down who received it.');
     s.receivedBy = who;
@@ -2509,9 +2541,15 @@
     if (!l) return null;
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return null;
+    onRoute(l, s, 'record');
     if (!s.receivedAt) throw new Error('Record that the office received it first.');
+    var when = dateOnly(data.releasedAt) || U.today();
+    if (when < s.receivedAt) {
+      throw new Error('That is before ' + stopName(s) + ' received it (' +
+        U.fmtDateShort(s.receivedAt) + '). Check the date.');
+    }
     s.outcome = oneOf(data.outcome, STOP_OUTCOMES, 'Approved');
-    s.releasedAt = dateOnly(data.releasedAt) || U.today();
+    s.releasedAt = when;
     s.note = str(data.note, LIMITS.reason);
 
     /* Sent back for revision. The return stays exactly as recorded and a fresh

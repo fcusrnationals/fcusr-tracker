@@ -1655,6 +1655,100 @@ function makeDevice(server, name) {
     sBad.upsert = realUpsert;
   }
 
+  /* ---------------- the letter tracker cannot be put in an impossible state ----------------
+     The screen offers a hand-over only on the desk currently holding the
+     letter. But a dialog can stay open while the letter changes underneath it —
+     another officer's release arriving by sync, a withdrawal from another phone
+     — and pressing Save went straight through, because the store had no
+     opinion. Every one of these was possible before. */
+  console.log('\n--- a letter cannot be recorded into an impossible state ---');
+  {
+    const sL = makeServer();
+    const D6 = makeDevice(sL, 'Letters');
+    const S6 = D6.S;
+    const unit = S6.nationalUnitId();
+    const route = () => [{ officeId: S6.officeByCode('PRES').id },
+                         { officeId: S6.officeByCode('OSA').id },
+                         { officeId: S6.officeByCode('DEAN').id }];
+    const fresh = () => S6.addLetter({ unitId: unit, subject: 'Letter ' + Math.random(), route: route() });
+    const tries = (fn) => { try { fn(); return ''; } catch (e) { return e.message; } };
+
+    // A desk further down cannot take it while an earlier one still has it.
+    let l = fresh();
+    let why = tries(() => S6.receiveStop(l.id, l.stops[2].id, { receivedBy: 'X' }));
+    check('a later office cannot receive it before the one holding it',
+      !!why && !S6.letter(l.id).stops[2].receivedAt,
+      'the third office received it while the first still had it');
+    check('and says where the letter actually is', /not with/i.test(why), why);
+
+    // Fully signed, then a stale dialog records a hand-over at the first desk.
+    l = fresh();
+    for (let i = 0; i < 3; i++) {
+      S6.receiveStop(l.id, l.stops[i].id, { receivedBy: 'R' + i });
+      S6.releaseStop(l.id, l.stops[i].id, { outcome: 'Approved' });
+    }
+    check('fully signed, it is approved', S6.letter(l.id).status === 'Approved');
+    why = tries(() => S6.receiveStop(l.id, S6.letter(l.id).stops[0].id, { receivedBy: 'stale' }));
+    check('a stale hand-over does not wipe a signature',
+      !!S6.letter(l.id).stops[0].releasedAt, 'the signature was wiped');
+    check('and an approved letter stays approved', S6.letter(l.id).status === 'Approved',
+      'went back to ' + S6.letter(l.id).status);
+    check('the refusal says so', !!why, 'refused silently or not at all');
+
+    // Recording an outcome twice.
+    l = fresh();
+    S6.receiveStop(l.id, l.stops[0].id, { receivedBy: 'A' });
+    S6.releaseStop(l.id, l.stops[0].id, { outcome: 'Approved' });
+    why = tries(() => S6.releaseStop(l.id, S6.letter(l.id).stops[0].id, { outcome: 'Returned for revision', note: 'x' }));
+    check('an outcome already recorded is not recorded over',
+      S6.letter(l.id).stops[0].outcome === 'Approved', S6.letter(l.id).stops[0].outcome);
+
+    // Back before it went in.
+    l = fresh();
+    S6.receiveStop(l.id, l.stops[0].id, { receivedBy: 'A', receivedAt: '2026-09-10' });
+    why = tries(() => S6.releaseStop(l.id, l.stops[0].id, { outcome: 'Approved', releasedAt: '2026-09-01' }));
+    check('it cannot come back before the day it was handed in',
+      !!why && !S6.letter(l.id).stops[0].releasedAt,
+      'received 2026-09-10, released ' + S6.letter(l.id).stops[0].releasedAt);
+    check('and the date is named in the refusal', /Sep 10, 2026/.test(why), why);
+    // The same day is fine.
+    S6.releaseStop(l.id, l.stops[0].id, { outcome: 'Approved', releasedAt: '2026-09-10' });
+    check('the same day is allowed', S6.letter(l.id).stops[0].releasedAt === '2026-09-10');
+
+    // A withdrawn letter is not brought back by a stale dialog.
+    l = fresh();
+    S6.setLetterStatus(l.id, 'Withdrawn');
+    why = tries(() => S6.receiveStop(l.id, S6.letter(l.id).stops[0].id, { receivedBy: 'stale' }));
+    check('a withdrawn letter stays withdrawn', S6.letter(l.id).status === 'Withdrawn',
+      'went back to ' + S6.letter(l.id).status);
+    l = fresh();
+    S6.setLetterStatus(l.id, 'Declined');
+    tries(() => S6.receiveStop(l.id, S6.letter(l.id).stops[0].id, { receivedBy: 'stale' }));
+    check('and so does a declined one', S6.letter(l.id).status === 'Declined');
+
+    // What still has to work: the ordinary route, and a return followed by a second attempt.
+    l = fresh();
+    S6.receiveStop(l.id, l.stops[0].id, { receivedBy: 'A' });
+    S6.releaseStop(l.id, l.stops[0].id, { outcome: 'Returned for revision', note: 'fix the budget' });
+    const after = S6.letter(l.id);
+    check('a return still opens a second attempt at the same desk',
+      after.stops.length === 4 && after.stops[1].officeId === after.stops[0].officeId);
+    after.stops.filter((x) => !x.releasedAt).forEach((x) => {
+      S6.receiveStop(l.id, x.id, { receivedBy: 'R' });
+      S6.releaseStop(l.id, x.id, { outcome: 'Approved' });
+    });
+    check('and it still reaches 100% and approval',
+      S6.letterProgress(S6.letter(l.id)).percent === 100 && S6.letter(l.id).status === 'Approved',
+      JSON.stringify(S6.letterProgress(S6.letter(l.id))) + ' ' + S6.letter(l.id).status);
+
+    // Correcting who received it, before the outcome, is still an ordinary edit.
+    l = fresh();
+    S6.receiveStop(l.id, l.stops[0].id, { receivedBy: 'Mrs Ferer' });
+    why = tries(() => S6.receiveStop(l.id, l.stops[0].id, { receivedBy: 'Mrs Ferrer' }));
+    check('correcting the name of who received it is still allowed',
+      !why && S6.letter(l.id).stops[0].receivedBy === 'Mrs Ferrer', why);
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));
