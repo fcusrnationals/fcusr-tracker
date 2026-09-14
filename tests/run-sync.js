@@ -1845,6 +1845,33 @@ function makeDevice(server, name) {
       Pw.S.termStatus().endDate);
   }
 
+  /* ---------------- the archive keeps every unit that worked ---------------- */
+  console.log('\n--- a deactivated college is still in the year\u2019s record ---');
+  {
+    const sA = makeServer();
+    const DA = makeDevice(sA, 'Closer');
+    const SA = DA.S;
+    const cas = SA.units().find((u) => u.code === 'CAS');
+    const ev = SA.addEvent({ title: 'CAS Week', unitId: cas.id, dateStart: '2026-01-10' });
+    SA.updateEvent(ev.id, { status: 'Completed' });
+    SA.saveReport(ev.id, { driveLink: 'https://drive.google.com/cas-week', driveOwned: true });
+    SA.setUnitActive(cas.id, false);                       // the college was wound up
+
+    SA.declareTerm('2026-01-31', { by: 'Arron' });
+    const st = SA.termStatus();
+    let archive = null, err = '';
+    try { archive = SA.closeTerm({}).archive; } catch (e) { err = e.message; }
+    if (err && /closing date/.test(err)) {
+      check('(skipped: the fixture date has not passed)', true);
+    } else {
+      check('the term closed', !err, err);
+      const kept = (archive || []).find((a) => a.unitCode === 'CAS');
+      check('a deactivated college\u2019s work is kept in the archive', !!kept,
+        'CAS Week was deleted and nothing of it recorded');
+      check('with its report link', kept && kept.events[0] && kept.events[0].driveLink === 'https://drive.google.com/cas-week');
+    }
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

@@ -2903,7 +2903,14 @@
     var keepTerm = cleanTerm(state.term);
     keepTerm.closedAt = nowISO();
     keepTerm.updatedAt = bumpStamp(keepTerm.updatedAt);
-    keepTerm.archive = units({ activeOnly: true }).map(function (u) {
+    /* Every unit that did any work, not only the ones still switched on. The
+       archive used to be built from active units while the wipe below took
+       everything — so a college deactivated during the year lost its record
+       entirely: its activities deleted, and nothing of them kept to say they
+       happened or where the reports were filed. */
+    keepTerm.archive = units().filter(function (u) {
+      return state.events.some(function (e) { return e.unitId === u.id; });
+    }).map(function (u) {
       var c = unitCompliance(u.id);
       return {
         unitId: u.id, unitName: u.name, unitCode: u.code, complied: c.complies,
