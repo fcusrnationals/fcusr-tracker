@@ -811,6 +811,15 @@ console.log('\n--- adding somebody hands over a password ---');
   check('the person form creates the account', /Backend\.createMember\(/.test(src));
   check('with a password generated for them', /var pw = suggestPassword\(\)/.test(src));
   check('and shows it once, to hand over', /invitedDialog\(data\.name, addr, pw\)/.test(src));
+
+  /* Only for a new person or a new address. Everything else is an edit, and an
+     edit that resets somebody's password and signs them out everywhere is not an
+     edit anybody meant to make. */
+  check('a password is only issued for a new person or a new address',
+    /var needsWayIn = isNew \|\| !before \|\| before !== addr\.toLowerCase\(\)/.test(src),
+    'every save of the person form still issues a new password');
+  check('an edit goes the way that never touches a password',
+    /if \(!needsWayIn\) \{\s*Backend\.enrol\(details\)/.test(src));
   check('there is a way to give everybody still waiting one',
     /data-give-all/.test(src) && /Backend\.waiting\(\)/.test(src));
   check('asked of the server, not read off the screen',

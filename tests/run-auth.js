@@ -204,10 +204,19 @@ window.fetch = function (url, opts) {
        used to leave `active` alone, so an address that had once been removed
        could be enrolled over and over and still be refused at the door — and
        this stand-in never set it either, so nothing here noticed. */
+    /* And updates the details, as the real function does — name, position, unit,
+       access. This stand-in used to switch `active` on and nothing else, so an
+       edit could not be seen to have done anything, and a test of "editing keeps
+       the password" would have passed whether or not the edit landed. */
     Object.keys(SB.profiles).forEach((k) => {
-      if (SB.profiles[k].email === String(body.p_email || '').toLowerCase().trim()) {
-        SB.profiles[k].active = true;
-      }
+      const pr = SB.profiles[k];
+      if (pr.email !== clean) return;
+      pr.active = true;
+      if (body.p_full_name) pr.full_name = body.p_full_name;
+      pr.position = body.p_position || '';
+      pr.unit_id = body.p_unit_id;
+      pr.access = body.p_access;
+      pr.units = units.find((x) => x.id === body.p_unit_id);
     });
     return reply(200, body.p_email);
   }
@@ -998,6 +1007,41 @@ const FILES = [
         full_name: 'X', position: '', unit_id: NAT, access: 'officer', eventIds: [] });
     } catch (e) { refused = e.message; }
     check('a password too short is refused', !!refused && !SB.users['x@filamer.edu.ph'], refused);
+  }
+
+  /* ---------------- editing somebody keeps their password ----------------
+     Saving the person form used to issue a new password every time. For
+     somebody who already had a login, making an account is the same act as
+     setting their password — so fixing a misspelt name or moving somebody to a
+     new position changed their password and signed them out everywhere. They
+     found out when their phone asked them to sign in again, with a password
+     nobody had told them. */
+  console.log('\n--- a change of name or position keeps the password ---');
+  {
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    const email = 'steady@filamer.edu.ph';
+    await Backend.createMember({
+      email: email, password: 'the-one-they-know',
+      full_name: 'Steady Officer', position: 'Senator',
+      unit_id: NAT, access: 'officer', eventIds: []
+    });
+
+    // What the form now sends for an edit to somebody who already has a login.
+    await Backend.enrol({
+      email: email, full_name: 'Steady Officer-Reyes', position: 'Vice President',
+      unit_id: NAT, access: 'officer', eventIds: []
+    });
+
+    const pr = Object.keys(SB.profiles).map((k) => SB.profiles[k]).find((x) => x.email === email);
+    check('the new name landed', pr && pr.full_name === 'Steady Officer-Reyes', pr && pr.full_name);
+    check('and the new position', pr && pr.position === 'Vice President', pr && pr.position);
+    check('the password is exactly what they were given',
+      SB.users[email].password === 'the-one-they-know', SB.users[email].password);
+
+    await Auth.signOut();
+    check('and it still lets them in',
+      !!(await Auth.signIn(email, 'the-one-they-know')));
+    await Auth.signOut();
   }
 
   /* ---------------- and the people already left waiting ----------------

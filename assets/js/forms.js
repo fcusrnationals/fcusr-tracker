@@ -2468,15 +2468,44 @@
              where every enrolment fault this council hit actually lived: an
              enrolment and an account that could disagree, and a person stuck
              between them with nobody able to see why. */
-          var pw = suggestPassword();
-          Backend.createMember({
-            email: addr, password: pw,
-            full_name: data.name, position: data.position,
+          /* A password only when the address is new to this person.
+
+             This used to issue one on every save. For somebody who already had a
+             login, making an account is the same act as setting their password —
+             so correcting a misspelt name or moving somebody to a new position
+             changed their password and signed them out of every device they were
+             on. They found out when their phone asked them to sign in again, with
+             a password they had never been told.
+
+             A new person, or an address being given for the first time, needs a
+             way in. Anybody else is having their details changed, and the details
+             go through the path that has never touched a password. */
+          var before = String(d.email || '').trim().toLowerCase();
+          var needsWayIn = isNew || !before || before !== addr.toLowerCase();
+
+          var details = {
+            email: addr, full_name: data.name, position: data.position,
             unit_id: data.unitId || Store.nationalUnitId(),
             access: data.access,
             eventIds: data.access === 'volunteer' ? (d.eventIds || []) : [],
             isHead: !!d.isHead
-          }).then(function () {
+          };
+
+          if (!needsWayIn) {
+            Backend.enrol(details).then(function () {
+              close();
+              UI.toast(data.name + ' saved. Their password is unchanged.');
+            }).catch(function (err) {
+              close();
+              if (err && err.setupMissing) return setupNeeded(err.message);
+              UI.toast(err.message || 'Saved here, but the change did not reach the server.', 'error');
+            });
+            return;
+          }
+
+          var pw = suggestPassword();
+          details.password = pw;
+          Backend.createMember(details).then(function () {
             close();
             invitedDialog(data.name, addr, pw);
           }).catch(function (err) {
