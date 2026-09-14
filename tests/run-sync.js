@@ -1872,6 +1872,96 @@ function makeDevice(server, name) {
     }
   }
 
+  /* ---------------- closing the term reaches everybody ---------------- */
+  console.log('\n--- closing the term deletes the year everywhere, and the preview nothing ---');
+  {
+    const sT = makeServer();
+    const P = makeDevice(sT, 'President');
+    const G = makeDevice(sT, 'Secretary');
+    const nat = P.S.nationalUnitId();
+
+    const per = P.S.addPerson({ name: 'Rutor, Angel', unitId: nat, position: 'Senator' });
+    const ev = P.S.addEvent({ title: 'Founders Day', unitId: nat, dateStart: '2026-02-01', headId: per.id });
+    P.S.addTask({ kind: 'event', eventId: ev.id, title: 'Book the hall', assigneeId: per.id, dueDate: '2026-02-01' });
+    P.S.addTask({ kind: 'directive', title: 'File the minutes', assigneeId: per.id, dueDate: '2026-02-02' });
+    P.S.addLetter({ unitId: nat, subject: 'Request for the hall', inChargeId: per.id,
+      route: [{ officeId: P.S.officeByCode('PRES').id }] });
+    P.S.updateEvent(ev.id, { status: 'Completed' });
+    P.S.saveReport(ev.id, { driveLink: 'https://drive.google.com/founders', driveOwned: true });
+    P.S.addListValue('positions', 'Adviser to the Board');
+    const positionsBefore = JSON.stringify(P.S.positions());
+
+    for (let i = 0; i < 2; i++) for (const d of [P, G]) await d.Sync.now();
+    const count = (srv) => ['events', 'tasks', 'letters', 'reports', 'people']
+      .reduce((n, t) => n + Object.keys(srv.tables[t]).length, 0);
+    check('the year is on the server and the other phone first',
+      count(sT) >= 6 && G.S.events().length === 1 && G.S.tasks().length === 2 && G.S.letters().length === 1,
+      count(sT) + ' rows on the server');
+
+    P.S.declareTerm('2026-12-31', { by: 'President' });
+    P.S.raw().term.endDate = '2026-01-01';          // wait for the date to pass
+    P.S.overrideCompliance('Closing for the test with everything accounted for.', 'President');
+
+    // ---- the preview ----
+    const before = JSON.stringify(P.S.raw());
+    const storedBefore = P.w.localStorage.getItem(Object.keys(P.w.localStorage).find((k) => /tracker/.test(k)) || '');
+    const pv = P.S.closePreview();
+    check('the preview changes nothing in memory', JSON.stringify(P.S.raw()) === before);
+    check('or in storage',
+      P.w.localStorage.getItem(Object.keys(P.w.localStorage).find((k) => /tracker/.test(k)) || '') === storedBefore);
+    check('it counts what would go',
+      pv.deletes.events === 1 && pv.deletes.tasks === 2 && pv.deletes.letters === 1 &&
+      pv.deletes.reports === 1 && pv.deletes.people === 1, JSON.stringify(pv.deletes));
+    check('it says the close is allowed', pv.allowed === true, pv.why);
+    check('and names what the record would keep',
+      pv.archive.some((a) => a.events.some((e) => e.driveLink === 'https://drive.google.com/founders')));
+    const serverBefore = count(sT);
+    await P.Sync.now();
+    check('and sends nothing to delete', count(sT) === serverBefore && P.S.events().length === 1);
+
+    const G2 = makeDevice(sT, 'Early');
+    const early = G2.S.closePreview();
+    check('the preview says why it cannot close yet', !early.allowed && /No closing date/.test(early.why), early.why);
+
+    // ---- the real thing ----
+    P.S.closeTerm({ overallLink: 'https://drive.google.com/overall' });
+    check('the phone that closed it is empty',
+      !P.S.events().length && !P.S.tasks().length && !P.S.letters().length &&
+      !P.S.reports().length && !P.S.people().length);
+    check('the council\u2019s positions are kept', JSON.stringify(P.S.positions()) === positionsBefore);
+
+    await P.Sync.now();
+    check('the server no longer holds the year', count(sT) === 0, count(sT) + ' rows still there');
+    check('and nothing came back on the phone that closed it',
+      !P.S.events().length && !P.S.tasks().length && !P.S.people().length);
+
+    await G.Sync.now();
+    check('the other phone loses the year on its next sync',
+      !G.S.events().length && !G.S.tasks().length && !G.S.letters().length &&
+      !G.S.reports().length && !G.S.people().length,
+      G.S.events().length + ' activities, ' + G.S.tasks().length + ' tasks left');
+    check('and learns the term is closed', !!G.S.term().closedAt);
+    check('with the record of the year', (G.S.term().archive || []).length > 0);
+
+    for (const d of [P, G]) await d.Sync.now({ full: true });
+    for (const d of [G, P]) await d.Sync.now({ full: true });
+    check('a full round brings none of it back anywhere',
+      count(sT) === 0 && !P.S.events().length && !G.S.events().length && !G.S.tasks().length,
+      count(sT) + ' on the server');
+
+    const fresh = makeDevice(sT, 'NewOfficer');
+    await fresh.Sync.now();
+    check('a phone opening the tracker for the first time finds it empty',
+      !fresh.S.events().length && !fresh.S.tasks().length && !!fresh.S.term().closedAt);
+
+    // The next administration can start work, and it syncs.
+    const next = G.S.addEvent({ title: 'Next year opener', unitId: nat, dateStart: '2026-11-01' });
+    for (let i = 0; i < 2; i++) for (const d of [G, P]) await d.Sync.now();
+    check('the next administration\u2019s work travels as normal', !!P.S.event(next.id));
+    check('closing phones stayed quiet', !P.errors.length && !G.errors.length,
+      P.errors.concat(G.errors).slice(0, 2).join(' | '));
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

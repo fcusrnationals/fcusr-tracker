@@ -297,6 +297,10 @@ console.log('\n--- closing the term ---');
   check('but carries no tasks or people', !JSON.stringify(S2.term().archive).includes('assigneeId'));
 
   check('and the term is marked closed', !!S2.term().closedAt);
+  /* Recorded as deleted, or the server keeps the year and gives it back. */
+  check('every removed record is recorded as deleted',
+    Object.keys(S2.deletions().event || {}).length === 2 &&
+    Object.keys(S2.deletions().report || {}).length >= 1);
 
   check('a link that is not Drive is refused',
     (() => { try { S2.setOverallLink('https://evil.example.com/x'); return false; }

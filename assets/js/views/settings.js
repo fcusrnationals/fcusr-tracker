@@ -108,6 +108,8 @@
           (st.declared ? 'Change the closing date' : 'Close the term') + '</button>' +
         '<button type="button" class="btn" data-term-export>' + UI.icon('pdf') +
           'Export all reports</button>' +
+        (!st.closed
+          ? '<button type="button" class="btn" data-close-preview>Preview closing the term</button>' : '') +
         (st.declared && st.passed
           ? '<button type="button" class="btn btn-danger" data-handover>Hand over</button>' : '') +
       '</div>' +
@@ -598,6 +600,8 @@
 
     var handover = root.querySelector('[data-handover]');
     if (handover) handover.addEventListener('click', function () { TermUI.handoverForm(); });
+    var closePreview = root.querySelector('[data-close-preview]');
+    if (closePreview) closePreview.addEventListener('click', function () { TermUI.previewClose(); });
 
     var termExport = root.querySelector('[data-term-export]');
     if (termExport) termExport.addEventListener('click', function () {

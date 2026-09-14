@@ -541,12 +541,18 @@
         '<textarea id="t-override" maxlength="300" placeholder="Why the term is closing with units outstanding. This is kept on the record and printed in the report."></textarea>' +
         '<div class="hint">At least a sentence. It is printed in the final record.</div></div>';
     } else {
-      body = '<p class="small">Every unit has filed. Closing hands the tracker to the next ' +
-        'administration:</p>' +
+      /* "Every unit has filed" was said here when units had been passed over as
+         well, directly above the card naming the ones that had not. */
+      body = '<p class="small">' + (st.allFiled ? 'Every unit has filed. ' : '') +
+        'Closing hands the tracker to the next administration:</p>' +
         '<ul class="small" style="padding-left:18px;line-height:1.8">' +
-        '<li>Every event, task, person and report on this device is <strong>deleted</strong>.</li>' +
-        '<li>The units, the letterhead and the links to the filed reports are kept.</li>' +
+        '<li>Every activity, task, letter, report and directory entry is <strong>deleted</strong> ' +
+        '&mdash; from this phone, from the database, and from every other phone the next time it syncs.</li>' +
+        '<li>The units, the offices, the letterhead and the links to the filed reports are kept.</li>' +
+        '<li>Sign-in accounts are kept. Remove anybody who is leaving from the account list.</li>' +
         '<li>The reports themselves are in Drive and are not touched.</li></ul>' +
+        '<p class="small muted">Not sure? <button type="button" class="btn btn-sm" data-preview>' +
+        'Preview closing the term</button> shows exactly what goes and changes nothing.</p>' +
         (st.overridden
           ? '<div class="card" style="background:var(--st-overdue-bg);border-color:var(--st-overdue-bd)">' +
             '<div class="small strong">Closing with units outstanding</div>' +
@@ -555,7 +561,7 @@
         '<div class="card" style="margin-top:12px">' +
         '<div class="strong" style="margin-bottom:6px">Download a backup first</div>' +
         '<div class="small muted" style="margin-bottom:10px">This cannot be undone, and the ' +
-        'backup file is the only way back. It is not optional.</div>' +
+        'backup file is the only full copy of the year that will be left. It is not optional.</div>' +
         '<button type="button" class="btn" data-backup>' + UI.icon('download') + 'Download backup</button>' +
         '</div>' +
         '<div class="field" style="margin-top:14px"><label for="t-overall">Link to the overall report</label>' +
@@ -588,6 +594,9 @@
           UI.toast('Backup downloaded. Keep it somewhere safe.');
         });
 
+        var pv = root.querySelector('[data-preview]');
+        if (pv) pv.addEventListener('click', function () { previewClose(); });
+
         var ov = root.querySelector('[data-override]');
         if (ov) ov.addEventListener('click', function () {
           var reason = (root.querySelector('#t-override') || {}).value || '';
@@ -605,8 +614,9 @@
           var link = (root.querySelector('#t-overall') || {}).value || '';
           UI.confirm({
             title: 'Delete everything and hand over?',
-            message: 'Every event, task, person and report on this device is removed.',
-            detail: 'This cannot be undone. You have the backup file; there is nothing else.',
+            message: 'Every activity, task, letter, report and directory entry is removed — ' +
+              'for everybody, not only on this phone.',
+            detail: 'This cannot be undone. The backup file you downloaded is the only full copy left.',
             confirmLabel: 'Delete everything'
           }).then(function (ok) {
             if (!ok) return;
@@ -615,6 +625,12 @@
               close();
               UI.toast('The term is closed. The tracker is ready for the next administration.');
               App.go('#/overview');
+              /* Straight away rather than at the next timed sync: until the
+                 deletions reach the server, every other phone still shows the
+                 year that was just closed. */
+              if (global.Sync && global.Auth && Auth.signedIn()) {
+                Sync.now({ loud: true }).catch(function () { /* the pill says so */ });
+              }
             } catch (err) { UI.toast(err.message, 'error'); }
           });
         });
@@ -622,10 +638,82 @@
     });
   }
 
+  /* ---------- trying it first ----------
+     Closing the term deletes the year for everybody, so it cannot be practised
+     on the real button. This shows what that button would do today — what goes,
+     what stays, and whether it would even be allowed — and touches nothing. */
+  function previewClose() {
+    var pv = Store.closePreview();
+    var d = pv.deletes;
+    var total = d.events + d.tasks + d.letters + d.reports + d.people;
+
+    function line(n, one, many, extra) {
+      return '<li><strong>' + U.esc(U.plural(n, one, many)) + '</strong>' + (extra || '') + '</li>';
+    }
+
+    var verdict = pv.allowed
+      ? '<div class="card" style="background:var(--st-overdue-bg);border-color:var(--st-overdue-bd)">' +
+        '<div class="strong">If it were pressed today, this is what would happen.</div>' +
+        '<div class="small">Every condition is met, so the real button is available.</div></div>'
+      : '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+        '<div class="strong">It could not be closed today.</div>' +
+        '<div class="small">' + U.esc(pv.why || 'Not every condition is met yet.') +
+        ' This is what it would do once it can be.</div></div>';
+
+    var kept = pv.archive.map(function (a) {
+      var filed = a.events.filter(function (e) { return e.driveLink; }).length;
+      return '<li><strong>' + U.esc(a.unitName) + '</strong> &mdash; ' +
+        U.esc(U.plural(a.events.length, 'activity', 'activities')) + ', ' +
+        U.esc(filed + ' with a report link') + '</li>';
+    }).join('');
+
+    var body =
+      '<div class="card" style="margin-bottom:12px">' +
+      '<div class="strong">This is only a preview.</div>' +
+      '<div class="small muted">Nothing is changed, deleted or sent. Open it as often as you like.</div>' +
+      '</div>' +
+      verdict +
+      '<div class="strong" style="margin-top:14px">Deleted, for everybody</div>' +
+      (total
+        ? '<ul class="small" style="padding-left:18px;line-height:1.8;margin:6px 0 0">' +
+          line(d.events, 'activity', 'activities') +
+          line(d.tasks, 'task') +
+          line(d.letters, 'letter') +
+          line(d.reports, 'accomplishment report', 'accomplishment reports', d.reports ? ' and their photos' : '') +
+          line(d.people, 'directory entry', 'directory entries') +
+          '</ul>'
+        : '<p class="small muted" style="margin:6px 0 0">Nothing &mdash; this phone holds no work for the year.</p>') +
+      '<div class="strong" style="margin-top:14px">Kept</div>' +
+      '<ul class="small" style="padding-left:18px;line-height:1.8;margin:6px 0 0">' +
+      '<li>' + U.esc(U.plural(pv.keeps.units, 'unit')) + ' and ' +
+        U.esc(U.plural(pv.keeps.offices, 'office')) + '</li>' +
+      '<li>The letterhead, positions and committees</li>' +
+      '<li>Sign-in accounts &mdash; remove anybody leaving from the account list</li>' +
+      '<li>The reports in Drive, which are never touched</li>' +
+      (pv.keeps.overallLink ? '<li>The link to the overall report</li>' : '') +
+      '</ul>' +
+      (kept
+        ? '<div class="strong" style="margin-top:14px">The record of the year that stays</div>' +
+          '<ul class="small" style="padding-left:18px;line-height:1.8;margin:6px 0 0">' + kept + '</ul>'
+        : '') +
+      (pv.sealed.length && global.Auth && Auth.signedIn()
+        ? '<p class="small muted" style="margin-top:14px">' + U.esc(pv.sealed.join(', ')) +
+          ' keep their records to themselves, so those are not on this phone and closing here ' +
+          'does not delete them.</p>'
+        : '');
+
+    UI.modal({
+      title: 'Preview: closing the term',
+      wide: true,
+      body: body,
+      footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
+    });
+  }
+
   global.TermUI = {
     banner: banner, mountBanner: mountBanner, archive: archive,
     maybeRemind: maybeRemind, declareForm: declareForm, handoverForm: handoverForm,
     heroStrip: heroStrip,
-    myHandoverForm: myHandoverForm, myOwed: myOwed,
+    myHandoverForm: myHandoverForm, myOwed: myOwed, previewClose: previewClose
   };
 })(window);

@@ -2882,10 +2882,87 @@
     };
   }
 
+  /* The record of the year a closed term leaves behind: unit names, activity
+     titles and where each report was filed. Built by the real close and by the
+     preview alike, so what the preview shows is exactly what the close keeps.
+
+     Every unit that did any work, not only the ones still switched on — a
+     college deactivated during the year would otherwise lose its record
+     entirely, its activities deleted and nothing kept to say they happened. */
+  function buildArchive() {
+    return units().filter(function (u) {
+      return state.events.some(function (e) { return e.unitId === u.id; });
+    }).map(function (u) {
+      var c = unitCompliance(u.id);
+      return {
+        unitId: u.id, unitName: u.name, unitCode: u.code, complied: c.complies,
+        events: state.events.filter(function (e) { return e.unitId === u.id; }).map(function (e) {
+          var r = report(e.id);
+          return {
+            title: e.title, dateStart: e.dateStart, dateEnd: e.dateEnd,
+            driveLink: r ? r.driveLink : '', driveOwned: !!(r && r.driveOwned)
+          };
+        })
+      };
+    });
+  }
+
+  /* What closing the term would do, without doing any of it.
+
+     Asked for by a council that wanted to try the end of term before October —
+     which, once closing genuinely deletes the year for everybody, is not
+     something that can be tried on the real button. This reads everything and
+     changes nothing: not the store, not the term, not the server. */
+  function closePreview() {
+    var st = termStatus();
+    var why = '';
+    if (!st.declared) why = 'No closing date has been declared yet.';
+    else if (st.closed) why = 'This term has already been closed.';
+    else if (!st.passed) why = 'The closing date, ' + U.fmtDate(st.endDate) + ', has not arrived.';
+    else if (st.outstandingUnits.length && !st.overridden) {
+      why = U.plural(st.outstandingUnits.length, 'unit') +
+        (st.outstandingUnits.length === 1 ? ' has' : ' have') + ' not filed yet.';
+    }
+
+    var sealed = units().filter(function (u) { return INDEPENDENT_KINDS.indexOf(u.kind) >= 0; });
+    return {
+      allowed: !!st.canClose,
+      why: why,
+      endDate: st.declared ? st.endDate : '',
+      deletes: {
+        events: state.events.length,
+        tasks: state.tasks.length,
+        letters: state.letters.length,
+        reports: state.reports.length,
+        people: state.people.length
+      },
+      archive: buildArchive(),
+      keeps: {
+        units: state.units.length,
+        offices: state.offices.length,
+        letterhead: !!state.org.letterhead,
+        overallLink: state.term.overallLink || ''
+      },
+      /* The sealed bodies' work is not on a national officer's phone at all, so
+         this phone cannot delete it. Said here rather than discovered later. */
+      sealed: sealed.map(function (u) { return u.name; })
+    };
+  }
+
   /* Closing the term. Everything the administration did is removed so the next
      one starts clean; the units, the letterhead and the link to the overall
      report are what carry over — the report itself lives in Drive, which is why
-     a link was the right thing to keep all along. */
+     a link was the right thing to keep all along.
+
+     It used to remove all of that from the phone that pressed the button and
+     nowhere else. It wrote no deletions, so the server kept every row and no
+     other phone was told anything — and because a cleared phone asks the server
+     for everything, the next sync brought the whole year straight back onto the
+     phone that had closed it. Closing the term looked like it worked, for about
+     twenty seconds.
+
+     Now every record it removes is recorded as deleted, the same way deleting
+     one activity is. That is what reaches the database and every other phone. */
   function closeTerm(opts) {
     opts = opts || {};
     var st = termStatus();
@@ -2903,37 +2980,48 @@
     var keepTerm = cleanTerm(state.term);
     keepTerm.closedAt = nowISO();
     keepTerm.updatedAt = bumpStamp(keepTerm.updatedAt);
-    /* Every unit that did any work, not only the ones still switched on. The
-       archive used to be built from active units while the wipe below took
-       everything — so a college deactivated during the year lost its record
-       entirely: its activities deleted, and nothing of them kept to say they
-       happened or where the reports were filed. */
-    keepTerm.archive = units().filter(function (u) {
-      return state.events.some(function (e) { return e.unitId === u.id; });
-    }).map(function (u) {
-      var c = unitCompliance(u.id);
-      return {
-        unitId: u.id, unitName: u.name, unitCode: u.code, complied: c.complies,
-        events: state.events.filter(function (e) { return e.unitId === u.id; }).map(function (e) {
-          var r = report(e.id);
-          return {
-            title: e.title, dateStart: e.dateStart, dateEnd: e.dateEnd,
-            driveLink: r ? r.driveLink : '', driveOwned: !!(r && r.driveOwned)
-          };
-        })
-      };
-    }).filter(function (a) { return a.events.length; });
+    keepTerm.archive = buildArchive();
     if (opts.overallLink) keepTerm.overallLink = driveLink(opts.overallLink) || keepTerm.overallLink;
 
-    // Pictures are held outside this record, so they are cleared too.
-    var reportIds = state.reports.map(function (r) { return r.id; });
+    // What is about to go, by kind, so each can be recorded as deleted.
+    var going = {
+      event: state.events.map(function (e) { return e.id; }),
+      task: state.tasks.map(function (t) { return t.id; }),
+      letter: state.letters.map(function (l) { return l.id; }),
+      report: state.reports.map(function (r) { return r.id; }),
+      person: state.people.map(function (p) { return p.id; })
+    };
+    var reportIds = going.report.slice();
+
+    /* Kept as well, because none of it is the year's work: the council's own
+       lists of positions and committees; the deletions already made, which the
+       server may still be holding rows for; and where syncing had got to, so
+       the next sync sends the deletions instead of downloading the year again. */
+    var keepDeleted = state.deleted;
+    var keepSync = state.sync;
+    var keepPositions = state.positions;
+    var keepCommittees = state.committees;
+    var keepCouncilAt = state.councilAt;
 
     state = blank();
     state.units = keepUnits;
     state.offices = keepOffices;
     state.org = keepOrg;
     state.term = keepTerm;
+    state.deleted = keepDeleted || {};
+    state.sync = keepSync || state.sync;
+    state.positions = keepPositions || state.positions;
+    state.committees = keepCommittees || state.committees;
+    state.councilAt = keepCouncilAt || '';
     state.seeded = true;
+
+    /* A deletion that is not recorded is a deletion nobody else hears of. */
+    var at = nowISO();
+    Object.keys(going).forEach(function (kind) {
+      if (!state.deleted[kind]) state.deleted[kind] = {};
+      going[kind].forEach(function (rid) { state.deleted[kind][rid] = at; });
+    });
+
     commit();
 
     if (global.AssetDB) {
@@ -3468,7 +3556,7 @@
     templateFor: templateFor, setUnitTemplate: setUnitTemplate,
     term: term, termStatus: termStatus, declareTerm: declareTerm, withdrawTerm: withdrawTerm,
     compliance: compliance, unitCompliance: unitCompliance,
-    overrideCompliance: overrideCompliance, setOverallLink: setOverallLink, closeTerm: closeTerm,
+    overrideCompliance: overrideCompliance, setOverallLink: setOverallLink, closeTerm: closeTerm, closePreview: closePreview,
     report: report, reports: reports, saveReport: saveReport, deleteReport: deleteReport,
     people: people, person: person, personName: personName, personByEmail: personByEmail,
     assignable: assignable,
