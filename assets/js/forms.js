@@ -151,7 +151,15 @@
   function taskForm(taskId) {
     var t = Store.task(taskId);
     if (!t) return;
+    /* The full form is for whoever may edit the task. Anybody else who reaches
+       it — the person it was given to, most often — reads it instead. */
+    if (global.Auth && Auth.signedIn() && !UI.taskEditable(t)) return taskView(taskId);
     var ev = Store.event(t.eventId);
+    /* A directive belongs to no activity. This form asked for one anyway, with
+       the first activity in the list already chosen, so saving any change to a
+       directive quietly filed it under whichever activity came first — moving
+       it into that unit, and out of sight of the people it was meant for. */
+    var directive = (t.kind || 'event') === 'directive';
 
     var body =
       field({
@@ -188,13 +196,13 @@
         control: '<textarea id="f-remarks" maxlength="400" placeholder="Anything the officer should know.">' + U.esc(t.remarks) + '</textarea>'
       }) +
       '<div class="field-row">' +
-      field({
+      (directive ? '' : field({
         name: 'eventId', label: 'Event', required: true,
         control: '<select id="f-eventId">' + UI.selectOptions(
           Store.events().map(function (e) { return { value: e.id, label: e.title }; }), t.eventId
         ) + '</select>',
         hint: 'Every task belongs to an event.'
-      }) + '</div>' +
+      })) + '</div>' +
       '<p class="tiny muted" style="margin:2px 0 0">Last updated ' + U.esc(U.fmtStamp(t.updatedAt)) +
       (t.completedAt ? ' · Completed ' + U.esc(U.fmtStamp(t.completedAt)) : '') + '</p>';
 
@@ -221,9 +229,9 @@
             priority: root.querySelector('#f-priority').value,
             status: statusSel.value,
             remarks: root.querySelector('#f-remarks').value,
-            blockedReason: root.querySelector('#f-blockedReason').value.trim(),
-            eventId: root.querySelector('#f-eventId').value
+            blockedReason: root.querySelector('#f-blockedReason').value.trim()
           };
+          if (!directive) data.eventId = root.querySelector('#f-eventId').value;
           if (!data.title) return showError(root, 'title', 'Give the task a title.');
           if (data.status === 'On hold' && !data.blockedReason) {
             return showError(root, 'blockedReason', 'Add a one-line reason.');
@@ -236,7 +244,8 @@
         root.querySelector('[data-delete]').addEventListener('click', function () {
           UI.confirm({
             title: 'Delete this task?',
-            message: '“' + t.title + '” will be removed from ' + (ev ? ev.title : 'this event') + '.',
+            message: '“' + t.title + '” will be removed from ' +
+              (directive ? 'the directives' : (ev ? ev.title : 'this event')) + '.',
             detail: 'This cannot be undone.',
             confirmLabel: 'Delete task'
           }).then(function (ok) {
@@ -250,6 +259,70 @@
     });
   }
 
+
+  /* A task opened by somebody who may read it and not edit it. Where it is
+     theirs, they can still say how it is going — which is most of what anybody
+     given a task needs to do. */
+  function taskView(taskId) {
+    var t = Store.task(taskId);
+    if (!t) return;
+    var ev = Store.event(t.eventId);
+    var directive = (t.kind || 'event') === 'directive';
+    var mine = !global.Auth || !Auth.signedIn() || UI.taskStatusEditable(t);
+
+    function row(label, value) {
+      return '<div class="field"><div class="small muted">' + U.esc(label) + '</div>' +
+        '<div>' + value + '</div></div>';
+    }
+
+    var body =
+      row('Task', '<strong>' + U.esc(t.title) + '</strong>') +
+      row(directive ? 'Directive' : 'Activity',
+        directive ? 'Council business, not part of an activity'
+          : U.esc(ev ? ev.title : 'An activity you cannot open')) +
+      '<div class="field-row">' +
+      row('Assigned to', U.esc(Store.personName(t.assigneeId))) +
+      row('Due', U.esc(t.dueDate ? U.fmtDate(t.dueDate) : 'No due date')) +
+      '</div>' +
+      row('Priority', U.esc(t.priority)) +
+      (t.remarks ? row('Remarks', U.esc(t.remarks)) : '') +
+      (mine
+        ? field({
+            name: 'status', label: 'How is it going?',
+            control: '<select id="f-status">' + UI.selectOptions(Store.STATUSES, t.status) + '</select>'
+          }) +
+          '<div id="blocked-wrap"' + (t.status === 'On hold' ? '' : ' hidden') + '>' +
+          field({
+            name: 'blockedReason', label: 'Why is it on hold?', required: true,
+            control: '<input type="text" id="f-blockedReason" maxlength="140" value="' +
+              U.esc(t.blockedReason) + '" placeholder="e.g. Waiting for the adviser to sign.">'
+          }) + '</div>'
+        : row('Status', UI.statusChip(t, false)) +
+          (t.status === 'On hold' && t.blockedReason ? row('On hold because', U.esc(t.blockedReason)) : ''));
+
+    UI.modal({
+      title: mine ? 'Your task' : 'Task',
+      body: body,
+      footer: '<button type="button" class="btn" data-close>' + (mine ? 'Cancel' : 'Close') + '</button>' +
+        (mine ? '<button type="button" class="btn btn-primary" data-save>Save</button>' : ''),
+      onMount: function (root, close) {
+        var sel = root.querySelector('#f-status');
+        if (!sel) return;
+        var wrap = root.querySelector('#blocked-wrap');
+        sel.addEventListener('change', function () { wrap.hidden = sel.value !== 'On hold'; });
+        root.querySelector('[data-save]').addEventListener('click', function () {
+          clearErrors(root);
+          var reason = root.querySelector('#f-blockedReason').value.trim();
+          if (sel.value === 'On hold' && !reason) {
+            return showError(root, 'blockedReason', 'Add a one-line reason.');
+          }
+          Store.setTaskStatus(taskId, sel.value, reason);
+          close();
+          UI.toast(sel.value === 'Done' ? 'Marked done.' : 'Saved.');
+        });
+      }
+    });
+  }
 
   /* ---------- enrolment ----------
      The single door through which access is created. Position is free text and
@@ -2546,7 +2619,7 @@
     askIfInternal: askIfInternal,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,
     readVolunteerCSV: readVolunteerCSV, parseCSV: parseCSV,
-    eventForm: eventForm, taskForm: taskForm, personForm: personForm,
+    eventForm: eventForm, taskForm: taskForm, taskView: taskView, personForm: personForm,
     rosterList: rosterList, unitPeopleForm: unitPeopleForm,
     importPeopleForm: importPeopleForm,
     field: field, showError: showError, clearErrors: clearErrors

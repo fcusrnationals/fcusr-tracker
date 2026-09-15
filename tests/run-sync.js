@@ -1962,6 +1962,43 @@ function makeDevice(server, name) {
       P.errors.concat(G.errors).slice(0, 2).join(' | '));
   }
 
+  /* ---------------- a task from an activity this phone cannot open ---------------- */
+  console.log('\n--- a task given from another unit\u2019s activity survives opening the app again ---');
+  {
+    const sK = makeServer();
+    const K = makeDevice(sK, 'Governor');
+    const nat = K.S.nationalUnitId();
+    const nowIso = new Date().toISOString();
+    const per = K.S.addPerson({ name: 'Dela Cruz, Juan', unitId: nat, position: 'Governor' });
+    // What the server sends a Governor given a task in a National activity:
+    // the task, and not the activity.
+    const hidden = '5b7e1d2a-1111-4aaa-8aaa-aaaaaaaaaaa1';
+    K.S.raw().tasks.push({ id: '5b7e1d2a-2222-4aaa-8aaa-aaaaaaaaaaa2', kind: 'event', eventId: hidden,
+      unitId: '', title: 'Bring the banner', assigneeId: per.id, dueDate: '2026-12-01', priority: 'Medium',
+      status: 'Not Started', remarks: '', blockedReason: '', completedAt: '', createdAt: nowIso, updatedAt: nowIso });
+    // And a directive an earlier version filed under an activity when it was edited.
+    const ev = K.S.addEvent({ title: 'Some activity', unitId: nat, dateStart: '2026-03-01' });
+    K.S.raw().tasks.push({ id: '5b7e1d2a-3333-4aaa-8aaa-aaaaaaaaaaa3', kind: 'directive', eventId: ev.id,
+      unitId: nat, title: 'Submit the minutes', assigneeId: per.id, dueDate: '2026-12-02', priority: 'Medium',
+      status: 'Not Started', remarks: '', blockedReason: '', completedAt: '', createdAt: nowIso, updatedAt: nowIso });
+    K.S.save();
+    K.S.load();                                             // the app opened again
+
+    const kept = K.S.tasks().find((t) => t.title === 'Bring the banner');
+    check('the task is still there after opening the app again', !!kept,
+      'thrown away because its activity is not on this phone');
+    check('and still shows in My tasks', K.S.tasks({ assigneeId: per.id, excludeArchived: true })
+      .some((t) => t.title === 'Bring the banner'));
+    const dir = K.S.tasks().find((t) => t.title === 'Submit the minutes');
+    check('a directive filed under an activity by mistake is put back', !!dir && dir.eventId === '',
+      dir && dir.eventId);
+
+    // Editing a directive keeps it a directive.
+    K.S.updateTask(dir.id, { title: 'Submit the minutes by Friday', status: 'In Progress' });
+    check('editing a directive does not give it an activity', K.S.task(dir.id).eventId === '' &&
+      K.S.task(dir.id).kind === 'directive');
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

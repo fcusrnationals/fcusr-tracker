@@ -401,11 +401,14 @@
     if (!title) return null;
     var raw = STATUS_ALIASES[t.status] || t.status;
     var status = oneOf(raw, STATUSES, 'Not Started');
+    var kind = oneOf(t.kind, ['event', 'directive'], 'event');
     return {
       id: id(t.id, 'tsk'),
-      kind: oneOf(t.kind, ['event', 'directive'], 'event'),
+      kind: kind,
       unitId: id(t.unitId),
-      eventId: typeof t.eventId === 'string' ? t.eventId : '',
+      /* A directive has no activity. Editing one used to file it under the first
+         activity in the list; those are put back where they belong here. */
+      eventId: kind !== 'directive' && typeof t.eventId === 'string' ? t.eventId : '',
       title: title,
       remarks: str(t.remarks, LIMITS.text),
       assigneeId: typeof t.assigneeId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(t.assigneeId) ? t.assigneeId : '',
@@ -982,8 +985,19 @@
     s.events.forEach(function (e) { eventIds[e.id] = true; });
     s.people.forEach(function (p) { personIds[p.id] = true; });
     s.events.forEach(function (e) { if (!personIds[e.headId]) e.headId = ''; });
+    /* A task is kept even when its activity is not on this device.
+
+       This used to drop it, on the reasoning that an activity which is not here
+       has been deleted. It is just as often an activity this person may not
+       open: a college officer given a task in a National activity, a volunteer
+       given one before being attached to it. The server sends them the task and
+       not the activity, so the task arrived, showed in My tasks, and was thrown
+       away the next time the page was opened — and because the sync had already
+       passed it, it did not come back until the next full round, only to be
+       thrown away again. Deleting an activity removes its tasks by itself; it
+       never needed this. */
     s.tasks = s.tasks.filter(function (t) {
-      return t.kind === 'directive' ? true : !!eventIds[t.eventId];
+      return t.kind === 'directive' || !!t.eventId;
     });
     s.reports = s.reports.filter(function (r) { return eventIds[r.eventId]; });
 
@@ -1767,7 +1781,8 @@
       list = list.filter(function (t) {
         if ((t.kind || 'event') === 'directive') return true;
         var e = event(t.eventId);
-        return e && e.status !== 'Archived';
+        // Not here is not archived: it may be an activity this person cannot open.
+        return !e || e.status !== 'Archived';
       });
     }
     return list;

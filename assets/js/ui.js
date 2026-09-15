@@ -114,6 +114,13 @@
     return Auth.canEditTask(task);
   }
 
+  /* Whether the status may be changed: everyone who may edit the task, and the
+     person it was given to. */
+  function statusEditable(task) {
+    if (!global.Auth || !Auth.signedIn()) return true;
+    return Auth.canUpdateTask ? Auth.canUpdateTask(task) : Auth.canEditTask(task);
+  }
+
   function taskRow(task, meta, opts) {
     opts = opts || {};
     var parts = (meta || []).filter(Boolean);
@@ -159,7 +166,7 @@
       '</button>' +
       '<span class="task-right">' +
         (opts.lean ? '' : dueChip(task)) +
-        statusChip(task, editable(task)) + '</span>' +
+        statusChip(task, statusEditable(task)) + '</span>' +
     '</div>';
   }
 
@@ -539,7 +546,7 @@
 
   global.UI = {
     icon: icon, statusClass: statusClass, statusChip: statusChip, dueChip: dueChip,
-    taskRow: taskRow, taskEditable: editable,
+    taskRow: taskRow, taskEditable: editable, taskStatusEditable: statusEditable,
     progressBar: progressBar, avatar: avatar, empty: empty,
     who: who, whoIndex: whoIndex, ring: ring, flashRow: flashRow, applyFlash: applyFlash,
     toast: toast, modal: modal, confirm: confirm,

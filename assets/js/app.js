@@ -395,10 +395,19 @@
       var id = el.getAttribute('data-status-for');
       // The chip is already plain text on a row you may not change; this is the
       // second lock, so a stray click cannot slip past the first.
-      if (!UI.taskEditable(Store.task(id))) {
+      if (!(UI.taskStatusEditable || UI.taskEditable)(Store.task(id))) {
         return UI.toast('That belongs to another unit — you can read it, not change it.', 'error');
       }
       UI.openStatusMenu(el, id);
+    });
+
+    /* A task row somebody may read and not edit. It was drawn as a button with
+       nothing listening to it, so tapping it did nothing — which looked broken,
+       because it was. It opens the task to read, and to mark how it is going
+       where it is theirs. */
+    U.on(document.body, 'click', '[data-view]', function (ev, el) {
+      ev.preventDefault();
+      Forms.taskView(el.getAttribute('data-view'));
     });
 
     document.getElementById('btn-search').addEventListener('click', openSearch);

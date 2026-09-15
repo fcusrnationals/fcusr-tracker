@@ -122,18 +122,50 @@ async function asPerson(browser, role) {
   await new Promise((r) => setTimeout(r, 500));
   const mine = await page.evaluate(() => {
     const v = document.getElementById('view');
+    const sel = v.querySelector('#person-select');
+    const row = [...v.querySelectorAll('.task')].find((r) => /MY OWN DIRECTIVE/.test(r.textContent));
     return {
-      picker: !!v.querySelector('#person-select'),
+      picker: !!sel,
+      pickerOnSelf: !!sel && /\(you\)/.test(sel.options[sel.selectedIndex].textContent),
       own: /MY OWN TASK/.test(v.innerText),
       directive: /MY OWN DIRECTIVE/.test(v.innerText),
       headedDirectives: [...v.querySelectorAll('.group-title')].some((g) => g.textContent.trim() === 'Directives'),
-      others: /SOMEBODY ELSES TASK/.test(v.innerText)
+      others: /SOMEBODY ELSES TASK/.test(v.innerText),
+      canTick: !!(row && row.querySelector('[data-status-for]'))
     };
   });
-  if (mine.picker) odd.push('My tasks asks a signed-in person to pick their own name');
+  if (R.access === 'volunteer' && mine.picker) odd.push('a volunteer is offered other people\'s task lists');
+  if (R.access !== 'volunteer' && !mine.pickerOnSelf) odd.push('the name dropdown does not start on the person signed in');
   if (!mine.own) odd.push('My tasks does not show their own task');
   if (!mine.directive || !mine.headedDirectives) odd.push('their directive is missing or mis-headed');
   if (mine.others) odd.push('My tasks shows somebody else\'s task');
+  if (!mine.canTick) odd.push('they cannot change the status of a directive given to them');
+
+  // Tapping their directive opens it — it used to do nothing at all.
+  const opened = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('#view .task')].find((r) => /MY OWN DIRECTIVE/.test(r.textContent));
+    row.querySelector('.task-main').click();
+    const md = [...document.querySelectorAll('.modal-backdrop')].pop();
+    // Whoever may edit it gets the full form, with the title in a text box.
+    const title = md && (md.textContent + ' ' + ((md.querySelector('#f-title') || {}).value || ''));
+    const ok = !!md && /MY OWN DIRECTIVE/.test(title) && !!md.querySelector('#f-status') &&
+      !md.querySelector('#f-eventId');
+    if (md) {
+      md.querySelector('#f-status').value = 'Done';
+      md.querySelector('#f-status').dispatchEvent(new Event('change', { bubbles: true }));
+      md.querySelector('[data-save]').click();
+    }
+    const t = Store.tasks().find((x) => x.title === 'MY OWN DIRECTIVE');
+    return { ok, done: !!t && t.status === 'Done' };
+  });
+  if (!opened.ok) odd.push('tapping their own directive does not open it with a status to set');
+  if (!opened.done) odd.push('marking their own directive done did not save');
+  await new Promise((r) => setTimeout(r, 300));
+  const underDone = await page.evaluate(() => {
+    const g = document.querySelector('[data-group="__done__"]');
+    return !!g && /MY OWN DIRECTIVE/.test(g.textContent);
+  });
+  if (!underDone) odd.push('the finished directive is not under Done');
 
   // ---- every control, everywhere ----
   let clicks = 0;

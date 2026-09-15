@@ -148,8 +148,34 @@
   function canEditTask(t) {
     if (!me || !t) return false;
     if ((t.kind || 'event') === 'directive') return isNational();
-    if (isVolunteer()) return t.assigneeId === me.id || canSee(t.eventId);
+    if (isVolunteer()) return canSee(t.eventId);
     return canEditEvent(t.eventId);
+  }
+
+  /* The directory entry of whoever is signed in. An account and a directory
+     entry are different records, joined by the address the account was made
+     with — they do not share an id. */
+  function myPerson() {
+    if (!me || !me.email) return null;
+    return Store.personByEmail(me.email);
+  }
+
+  /* Whether this task was given to the person signed in.
+
+     Whoever holds a task may mark how it is going, whatever unit it belongs to.
+     That was meant to be true all along and was not: the check compared the
+     task's holder with the account's id, which is never a directory entry's
+     id, so it matched nobody. A volunteer could not tick off their own
+     directive, and a Governor given a task in a National activity could see it
+     and not touch it — tapping it did nothing at all. */
+  function isMyTask(t) {
+    var p = myPerson();
+    return !!(p && t && t.assigneeId && t.assigneeId === p.id);
+  }
+
+  /* Changing a task's status: whoever may edit it, and whoever holds it. */
+  function canUpdateTask(t) {
+    return canEditTask(t) || isMyTask(t);
   }
 
   /* A letter follows the same rule as an event: it belongs to a unit, and the
@@ -460,6 +486,7 @@
     isPresident: isPresident, isUnitHead: isUnitHead, canOpenSettings: canOpenSettings,
     canEnrolVolunteers: canEnrolVolunteers, canSeeLetter: canSeeLetter,
     canEditUnit: canEditUnit, canEditEvent: canEditEvent, canEditTask: canEditTask,
+    canUpdateTask: canUpdateTask, isMyTask: isMyTask, myPerson: myPerson,
     visibleEvents: visibleEvents, canSee: canSee, eventIdsFor: eventIdsFor,
     myUnitId: myUnitId,
     signIn: signIn, signUp: signUp, signOut: signOut,

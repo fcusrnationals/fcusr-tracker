@@ -224,10 +224,36 @@ const foundation = S.events().find((e) => e.title.startsWith('Foundation'));
 goto('#/events/' + foundation.id);
 check('2 grouping options', $$('[data-group-by]').length === 2);
 check('event admin behind one menu', !!$('[data-more]'));
-S.setLastPerson(S.people()[0].id);
-goto('#/my-tasks');
-check('one segmented filter, no dropdown stack',
-  $$('[data-filter]').length === 3 && !$('#f-status') && !$('#f-sort'));
+{
+  const holder = S.people().find((p) => S.tasks({ assigneeId: p.id }).some((t) => t.status !== 'Done'));
+  S.setLastPerson(holder.id);
+  goto('#/my-tasks');
+  check('one segmented filter, no dropdown stack',
+    $$('[data-filter]').length === 2 && !$('#f-status') && !$('#f-sort'));
+  check('the name dropdown is there, on the person chosen',
+    !!$('#person-select') && $('#person-select').value === holder.id);
+
+  /* Ticking a task off made it vanish with nowhere obvious to find it. */
+  const t = S.tasks({ assigneeId: holder.id }).find((x) => x.status !== 'Done');
+  const was = t.status;
+  S.setTaskStatus(t.id, 'Done');
+  goto('#/my-tasks');
+  const doneGroup = () => $('[data-group="__done__"]');
+  check('finished work waits under a Done dropdown', !!doneGroup() &&
+    doneGroup().getAttribute('data-collapsed') === 'true');
+  click($('[data-done-toggle]'));
+  check('which opens onto the finished task', doneGroup().getAttribute('data-collapsed') === 'false' &&
+    doneGroup().textContent.includes(t.title));
+  check('and it is not in the to-do list above it',
+    !$$('.group:not([data-group="__done__"]) .task-title').some((n) => n.textContent.includes(t.title)));
+  S.setTaskStatus(t.id, was);
+
+  const other = S.people().find((p) => p.id !== holder.id);
+  setValue($('#person-select'), other.id);
+  check('choosing another name shows their tasks', S.lastPerson() === other.id &&
+    $('.person-name').textContent === other.name);
+  S.setLastPerson(holder.id);
+}
 
 /* ---------------- core flow ---------------- */
 console.log('\n--- create event → add tasks ---');
@@ -841,13 +867,15 @@ console.log('\n--- adding somebody hands over a password ---');
 console.log('\n--- My tasks knows who is signed in ---');
 {
   const src = fs.readFileSync(path.join(ROOT, 'assets/js/views/mytasks.js'), 'utf8');
-  check('signed in, it is the person whose account it is',
-    /if \(signedIn\(\)\) \{[\s\S]*?Store\.personByEmail\(me\.email\)/.test(src),
-    'My tasks still asks a signed-in officer to pick their own name');
-  check('and there is no switching to somebody else\u2019s list',
-    /\(signedIn\(\) \? '' :\s*'<button type="button" class="btn btn-sm" data-switch>/.test(src));
+  check('signed in, it starts on the person whose account it is',
+    /Auth\.myPerson/.test(src) && /return self \? self\.id : ''/.test(src),
+    'My tasks does not start on the signed-in person');
+  check('a volunteer is not offered anybody else\u2019s list',
+    /if \(isVolunteer\(\) \|\|/.test(src) && /isVolunteer\(\)\) \{\s*list = \[\];/.test(src));
+  check('a choice is forgotten when somebody else signs in',
+    /chosen\.by === myEmail\(\)/.test(src));
   check('a directive is headed Directives, not Event',
-    /eid === DIRECTIVES \? 'Directives'/.test(src) && !/e \? e\.title : 'Event'/.test(src));
+    /key === DIRECTIVES\) return 'Directives'/.test(src) && !/e \? e\.title : 'Event'/.test(src));
 }
 
 /* ---------------- a pasted roster makes accounts, for the right people ---------------- */
