@@ -13,6 +13,10 @@
 
   function president() { return !global.Auth || Auth.isPresident() || Auth.isOffline(); }
 
+  function myUnitNow() {
+    return (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId();
+  }
+
   function render() {
     var org = Store.org();
     var counts = Store.raw();
@@ -38,13 +42,23 @@
       U.plural(people.length, 'person', 'people') +
         (mineOnly ? ' \u00b7 ' + Store.unitName(myUnit) : ''),
       '<div style="padding:14px">' +
-      '<p class="small muted">Add somebody and they are given a username and a password to sign ' +
-      'in with — nothing to type but their name. Forgotten passwords are set again from ' +
-      '<strong>Who can sign in</strong>. A person&rsquo;s ' +
+      '<p class="small muted">' + (mineOnly
+        ? 'Your council’s officers are added by the National government. Volunteers are ' +
+          'taken on from the activity they are helping with — open it and use <strong>Add ' +
+          'volunteer</strong>, or give them its code. '
+        : 'Add somebody and they are given a username and a password to sign in with — ' +
+          'nothing to type but their name. Volunteers are taken on from the activity itself. ' +
+          'Forgotten passwords are set again from <strong>Who can sign in</strong>. ') +
+      'A person&rsquo;s ' +
       '<strong>position</strong> is only a label printed on reports &mdash; what they can actually ' +
       'reach is decided by the two settings below.</p>' +
       '<div class="row" style="margin:12px 0">' +
-        '<button type="button" class="btn btn-primary" data-add-person>' + UI.icon('plus') + 'Add someone</button>' +
+        /* A college's officers are the National government's to add; its
+           volunteers are taken on from the activity they are helping with. So a
+           Governor has nobody to add from here, and a button that always
+           refuses is worse than no button. */
+        (mineOnly ? '' :
+          '<button type="button" class="btn btn-primary" data-add-person>' + UI.icon('plus') + 'Add someone</button>') +
         '<button type="button" class="btn" data-roster>' + UI.icon('users') + 'Who can sign in</button>' +
         '<button type="button" class="btn" data-my-handover>' + UI.icon('check') + 'Before you hand over</button>' +
       '</div>' +
@@ -130,17 +144,44 @@
       '<p class="tiny muted" style="margin:10px 0 0">A unit holding events is set inactive rather than ' +
       'removed, so past work keeps the unit it was filed under.</p></div>');
 
-    /* ---- offices letters pass through ---- */
-    var offs = Store.offices();
-    if (!mineOnly) html += section('offices', 'Offices', U.plural(offs.length, 'office'),
+    /* ---- offices letters pass through ----
+
+       Two kinds, and the difference is the whole point: the Republic's desks —
+       the OSA, the Dean of Student Affairs — which every unit routes letters
+       through, and a unit's own, which mean nothing to anybody else. The
+       National government adds the first and sees both; a college adds and sees
+       only its own, underneath the Republic's, which it may use and not
+       change. */
+    var republicOffices = Store.offices({ republicOnly: true });
+    var myOffices = Store.offices({ ownedBy: myUnit });
+    var offs = mineOnly ? republicOffices.concat(myOffices) : Store.offices();
+
+    html += section('offices', 'Offices',
+      mineOnly ? U.plural(myOffices.length, 'of your own') : U.plural(offs.length, 'office'),
       '<div style="padding:14px 14px 4px">' +
       '<p class="small muted">The desks a letter has to pass through. ' +
       '<strong>Usually takes</strong> is what turns the tracker into something useful: ' +
       'a letter sitting somewhere longer than that is flagged for chasing rather than ' +
-      'quietly forgotten.</p></div>' +
-      '<div class="list">' + offs.map(officeRow).join('') + '</div>' +
+      'quietly forgotten.</p>' +
+      (mineOnly
+        ? '<p class="small muted">The Republic&rsquo;s desks below are shared by every unit and ' +
+          'are the National government&rsquo;s to change. Anything you add here belongs to ' +
+          U.esc(Store.unitName(myUnit)) + ' alone.</p>'
+        : '<p class="small muted">An office added here is added for <strong>every unit</strong>. ' +
+          'A unit&rsquo;s own desks are marked with its code and are that unit&rsquo;s to change.</p>') +
+      '</div>' +
+      (mineOnly
+        ? '<div class="field-label" style="padding:0 14px">The Republic\u2019s desks</div>' +
+          '<div class="list">' + republicOffices.map(function (o) { return officeRow(o, true); }).join('') + '</div>' +
+          '<div class="field-label" style="padding:12px 14px 0">' +
+          U.esc(Store.unitName(myUnit)) + '\u2019s own</div>' +
+          (myOffices.length
+            ? '<div class="list">' + myOffices.map(function (o) { return officeRow(o); }).join('') + '</div>'
+            : '<p class="small muted" style="padding:6px 14px 0">None yet. Add the desks only ' +
+              'your council uses \u2014 your own Dean, your adviser.</p>')
+        : '<div class="list">' + offs.map(function (o) { return officeRow(o); }).join('') + '</div>') +
       '<div style="padding:12px"><button type="button" class="btn btn-block" data-add-office>' +
-      UI.icon('plus') + 'Add office</button>' +
+      UI.icon('plus') + (mineOnly ? 'Add one of your own' : 'Add office') + '</button>' +
       '<p class="tiny muted" style="margin:10px 0 0">An office letters have already passed ' +
       'through is set inactive rather than removed, so old trails still read correctly.</p></div>');
 
@@ -451,7 +492,7 @@
      active, whatever had been chosen. */
   var ALL_TABS = ['access', 'term', 'units', 'offices', 'roles',
                   'letterhead', 'sync', 'backup', 'data'];
-  var UNIT_HEAD_TABS = ['access', 'template', 'sync', 'backup'];
+  var UNIT_HEAD_TABS = ['access', 'offices', 'template', 'sync', 'backup'];
 
   var active = '';
 
@@ -491,15 +532,23 @@
       '</span></div>';
   }
 
-  function officeRow(o) {
+  function officeRow(o, readOnly) {
     var held = Store.officeLetterCount(o.id);
+    var owner = Store.officeOwner(o);
+    var main = '<span class="task-title">' +
+      (o.code ? '<span class="unit-code">' + U.esc(o.code) + '</span>' : '') + U.esc(o.name) +
+      (o.active === false ? ' <span class="chip st-not-started">Inactive</span>' : '') + '</span>' +
+      '<span class="task-meta">Usually ' + U.plural(o.turnaroundDays, 'day') +
+        '<span class="sep">·</span>' + U.plural(held, 'letter') +
+        (owner ? '<span class="sep">·</span>' + U.esc(Store.unitName(owner)) + '\u2019s own'
+               : '<span class="sep">·</span>every unit') + '</span>';
+
+    // A college reads the Republic's desks and does not change them.
+    if (readOnly) {
+      return '<div class="task"><span class="task-main" style="cursor:default">' + main + '</span></div>';
+    }
     return '<div class="task">' +
-      '<button type="button" class="task-main" data-edit-office="' + U.esc(o.id) + '">' +
-        '<span class="task-title">' +
-          (o.code ? '<span class="unit-code">' + U.esc(o.code) + '</span>' : '') + U.esc(o.name) +
-          (o.active === false ? ' <span class="chip st-not-started">Inactive</span>' : '') + '</span>' +
-        '<span class="task-meta">Usually ' + U.plural(o.turnaroundDays, 'day') +
-          '<span class="sep">·</span>' + U.plural(held, 'letter') + '</span></button>' +
+      '<button type="button" class="task-main" data-edit-office="' + U.esc(o.id) + '">' + main + '</button>' +
       '<span class="task-right"><button type="button" class="btn btn-sm" data-toggle-office="' +
         U.esc(o.id) + '">' + (o.active === false ? 'Reactivate' : 'Deactivate') + '</button></span>' +
     '</div>';
@@ -711,7 +760,10 @@
     });
 
     U.els('[data-add-office]', root).forEach(function (b) {
-      b.addEventListener('click', function () { Forms.officeForm(null); });
+      // A college adds its own desk; the National government adds the Republic's.
+      b.addEventListener('click', function () {
+        Forms.officeForm(null, { unitId: president() ? '' : myUnitNow() });
+      });
     });
     U.els('[data-edit-office]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.officeForm(b.getAttribute('data-edit-office')); });
@@ -768,21 +820,46 @@
         if (holds.events) parts.push(U.plural(holds.events, 'activity', 'activities') + ' they head');
         if (holds.letters) parts.push(U.plural(holds.letters, 'letter') + ' they are carrying');
 
+        var online = !!(global.Auth && !Auth.isOffline());
+        var hasLogin = !!p.email;
+
         UI.confirm({
           title: 'Remove ' + p.name + '?',
-          message: holds.total
+          message: (holds.total
             ? p.name + ' is holding ' + parts.join(', ') + '. Those are kept \u2014 the ' +
               'tasks simply become unassigned, and the letters keep their name as text \u2014 ' +
               'but nobody will be answerable for them until somebody else is put on.'
-            : p.name + ' is not holding anything, so nothing else changes.',
+            : p.name + ' is not holding anything, so nothing else changes.') +
+            (online && hasLogin
+              ? ' Their login (' + U.loginLabel(p.email) + ') is deleted with them, on every ' +
+                'device, and they can no longer sign in.'
+              : ''),
           detail: 'If they were an officer whose term has ended, deactivate them instead: ' +
             'their name then stays on the work they did.',
           confirmLabel: 'Remove from the list'
         }).then(function (ok) {
           if (!ok) return;
-          Store.deletePerson(p.id);
-          UI.toast(p.name + ' removed.' + (holds.tasks
-            ? ' ' + U.plural(holds.tasks, 'task') + ' now unassigned.' : ''));
+          var done = function () {
+            Store.deletePerson(p.id);
+            UI.toast(p.name + ' removed.' + (holds.tasks
+              ? ' ' + U.plural(holds.tasks, 'task') + ' now unassigned.' : ''));
+          };
+
+          /* The login goes with the person. It used to stay: the name vanished
+             from the directory and the account behind it carried on signing in,
+             turning up under "Who can sign in" with nobody to match it to. The
+             server is asked first, because a directory entry removed here while
+             the account survives is exactly the state that was wrong. */
+          if (!online || !hasLogin) return done();
+          Backend.removeMember(p.email).then(done).catch(function (err) {
+            if (err && err.setupMissing) {
+              return UI.toast('Their login could not be removed: the database needs one setup ' +
+                'step first. Nothing was changed.', 'error');
+            }
+            UI.toast((err && err.message) ||
+              'Their login could not be removed, so nothing was changed. Try again in a moment.',
+              'error');
+          });
         });
       });
     });

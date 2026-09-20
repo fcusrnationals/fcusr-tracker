@@ -327,6 +327,9 @@
     if (!canEdit(e)) return '';
 
     var list = Store.volunteersFor(e.id);
+    var code = e.volunteerCode || '';
+    var live = !Store.isShelved(e) && e.status !== 'Completed';
+
     var html = '<div class="section">' +
       (asTab ? ''
         : '<div class="section-head">' +
@@ -350,13 +353,41 @@
         'this activity and nothing else, and only while it is running.</p>';
     }
 
+    /* The code, which is how nearly everybody gets in: the officer reads it
+       out once and forty helpers let themselves in, each under their own name.
+       Typing them in one at a time is still here for the ones who are not in
+       the room. */
+    html += '<div class="join-code">' +
+      '<div class="jc-label">How volunteers join</div>' +
+      (code && live
+        ? '<div class="jc-code">' + U.esc(code) + '</div>' +
+          '<div class="jc-note">They open <strong>' + U.esc(SITE_SHORT) + '</strong>, tap ' +
+          '<strong>I am a volunteer</strong>, and type this code and their name. No password. ' +
+          'Anybody with the code can join this activity and nothing else.</div>' +
+          '<div class="jc-actions">' +
+          '<button type="button" class="btn btn-sm" data-copy-code>Copy the message</button>' +
+          '<button type="button" class="btn btn-sm" data-new-code>New code</button>' +
+          '<button type="button" class="btn btn-sm btn-ghost" data-stop-code>Stop it</button>' +
+          '</div>'
+        : live
+          ? '<div class="jc-note">Make a code and read it out. Volunteers type it with their ' +
+            'name and are in \u2014 no password, and only this activity.</div>' +
+            '<div class="jc-actions">' +
+            '<button type="button" class="btn btn-sm btn-primary" data-new-code>' +
+            UI.icon('plus') + 'Make a code</button></div>'
+          : '<div class="jc-note">This activity is over, so no code will open it.</div>') +
+      '</div>';
+
     html += '<div style="margin-top:10px" class="row" style="gap:8px">' +
-      '<button type="button" class="btn" data-add-volunteer>' + UI.icon('plus') + 'Add volunteer</button>' +
-      '<button type="button" class="btn" data-import-volunteers>' + UI.icon('upload') + 'Import a list</button>' +
+      '<button type="button" class="btn" data-add-volunteer>' + UI.icon('plus') + 'Add one by name</button>' +
+      '<button type="button" class="btn" data-import-volunteers>' + UI.icon('upload') + 'Add a list</button>' +
       '</div></div>';
 
     return html;
   }
+
+  // Where a volunteer is told to go. Short enough to read down a phone.
+  var SITE_SHORT = 'fcusrnationals.github.io/fcusr-tracker';
 
   function seg(key, label) {
     return '<button type="button" data-group-by="' + key + '"' +
@@ -450,6 +481,49 @@
           UI.toast(p.name + ' removed.');
         });
       });
+    });
+
+    var newCode = root.querySelector('[data-new-code]');
+    if (newCode) newCode.addEventListener('click', function () {
+      var had = !!e.volunteerCode;
+      var go = function () {
+        try {
+          var code = Store.makeVolunteerCode(e.id);
+          UI.toast('The code is ' + code + '. Read it out to them.');
+        } catch (err) { UI.toast(err.message, 'error'); }
+      };
+      if (!had) return go();
+      UI.confirm({
+        title: 'Replace the code?',
+        message: 'The old code stops working straight away, and anybody who joined with it is ' +
+          'signed out until you give them the new one.',
+        detail: 'Their work stays exactly where it is. Use this when a code has got out.',
+        confirmLabel: 'Make a new code'
+      }).then(function (ok) { if (ok) go(); });
+    });
+
+    var stopCode = root.querySelector('[data-stop-code]');
+    if (stopCode) stopCode.addEventListener('click', function () {
+      UI.confirm({
+        title: 'Stop the code?',
+        message: 'Nobody new can join with it. The volunteers already on this activity stay.',
+        confirmLabel: 'Stop it'
+      }).then(function (ok) {
+        if (!ok) return;
+        Store.clearVolunteerCode(e.id);
+        UI.toast('The code is closed.');
+      });
+    });
+
+    var copyCode = root.querySelector('[data-copy-code]');
+    if (copyCode) copyCode.addEventListener('click', function () {
+      var line = 'FCUSR Task Tracker — ' + e.title + '\n' +
+        'https://' + SITE_SHORT + '\n' +
+        'Tap "I am a volunteer" and enter:\n' +
+        'Code: ' + e.volunteerCode + '\n' +
+        'Your full name.';
+      UI.copyText(line).then(function () { UI.toast('Copied — send it to your volunteers.'); })
+        .catch(function (err) { UI.toast(err.message, 'error'); });
     });
 
     var again = root.querySelector('[data-reschedule]');

@@ -159,6 +159,42 @@ window.fetch = function (url, opts) {
   }
 
   /* ---- rest ---- */
+  /* join_with_code: volunteer-code.sql. The one call made by somebody not
+     signed in — the code stands in for a login. */
+  if (u.indexOf('/rest/v1/rpc/join_with_code') === 0) {
+    const code = String(body.p_code || '').toUpperCase();
+    const name = String(body.p_name || '').trim();
+    const ev = SB.codes && SB.codes[code];
+    if (!ev) return reply(400, { message: 'That code is not open.' });
+    if (name.length < 2) return reply(400, { message: 'Type your full name.' });
+    let email = Object.keys(SB.users).find((e) => {
+      const pr = SB.profiles[SB.users[e].id];
+      return pr && pr.access === 'volunteer' && pr.full_name.toLowerCase() === name.toLowerCase() &&
+        SB.members.some((m) => m.profile_id === pr.id && m.event_id === ev.eventId);
+    });
+    let id;
+    if (email) {
+      id = SB.users[email].id;
+      SB.users[email].password = code;
+    } else {
+      let base = name.toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+      let username = base, n = 1;
+      while (SB.users[username + '@fcusr.invalid']) { n++; username = base + n; }
+      email = username + '@fcusr.invalid';
+      id = 'user-' + (++SB.n);
+      SB.users[email] = { id: id, email: email, password: code };
+      SB.members.push({ event_id: ev.eventId, profile_id: id });
+    }
+    SB.profiles[id] = {
+      id: id, email: email, full_name: name, position: 'Volunteer', unit_id: ev.unitId,
+      access: 'volunteer', is_head: false, active: true, units: units.find((x) => x.id === ev.unitId)
+    };
+    SB.enrolments[email] = { email: email, full_name: name, position: 'Volunteer',
+      unit_id: ev.unitId, access: 'volunteer', event_ids: [ev.eventId], claimed_at: new Date().toISOString() };
+    return reply(200, email.split('@')[0]);
+  }
+
+  /* ---- rest ---- */
   if (!who) return reply(401, { message: 'JWT expired or missing' });
 
   if (u.indexOf('/rest/v1/units') === 0) return reply(200, units);
@@ -1396,6 +1432,127 @@ const FILES = [
     check('there is no Change my password anywhere', !D.querySelector('[data-change-pw]') &&
       typeof Auth.changePassword === 'undefined');
     await Auth.signOut();
+  }
+
+  /* ---------------- a volunteer joins with the activity's code ----------------
+     Forty helpers for one activity used to be forty names typed by an officer
+     and forty passwords handed out, every one of them a chance to be stranded
+     at the door. The code is the whole of what a volunteer needs. */
+  console.log('\n--- joining with an activity code ---');
+  {
+    const D = window.document;
+    const click = (el) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const top = () => [...D.querySelectorAll('.modal-backdrop')].pop();
+
+    await Auth.signOut();
+    SB.codes = { 'NURSEWEEK-4827': { eventId: 'event-cn-1', unitId: CN } };
+
+    window.App.render();
+    check('the door offers a volunteer their own way in', !!D.querySelector('[data-volunteer]'));
+    click(D.querySelector('[data-volunteer]'));
+    await wait(30);
+    check('which asks for the code and a name',
+      !!top() && !!top().querySelector('#v-code') && !!top().querySelector('#v-name'));
+
+    top().querySelector('#v-code').value = 'nurseweek-4827';
+    top().querySelector('#v-name').value = 'Bea  Villanueva';
+    click(top().querySelector('[data-go]'));
+    await wait(120);
+    check('a volunteer is in, with no password anywhere', Auth.signedIn() && Auth.isVolunteer(),
+      Auth.signedIn() ? Auth.current().access : 'not signed in');
+    check('under the name they typed', Auth.current().name === 'Bea  Villanueva'.replace(/\s+/g, '  '),
+      Auth.current().name);
+    check('in the unit that owns the activity', Auth.current().unitName === 'College of Nursing');
+    check('and attached to that activity', Auth.current().eventIds.indexOf('event-cn-1') >= 0);
+
+    const account = Object.keys(SB.users).find((e) => /bea\.villanueva/.test(e));
+    check('their login is a username, never an address they had to give', /@fcusr\.invalid$/.test(account), account);
+    check('and its password is the code itself', SB.users[account].password === 'NURSEWEEK-4827');
+
+    // The same person, next week, on a different phone.
+    await Auth.signOut();
+    window.App.render();
+    click(D.querySelector('[data-volunteer]'));
+    await wait(30);
+    top().querySelector('#v-code').value = 'NURSEWEEK-4827';
+    top().querySelector('#v-name').value = 'Bea  Villanueva';
+    click(top().querySelector('[data-go]'));
+    await wait(120);
+    check('joining again is the same account, not a second one', Auth.signedIn() &&
+      Object.keys(SB.users).filter((e) => /bea\.villanueva/.test(e)).length === 1);
+
+    // A code that is not open.
+    await Auth.signOut();
+    window.App.render();
+    click(D.querySelector('[data-volunteer]'));
+    await wait(30);
+    top().querySelector('#v-code').value = 'MADE-UP-1234';
+    top().querySelector('#v-name').value = 'A Stranger';
+    click(top().querySelector('[data-go]'));
+    await wait(120);
+    check('a code that is not open says so and lets nobody in',
+      !Auth.signedIn() && /not open/i.test(top().textContent), top() ? top().textContent.slice(0, 90) : 'no dialog');
+    D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+  }
+
+  /* ---------------- removing somebody removes their login ----------------
+     Remove on the directory used to take the name off the list and leave the
+     account behind it signing in — turning up under "Who can sign in" with
+     nobody to match it to, and still holding everything that account could
+     reach. */
+  console.log('\n--- removing somebody takes their login with them ---');
+  {
+    const D = window.document;
+    const click = (el) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const top = () => [...D.querySelectorAll('.modal-backdrop')].pop();
+
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+
+    const nat = Store.nationalUnitId();
+    window.Forms.personForm(null, { unitId: nat });
+    top().querySelector('#f-name').value = 'Leaver, Test';
+    click(top().querySelector('[data-save]'));
+    await wait(120);
+    D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+
+    const person = Store.people().find((p) => p.name === 'Leaver, Test');
+    check('they are added, with a login', !!person && !!person.email && !!SB.users[person.email],
+      person && person.email);
+
+    window.App.go('#/settings');
+    window.App.render();
+    await wait(60);
+    const removeBtn = D.querySelector('[data-remove-person="' + person.id + '"]');
+    check('the directory offers to remove them', !!removeBtn);
+    click(removeBtn);
+    await wait(40);
+    check('and says the login goes too', /login/i.test(top().textContent), top().textContent.slice(0, 120));
+    click(top().querySelector('[data-ok]'));
+    await wait(150);
+
+    check('the login is gone from the server', !SB.users[person.email]);
+    check('so is their account', !Object.keys(SB.profiles).some((k) => SB.profiles[k].email === person.email));
+    check('and their enrolment', !SB.enrolments[person.email]);
+    check('the directory entry is gone here', !Store.person(person.id));
+    check('and recorded as deleted, so it goes from every other phone too',
+      !!(Store.deletions().person || {})[person.id]);
+
+    // Added again afterwards: one entry, one login, no leftovers.
+    window.Forms.personForm(null, { unitId: nat });
+    top().querySelector('#f-name').value = 'Leaver, Test';
+    click(top().querySelector('[data-save]'));
+    await wait(150);
+    D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+    check('adding them again makes exactly one entry',
+      Store.people().filter((p) => p.name === 'Leaver, Test').length === 1);
+    check('and exactly one login',
+      Object.keys(SB.users).filter((e) => /leaver/.test(e)).length === 1,
+      Object.keys(SB.users).filter((e) => /leaver/.test(e)).join(', '));
+    check('the directory holds no duplicates at all', Store.duplicatePeopleCount() === 0,
+      Store.duplicatePeopleCount() + ' duplicates');
   }
 
   /* ---------------- a delete too big for one address ----------------

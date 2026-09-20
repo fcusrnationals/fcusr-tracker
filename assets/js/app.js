@@ -585,9 +585,11 @@
         '</span>' +
       '</button>' +
       '<div class="sep"></div>' +
+      '<button type="button" data-set="home">Put it on my home screen</button>' +
       '<button type="button" class="danger" data-set="out">Sign out</button>';
 
     UI.openMenu(anchor, items, function (action) {
+      if (action === 'home') return offerHomeScreen(true);
       if (action === 'out') return signOutFlow();
     });
   }
@@ -633,6 +635,106 @@
     // date, so stacking the term reminder behind it would greet somebody with
     // two dialogs saying overlapping things.
     TermUI.maybeRemind();
+    offerHomeScreen();
+  }
+
+  /* ---------- put it on the home screen ----------
+
+     A tracker somebody has to find in a browser's history is a tracker that
+     gets opened once a week. On the home screen it is an app: one tap, no
+     address bar, the council's seal among their other icons. Every phone can do
+     it and almost nobody knows how, so this says how — for the phone they are
+     actually holding — and then gets out of the way for good.
+
+     Asked once per device, never in front of the sign-in screen, and never when
+     the app is already running from the home screen. */
+  var INSTALL_KEY = 'fcusr.tracker.homescreen';
+
+  function standalone() {
+    try {
+      return (global.matchMedia && matchMedia('(display-mode: standalone)').matches) ||
+        global.navigator.standalone === true;
+    } catch (e) { return false; }
+  }
+
+  function installState() {
+    try { return global.localStorage.getItem(INSTALL_KEY) || ''; } catch (e) { return 'skip'; }
+  }
+  function rememberInstalled(v) {
+    try { global.localStorage.setItem(INSTALL_KEY, v); } catch (e) { /* private window */ }
+  }
+
+  function phoneKind() {
+    var ua = String(global.navigator.userAgent || '');
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+    if (/Android/i.test(ua)) return 'android';
+    return 'other';
+  }
+
+  function offerHomeScreen(forced) {
+    if (!forced) {
+      if (standalone() || installState() === 'yes') return;
+      if (global.Auth && !Auth.isOffline() && !Auth.signedIn()) return;   // not at the door
+      /* Only where there is a home screen to put it on. A computer gets the
+         same instructions from the account menu if anybody wants them, but it
+         is not something to greet somebody with at the library PC. */
+      if (phoneKind() === 'other') return;
+    }
+
+    var kind = phoneKind();
+    var steps = kind === 'ios'
+      ? ['Tap the <strong>Share</strong> button at the bottom of Safari ' +
+         '&mdash; the square with an arrow coming out of it.',
+         'Scroll down and tap <strong>Add to Home Screen</strong>.',
+         'Tap <strong>Add</strong> at the top right.']
+      : kind === 'android'
+        ? ['Tap the <strong>\u22ee</strong> menu at the top right of Chrome.',
+           'Tap <strong>Add to Home screen</strong> (or <strong>Install app</strong>).',
+           'Tap <strong>Install</strong>.']
+        : ['Open this page on your phone, in <strong>Safari</strong> (iPhone) or ' +
+           '<strong>Chrome</strong> (Android).',
+           'iPhone: <strong>Share \u2192 Add to Home Screen</strong>. ' +
+           'Android: <strong>\u22ee \u2192 Add to Home screen</strong>.',
+           'On a computer you can also use Chrome\u2019s <strong>Install</strong> button in the ' +
+           'address bar.'];
+
+    UI.modal({
+      title: 'Put the tracker on your home screen',
+      body:
+        '<p class="small" style="margin-top:0">It opens like an app after that: one tap, no ' +
+        'address bar, and it stays signed in. It takes about ten seconds.</p>' +
+        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+        '<div class="strong" style="margin-bottom:6px">' +
+        (kind === 'ios' ? 'On your iPhone' : kind === 'android' ? 'On your Android phone' : 'On your phone') +
+        '</div>' +
+        '<ol class="small" style="padding-left:18px;line-height:1.9;margin:0">' +
+        steps.map(function (t) { return '<li>' + t + '</li>'; }).join('') +
+        '</ol></div>' +
+        '<p class="small muted" style="margin-bottom:0">Nothing is downloaded and nothing is ' +
+        'installed from a store — it is this same page, kept where you can reach it.</p>',
+      footer: '<button type="button" class="btn" data-close>Not now</button>' +
+        '<button type="button" class="btn btn-primary" data-done>I have added it</button>',
+      onMount: function (root, close) {
+        root.querySelector('[data-done]').addEventListener('click', function () {
+          close();
+          /* Asked twice on purpose. "I have added it" is the button somebody
+             presses to make a dialog go away, and this one never comes back —
+             so it is worth one plain question before it does. */
+          UI.confirm({
+            title: 'Is it on your home screen now?',
+            message: 'Have a look for the FCUSR icon on your phone before you answer.',
+            detail: 'Say yes and this is never asked again on this phone.',
+            tone: 'primary',
+            cancelLabel: 'Not yet',
+            confirmLabel: 'Yes, it is there'
+          }).then(function (ok) {
+            if (!ok) return offerHomeScreen(true);
+            rememberInstalled('yes');
+            UI.toast('Good. Open it from your home screen from now on.');
+          });
+        });
+      }
+    });
   }
 
   /* Whether this device is behind. In the header rather than a settings page,

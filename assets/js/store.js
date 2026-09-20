@@ -389,6 +389,11 @@
       /* Why it was called off, and whether the council means to hold it later.
          A cancellation with no reason is a gap somebody has to ask about at the
          end of the term, so the reason is asked for when it is still fresh. */
+      /* The code a volunteer types at the door to join this activity. Held on
+         the activity itself, so it travels with it and ends with it. */
+      volunteerCode: str(e.volunteerCode, 24).toUpperCase().replace(/[^A-Z0-9-]/g, ''),
+      volunteerCodeAt: e.volunteerCodeAt ? stamp(e.volunteerCodeAt) : '',
+
       cancelReason: str(e.cancelReason, LIMITS.reason),
       cancelledBy: str(e.cancelledBy, LIMITS.name),
       cancelledAt: e.cancelledAt ? stamp(e.cancelledAt) : '',
@@ -1746,6 +1751,54 @@
     return e;
   }
 
+  /* ---------- the code a volunteer joins with ----------
+
+     Taking on forty helpers meant typing forty names and handing out forty
+     passwords. The activity carries a code instead; a volunteer types the code
+     and their own name at the door and is in, as a volunteer of that activity
+     and nothing else. Replacing the code shuts out everybody who joined with
+     the old one, which is the only revoking a council ever needs. */
+  function makeVolunteerCode(id) {
+    var e = event(id);
+    if (!e) return null;
+    if (isDirectiveSet(e)) throw new Error('A directive takes no volunteers.');
+    if (isShelved(e) || e.status === 'Completed') {
+      throw new Error('That activity is over, so a code would open nothing.');
+    }
+
+    var word = (e.title || 'ACTIVITY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || 'ACTIVITY';
+    var code = '';
+    var taken = function (c) {
+      return state.events.some(function (x) { return x.id !== e.id && x.volunteerCode === c; });
+    };
+    for (var tries = 0; tries < 40; tries++) {
+      // Four digits, and never one that reads as another activity's.
+      code = word + '-' + String(1000 + Math.floor(Math.random() * 9000));
+      if (!taken(code)) break;
+    }
+    e.volunteerCode = code;
+    e.volunteerCodeAt = nowISO();
+    e.updatedAt = bumpStamp(e.updatedAt);
+    commit();
+    return code;
+  }
+
+  function clearVolunteerCode(id) {
+    var e = event(id);
+    if (!e) return null;
+    e.volunteerCode = '';
+    e.volunteerCodeAt = '';
+    e.updatedAt = bumpStamp(e.updatedAt);
+    commit();
+    return e;
+  }
+
+  function eventByVolunteerCode(code) {
+    var want = String(code || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    if (!want) return null;
+    return state.events.filter(function (e) { return e.volunteerCode === want; })[0] || null;
+  }
+
   /* Calling an activity off.
 
      Not the same as deleting it and not the same as archiving it. The council
@@ -2254,6 +2307,11 @@
     return {
       id: id(o.id, 'off'),
       code: str(o.code, 16).toUpperCase().replace(/[^A-Z0-9-]/g, ''),
+      /* Whose desk this is. Empty means the Republic's, which every unit routes
+         letters through — the OSA, the Dean of Student Affairs, the President.
+         A college has desks of its own that mean nothing to anybody else (its
+         own Dean, its own adviser), and those carry its unit. */
+      unitId: typeof o.unitId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(o.unitId) ? o.unitId : '',
       name: name,
       seededName: str(o.seededName, LIMITS.org),
       turnaroundDays: isFinite(days) && days > 0 && days < 400 ? Math.round(days) : 3,
@@ -2319,12 +2377,27 @@
 
   /* ---------- offices ---------- */
 
+  /* `forUnit` is what a unit may route a letter through: the Republic's desks,
+     and its own. Without it the whole list comes back, which is what the
+     National government maintains and what the office screen shows. */
   function offices(opts) {
     opts = opts || {};
     var list = state.offices.slice();
     if (opts.activeOnly) list = list.filter(function (o) { return o.active !== false; });
+    if (opts.forUnit) {
+      list = list.filter(function (o) {
+        return !o.unitId || o.unitId === opts.forUnit || o.unitId === nationalUnitId();
+      });
+    }
+    if (opts.ownedBy) list = list.filter(function (o) { return o.unitId === opts.ownedBy; });
+    if (opts.republicOnly) {
+      list = list.filter(function (o) { return !o.unitId || o.unitId === nationalUnitId(); });
+    }
     return list.sort(function (a, b) { return a.name.localeCompare(b.name); });
   }
+
+  // Whose desk: the Republic's, or one unit's own.
+  function officeOwner(o) { return o && o.unitId && o.unitId !== nationalUnitId() ? o.unitId : ''; }
 
   function office(oid) {
     if (!oid) return null;
@@ -2364,8 +2437,17 @@
   }
 
   function addOffice(data) {
+    /* A code is unique per owner, so a college's "DEAN" cannot collide with the
+       Republic's: a unit's own desks carry their unit's code in front. */
+    var owner = data.unitId && data.unitId !== nationalUnitId() ? data.unitId : '';
+    var code = data.code || deriveCode(data.name);
+    if (owner) {
+      var u = unit(owner);
+      var prefix = (u && u.code ? u.code : 'UNIT') + '-';
+      if (code.indexOf(prefix) !== 0) code = prefix + code;
+    }
     var o = cleanOffice({
-      id: U.uid('off'), code: data.code || deriveCode(data.name), name: data.name,
+      id: U.uid('off'), code: code, name: data.name, unitId: owner,
       turnaroundDays: data.turnaroundDays, active: true,
       createdAt: nowISO(), updatedAt: nowISO()
     });
@@ -3759,7 +3841,7 @@
     committees: function () { return state.committees.slice(); },
     addListValue: addListValue, removeListValue: removeListValue,
     LETTER_STATUSES: LETTER_STATUSES, STOP_OUTCOMES: STOP_OUTCOMES,
-    offices: offices, office: office, officeName: officeName,
+    offices: offices, office: office, officeName: officeName, officeOwner: officeOwner,
     addOffice: addOffice, updateOffice: updateOffice, setOfficeActive: setOfficeActive,
     deleteOffice: deleteOffice, officeLetterCount: officeLetterCount,
     routeTemplates: routeTemplates,
@@ -3799,6 +3881,8 @@
     duplicatePeopleCount: duplicatePeopleCount, mergeDuplicatePeople: mergeDuplicatePeople,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
     cancelEvent: cancelEvent, reinstateEvent: reinstateEvent,
+    makeVolunteerCode: makeVolunteerCode, clearVolunteerCode: clearVolunteerCode,
+    eventByVolunteerCode: eventByVolunteerCode,
     isShelved: isShelved, isCancelled: isCancelled, isDirectiveSet: isDirectiveSet,
     directiveSets: directiveSets, directiveWork: directiveWork,
     needsFeedback: needsFeedback, setFeedbackLink: setFeedbackLink,

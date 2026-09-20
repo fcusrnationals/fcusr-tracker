@@ -1016,6 +1016,49 @@ console.log('\n--- a directive with tasks of its own ---');
   S.deleteEvent(set.id);
 }
 
+/* ---------------- the code volunteers join with ---------------- */
+console.log('\n--- an activity carries a code for its volunteers ---');
+{
+  // The council's own, so the screen is one this officer may change.
+  const ev = S.events({ unitId: S.nationalUnitId() })
+    .find((e) => e.status !== 'Completed' && !S.isShelved(e));
+  const code = S.makeVolunteerCode(ev.id);
+  check('a code is made from the activity\u2019s own name', /^[A-Z0-9]+-\d{4}$/.test(code), code);
+  check('and kept on the activity', S.event(ev.id).volunteerCode === code);
+  check('the activity can be found by it', S.eventByVolunteerCode(code.toLowerCase()).id === ev.id);
+  const again = S.makeVolunteerCode(ev.id);
+  check('a new one replaces the old', again !== code && S.event(ev.id).volunteerCode === again);
+  check('and the old one opens nothing', !S.eventByVolunteerCode(code));
+
+  goto('#/events/' + ev.id);
+  click($('[data-tab="volunteers"]'));
+  check('the activity shows the code to read out', text().includes(again));
+  check('with a way to copy, replace or stop it',
+    !!$('[data-copy-code]') && !!$('[data-new-code]') && !!$('[data-stop-code]'));
+  click($('[data-stop-code]'));
+  click($('.modal-backdrop [data-ok]'));
+  await new Promise((r) => setTimeout(r, 10));     // the confirm answers in a promise
+  check('stopping it closes the door', !S.event(ev.id).volunteerCode);
+  goto('#/events/' + ev.id);
+  click($('[data-tab="volunteers"]'));
+  check('and the screen offers to make another', !!$('[data-new-code]'));
+
+  // A directive takes no volunteers, so it takes no code either.
+  const dir = S.addEvent({ kind: 'directive', title: 'A standing instruction', unitId: S.nationalUnitId() });
+  let refused = '';
+  try { S.makeVolunteerCode(dir.id); } catch (e) { refused = e.message; }
+  check('a directive is refused a code', /takes no volunteers/.test(refused), refused);
+  S.deleteEvent(dir.id);
+
+  // Nor does one that is over.
+  const done = S.events().find((e) => e.status === 'Completed');
+  if (done) {
+    let over = '';
+    try { S.makeVolunteerCode(done.id); } catch (e) { over = e.message; }
+    check('nor one that is over', /over/.test(over), over);
+  }
+}
+
 /* ---------------- installed on a phone ---------------- */
 console.log('\n--- the tracker installs like an app ---');
 {

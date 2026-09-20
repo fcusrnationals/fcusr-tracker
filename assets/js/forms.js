@@ -31,6 +31,18 @@
     });
   }
 
+  /* The desks whoever is looking may route a letter through: the Republic's,
+     and their own unit's. A college's own Dean means nothing to another
+     college, and offering it would put it on their letters. */
+  function myUnitId() {
+    if (!global.Auth || !Auth.signedIn() || Auth.isOffline()) return Store.nationalUnitId();
+    return Auth.myUnitId() || Store.nationalUnitId();
+  }
+  function routableOffices(opts) {
+    opts = opts || {};
+    return Store.offices({ activeOnly: opts.activeOnly !== false, forUnit: myUnitId() });
+  }
+
   /* ---------- event ---------- */
 
   /* One form for an activity and for a directive that holds tasks. They are the
@@ -470,10 +482,16 @@
   /* An office a letter passes through. The turnaround is the only number here
      and it earns its place: it is what lets the tracker say "this has been
      sitting there too long" instead of only "it is there". */
-  function officeForm(officeId) {
+  function officeForm(officeId, opts) {
+    opts = opts || {};
     var o = officeId ? Store.office(officeId) : null;
     var isNew = !o;
     var held = o ? Store.officeLetterCount(o.id) : 0;
+    /* Whose desk this is. A college adds its own; the National government adds
+       the Republic's, which every unit routes letters through. */
+    var owner = isNew
+      ? (opts.unitId && opts.unitId !== Store.nationalUnitId() ? opts.unitId : '')
+      : Store.officeOwner(o);
     var d = o || { name: '', code: '', turnaroundDays: 3 };
 
     var body =
@@ -495,6 +513,12 @@
         hint: 'Days. A letter left longer than this is flagged for chasing.'
       }) +
       '</div>' +
+      '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+      '<div class="small">' + (owner
+        ? '<strong>' + U.esc(Store.unitName(owner)) + '\u2019s own desk.</strong> Only ' +
+          U.esc(Store.unitName(owner)) + ' routes letters through it, and only they see it.'
+        : '<strong>The Republic\u2019s desk.</strong> Every unit can route a letter through it, ' +
+          'so adding one here adds it for all of them.') + '</div></div>' +
       (!isNew
         ? '<p class="small muted">' + (held
             ? U.plural(held, 'letter') + ' has passed through here. An office with a trail can be ' +
@@ -521,7 +545,12 @@
           if (!isFinite(days) || days < 1) {
             return showError(root, 'turnaround', 'How many days does it usually take?');
           }
-          if (isNew) Store.addOffice(data); else Store.updateOffice(officeId, data);
+          if (isNew) {
+            data.unitId = owner;
+            Store.addOffice(data);
+          } else {
+            Store.updateOffice(officeId, data);
+          }
           close();
           UI.toast(isNew ? data.name + ' added.' : 'Office saved.');
         }
@@ -641,7 +670,7 @@
       '<div class="row" style="gap:6px;flex-wrap:nowrap;margin-top:8px">' +
       '<select id="f-laddoffice" style="flex:1">' +
       '<option value="">Add an office or person…</option>' +
-      Store.offices({ activeOnly: true }).map(function (o) {
+      routableOffices().map(function (o) {
         return '<option value="' + U.esc(o.id) + '">' + U.esc(o.name) + '</option>';
       }).join('') +
       '<option value="__office">An office that is not listed…</option>' +
@@ -805,12 +834,12 @@
           if (!name) return nameIn.focus();
 
           if (typedMode === 'office') {
-            var existing = Store.offices().filter(function (o) {
+            var existing = routableOffices({ activeOnly: false }).filter(function (o) {
               return o.name.toLowerCase() === name.toLowerCase();
             })[0];
             var made;
             try {
-              made = existing || Store.addOffice({ name: name });
+              made = existing || Store.addOffice({ name: name, unitId: myUnitId() });
             } catch (err) {
               return UI.toast(err.message || 'That office could not be added.', 'error');
             }
@@ -920,7 +949,7 @@
     if (at < 0) return;
 
     var here = Store.stopName(l.stops[at]);
-    var choices = Store.offices({ activeOnly: true });
+    var choices = routableOffices();
 
     var body =
       '<p class="small" style="margin-top:0">' + U.esc(here) + ' has the letter. ' +
@@ -973,12 +1002,12 @@
                 ? 'What is the office called?' : 'Who has to sign it?');
             }
             if (pick.value === '__office') {
-              var existing = Store.offices().filter(function (o) {
+              var existing = routableOffices({ activeOnly: false }).filter(function (o) {
                 return o.name.toLowerCase() === name.toLowerCase();
               })[0];
               var made;
               try {
-                made = existing || Store.addOffice({ name: name });
+                made = existing || Store.addOffice({ name: name, unitId: myUnitId() });
               } catch (err) {
                 return showError(root, 'office', err.message);
               }
@@ -2754,8 +2783,7 @@
     var d = p || { name: '', position: '', committee: '', active: true, unitId: myUnit };
     // Only the President moves people between units; a Governor's people are theirs.
     var canPickUnit = !global.Auth || Auth.isPresident() || Auth.isOffline();
-    var provinceHead = !!(global.Auth && Auth.signedIn() && !Auth.isOffline() &&
-      !Auth.isNational() && (Auth.current().unitKind === 'province'));
+
 
     var body =
       field({
@@ -2802,28 +2830,29 @@
          an executive promoting a volunteer changed the account and left the
          directory saying volunteer, or put them on an activity afterwards and
          silently sent them back down again. */
-      /* A province takes on volunteers; its elected and appointed posts are
-         filled by the National government. The database has always refused
-         anything else, and the form used to offer it anyway — so a Governor
-         added an officer, the person landed in the directory, and the login was
-         refused afterwards with a sentence about provinces. */
-      field({
-        name: 'access', label: 'What they are',
-        control: provinceHead
-          ? '<select id="f-access"><option value="volunteer" selected>' +
-            'Volunteer &mdash; only the activities they are put on</option></select>'
-          : '<select id="f-access">' +
-            '<option value="officer"' + (d.access !== 'volunteer' ? ' selected' : '') + '>' +
-            'Officer &mdash; their unit\u2019s work</option>' +
-            '<option value="volunteer"' + (d.access === 'volunteer' ? ' selected' : '') + '>' +
-            'Volunteer &mdash; only the activities they are put on</option>' +
-            '</select>',
-        hint: provinceHead
-          ? 'A college takes on volunteers. Its elected and appointed officers are added by the ' +
-            'National government.'
-          : 'An officer of the National government reaches the whole Republic. A volunteer ' +
-            'sees only the activities somebody enrols them into.'
-      }) +
+      /* Somebody added here is an officer. Volunteers are taken on from the
+         activity they are helping with — that is where anybody thinks of them,
+         it is what decides what they can reach, and a volunteer added from a
+         settings page with no activity attached could reach nothing at all.
+         The choice stays on an existing person, because promoting a volunteer
+         to an officer is an ordinary thing a council does. */
+      (isNew
+        ? '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
+          '<div class="small"><strong>This adds an officer.</strong> Volunteers are taken on ' +
+          'from the activity they are helping with &mdash; open it and use <strong>Add ' +
+          'volunteer</strong>, or give them the activity\u2019s code.</div></div>' +
+          '<input type="hidden" id="f-access" value="officer">'
+        : field({
+            name: 'access', label: 'What they are',
+            control: '<select id="f-access">' +
+              '<option value="officer"' + (d.access !== 'volunteer' ? ' selected' : '') + '>' +
+              'Officer &mdash; their unit\u2019s work</option>' +
+              '<option value="volunteer"' + (d.access === 'volunteer' ? ' selected' : '') + '>' +
+              'Volunteer &mdash; only the activities they are put on</option>' +
+              '</select>',
+            hint: 'An officer of the National government reaches the whole Republic. A volunteer ' +
+              'sees only the activities somebody enrols them into.'
+          })) +
       (isNew ? '' :
         '<div class="field"><label class="checkbox"><input type="checkbox" id="f-active"' + (d.active !== false ? ' checked' : '') + '>' +
         '<span>Active officer<span class="hint">Deactivated officers keep their past tasks but no longer appear in assignee lists.</span></span></label></div>');

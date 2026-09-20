@@ -282,6 +282,19 @@
       });
     },
 
+    /* A volunteer at the door with an activity's code. The one call this app
+       makes without being signed in: the code is what stands in for a login,
+       and the server answers with the username it made for them. */
+    joinWithCode: function (code, name) {
+      return sbRaw('/rest/v1/rpc/join_with_code', {
+        method: 'POST', auth: false,
+        body: { p_code: code, p_name: name }
+      }).catch(function (err) {
+        if (err && err.status === 404) throw notSetUp('volunteer-code.sql');
+        throw err;
+      });
+    },
+
     /* Everybody enrolled who has no login — volunteers included, who come in
        through a different door and do not always show on the roster. */
     waiting: function () {
@@ -670,6 +683,11 @@
       var d = driver();
       return d.createMember ? d.createMember(m)
         : Promise.reject(new Error('Creating accounts needs the online version.'));
+    },
+    joinWithCode: function (code, name) {
+      var d = driver();
+      return d.joinWithCode ? d.joinWithCode(code, name)
+        : Promise.reject(new Error('Joining with a code needs the online version.'));
     },
     createLogin: function (m) {
       var d = driver();

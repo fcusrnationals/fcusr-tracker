@@ -101,7 +101,14 @@
     }
     if (kind === 'report') { row.event_id = rec.eventId || null; row.drive_link = rec.driveLink || ''; row.drive_owned = !!rec.driveOwned; row.status = rec.status || 'draft'; }
     if (kind === 'letter') { row.unit_id = u; row.subject = rec.subject || ''; row.status = rec.status || 'Routing'; row.stops = rec.stops || []; row.internal = !!rec.internal; }
-    if (kind === 'office') { row.name = rec.name || ''; row.code = rec.code || null; row.active = rec.active !== false; }
+    /* A desk belongs to the Republic or to one unit, and the server decides who
+       may write it by that — so it travels in its own column, not only in body. */
+    if (kind === 'office') {
+      row.name = rec.name || '';
+      row.code = rec.code || null;
+      row.active = rec.active !== false;
+      row.unit_id = rec.unitId && U.isUuid(rec.unitId) && Store.unit(rec.unitId) ? rec.unitId : null;
+    }
     return row;
   }
 
@@ -132,7 +139,7 @@
     if (kind === 'task' && !rec.title) { rec.title = row.title || ''; rec.eventId = row.event_id || ''; }
     if (kind === 'report' && !rec.eventId) rec.eventId = row.event_id || '';
     if (kind === 'letter' && !rec.subject) { rec.subject = row.subject || ''; rec.unitId = row.unit_id || ''; }
-    if (kind === 'office' && !rec.name) rec.name = row.name || '';
+    if (kind === 'office' && !rec.name) { rec.name = row.name || ''; rec.unitId = row.unit_id || ''; }
     return rec;
   }
 

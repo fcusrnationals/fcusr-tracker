@@ -283,6 +283,21 @@
     });
   }
 
+  /* A volunteer joining with the code an officer gave them.
+
+     The code is the password; the app holds it for them so there is nothing to
+     remember and nothing to lose. The server makes the account if this is their
+     first time and hands back the username, and the ordinary sign-in follows —
+     so from here on a volunteer is somebody signed in like anybody else. */
+  function joinWithCode(code, name) {
+    var clean = String(code || '').trim().toUpperCase();
+    return Backend.joinWithCode(clean, String(name || '').trim()).then(function (username) {
+      username = typeof username === 'string' ? username : '';
+      if (!username) throw new Error('That code did not open anything. Ask the officer to read it out again.');
+      return signIn(username, clean);
+    });
+  }
+
   /* Claiming an enrolment: the person sets their own password on an address an
      executive has already enrolled. If nobody enrolled it, the backend makes no
      profile and this fails with a plain explanation rather than a blank app. */
@@ -460,7 +475,7 @@
     canUpdateTask: canUpdateTask, isMyTask: isMyTask, myPerson: myPerson,
     visibleEvents: visibleEvents, canSee: canSee, eventIdsFor: eventIdsFor,
     myUnitId: myUnitId,
-    signIn: signIn, signUp: signUp, signOut: signOut,
+    signIn: signIn, signUp: signUp, signOut: signOut, joinWithCode: joinWithCode,
     restore: restore, resume: resume, adopt: adopt, settled: settled,
     refresh: refresh,
     promptSignIn: promptSignIn, requireExecutive: requireExecutive,

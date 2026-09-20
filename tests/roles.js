@@ -198,12 +198,19 @@ async function asPerson(browser, role) {
       .filter((t) => t.hidden).map((t) => t.getAttribute('data-route'));
     out.settingsButtonHidden = document.getElementById('btn-settings').hidden;
 
-    // What a unit head may take on: a college adds volunteers, never officers.
-    if (role === 'governor') {
+    await go('#/settings');
+    out.addPerson = !!V().querySelector('[data-add-person]');
+    out.addOffice = !!V().querySelector('[data-add-office]');
+
+    /* Somebody added from Settings is an officer: volunteers are taken on from
+       the activity they are helping with, which is what decides what they can
+       reach at all. */
+    if (out.addPerson) {
       Forms.personForm(null, {});
       const md = [...document.querySelectorAll('.modal-backdrop')].pop();
-      out.accessOptions = [...(md.querySelector('#f-access') || { options: [] }).options].map((o) => o.value);
-      out.unitPicker = !!md.querySelector('#f-unit') && md.querySelector('#f-unit').tagName === 'SELECT';
+      const acc = md.querySelector('#f-access');
+      out.newPersonIsOfficer = !!acc && acc.tagName === 'INPUT' && acc.value === 'officer';
+      out.saysVolunteersElsewhere = /from the activity/i.test(md.textContent);
       document.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
     }
     return out;
@@ -223,7 +230,7 @@ async function asPerson(browser, role) {
     }
   } else if (R.head) {
     const want = national ? ['access', 'term', 'units', 'offices', 'roles', 'letterhead', 'sync', 'backup', 'data']
-                          : ['access', 'template', 'sync', 'backup'];
+                          : ['access', 'offices', 'template', 'sync', 'backup'];
     const missing = want.filter((k) => seen.panels.indexOf(k) < 0);
     const extra = seen.panels.filter((k) => want.indexOf(k) < 0);
     if (missing.length || extra.length) {
@@ -232,12 +239,15 @@ async function asPerson(browser, role) {
     }
     if (!national) {
       if (seen.peopleUnits.length) odd.push('a Governor is asked which unit to show — they have one');
-      if (seen.accessOptions && (seen.accessOptions.length !== 1 || seen.accessOptions[0] !== 'volunteer')) {
-        odd.push('a Governor is offered a level the database will refuse: ' + (seen.accessOptions || []).join(', '));
+      if (seen.addPerson) {
+        odd.push('a Governor is offered Add someone, which the database refuses for a college');
       }
-      if (seen.unitPicker) odd.push('a Governor can file somebody under another unit');
+      if (!seen.addOffice) odd.push('a Governor cannot add a desk of their own');
       const others = seen.eventUnits.filter((c) => c && c !== 'CN');
       if (others.length) odd.push('a Governor sees another unit\'s activities: ' + others.join(', '));
+    } else {
+      if (!seen.newPersonIsOfficer) odd.push('somebody added from Settings is not simply an officer');
+      if (!seen.saysVolunteersElsewhere) odd.push('the form does not say where volunteers are taken on');
     }
   } else {
     // An officer who is not the head of their unit: Settings is not theirs.

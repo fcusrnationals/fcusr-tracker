@@ -63,6 +63,11 @@
       '</button>' +
 
       (offline ? '' :
+        /* The other door. A volunteer has no password and never had one: an
+           officer read them a code, and the code is the whole of what they
+           need. Saying so here is what stops them queuing at the wrong one. */
+        '<button type="button" class="btn btn-block" data-volunteer ' +
+        'style="margin-top:10px">I am a volunteer &mdash; I have a code</button>' +
         '<button type="button" class="btn btn-ghost btn-block" data-forgot ' +
         'style="margin-top:8px">Forgot your password?</button>') +
 
@@ -137,6 +142,67 @@
     });
   }
 
+  /* Joining with an activity's code: the code, and your own name. */
+  function volunteerDoor(opts) {
+    opts = opts || {};
+    var working = false;
+
+    UI.modal({
+      title: 'Join with an activity code',
+      body:
+        '<p class="small" style="margin-top:0">The officer who took you on will have read out a ' +
+        'code like <strong>NURSEWEEK-4827</strong>. That and your name is all you need &mdash; ' +
+        'there is no password to remember.</p>' +
+        '<div class="field"><label for="v-code">Activity code</label>' +
+        '<input type="text" id="v-code" data-autofocus autocapitalize="characters" ' +
+        'autocorrect="off" spellcheck="false" placeholder="NURSEWEEK-4827"></div>' +
+        '<div class="field"><label for="v-name">Your full name</label>' +
+        '<input type="text" id="v-name" maxlength="80" placeholder="Juan D. Dela Cruz">' +
+        '<div class="hint">The way it should appear on the activity. Use the same name every ' +
+        'time so your tasks stay yours.</div>' +
+        '<div class="error-text" data-err hidden></div></div>',
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-go>Join</button>',
+      onMount: function (root, close) {
+        var code = root.querySelector('#v-code');
+        var name = root.querySelector('#v-name');
+        var err = root.querySelector('[data-err]');
+        var go = root.querySelector('[data-go]');
+
+        function submit() {
+          if (working) return;
+          var c = (code.value || '').trim();
+          var n = (name.value || '').trim();
+          err.hidden = true;
+          if (c.length < 4) { err.hidden = false; err.textContent = 'Type the code the officer gave you.'; return; }
+          if (n.length < 2) { err.hidden = false; err.textContent = 'Type your full name.'; return; }
+
+          working = true;
+          go.disabled = true;
+          go.textContent = 'One moment\u2026';
+          Auth.joinWithCode(c, n).then(function () {
+            close();
+            if (opts.onDone) return opts.onDone();
+            App.go('#/events');
+            App.render();
+            UI.toast('You are in. These are the activities you were taken on for.');
+          }).catch(function (e) {
+            working = false;
+            go.disabled = false;
+            go.textContent = 'Join';
+            err.hidden = false;
+            err.textContent = (e && e.message) || 'That did not work.';
+          });
+        }
+
+        go.addEventListener('click', submit);
+        [code, name].forEach(function (el) {
+          el.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') submit(); });
+        });
+      }
+    });
+  }
+
   function mount(root, opts) {
     opts = opts || {};
     var email = root.querySelector('#gate-email');
@@ -190,6 +256,11 @@
       });
     }
 
+    var volunteerBtn = root.querySelector('[data-volunteer]');
+    if (volunteerBtn) {
+      volunteerBtn.addEventListener('click', function () { volunteerDoor(opts); });
+    }
+
     var forgotBtn = root.querySelector('[data-forgot]');
     if (forgotBtn) {
       forgotBtn.addEventListener('click', function () {
@@ -212,5 +283,5 @@
   function reset() { busy = false; problem = ''; }
 
   global.ViewSignIn = { render: render, checking: checking, mount: mount, card: card,
-    reset: reset, forgot: forgot };
+    reset: reset, forgot: forgot, volunteerDoor: volunteerDoor };
 })(window);

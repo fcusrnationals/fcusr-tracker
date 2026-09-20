@@ -1545,3 +1545,20 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   display: flex; gap: 6px; flex-wrap: wrap;
   padding: 0 12px 10px; margin-top: -2px;
 }
+
+/* The code volunteers join an activity with: read out once, typed by forty
+   people. Big enough to read across a room. */
+.join-code {
+  margin-top: 12px; padding: 14px; border: 1px solid var(--gold-300);
+  border-radius: var(--radius); background: var(--gold-50);
+}
+.jc-label {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--gold-700); margin-bottom: 6px;
+}
+.jc-code {
+  font-size: 26px; font-weight: 800; letter-spacing: .06em; color: var(--ink);
+  margin-bottom: 6px; word-break: break-all;
+}
+.jc-note { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.jc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
