@@ -433,40 +433,10 @@
     });
   }
 
-  /* Each person changes their own password; nobody else can, and the app never
-     sees the old one. */
-  function changePassword() {
-    UI.modal({
-      title: 'Change your password',
-      body: '<div class="field"><label for="pw1">New password</label>' +
-        '<input type="password" id="pw1" data-autofocus autocomplete="new-password"></div>' +
-        '<div class="field"><label for="pw2">Type it again</label>' +
-        '<input type="password" id="pw2" autocomplete="new-password">' +
-        '<div class="error-text" hidden></div></div>' +
-        '<p class="small muted">At least eight characters.</p>',
-      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
-        '<button type="button" class="btn btn-primary" data-go>Change it</button>',
-      onMount: function (root, close) {
-        root.querySelector('[data-go]').addEventListener('click', function () {
-          var a = root.querySelector('#pw1').value;
-          var b = root.querySelector('#pw2').value;
-          var f = root.querySelector('#pw2').closest('.field');
-          var err = f.querySelector('.error-text');
-          function fail(msg) {
-            f.classList.add('has-error');
-            err.textContent = msg;
-            err.hidden = false;
-          }
-          if (a.length < 8) return fail('Too short — use at least eight characters.');
-          if (a !== b) return fail('Those two do not match.');
-          Backend.changePassword(a).then(function () {
-            close();
-            UI.toast('Password changed.');
-          }).catch(function (e) { fail(e.message || 'That could not be changed.'); });
-        });
-      }
-    });
-  }
+  /* changePassword() was here. Passwords are made by the system and handed over,
+     and nobody changes their own: a list an executive keeps stays true, and a
+     forgotten password is one question to them rather than a lost account.
+     An executive sets a new one from the account list. */
 
   /* ---------- a forgotten password ----------
 
@@ -493,7 +463,7 @@
     restore: restore, resume: resume, adopt: adopt, settled: settled,
     refresh: refresh,
     promptSignIn: promptSignIn, requireExecutive: requireExecutive,
-    changePassword: changePassword, isOffline: isOffline,
+    isOffline: isOffline,
     setMemberPassword: setMemberPassword
   };
 })(window);

@@ -138,11 +138,11 @@
       table('Has an account', 'Holding an account on this system.',
         active.map(function (p) {
           return [p.full_name || '—', p.position || '', unitOf(p),
-                  (p.email || '') + (p.active ? '' : '  (cannot sign in)')];
-        }), ['Name', 'Position', 'Unit', 'Email']);
+                  U.loginLabel(p.email) + (p.active ? '' : '  (cannot sign in)')];
+        }), ['Name', 'Position', 'Unit', 'Signs in as']);
 
-      table('Waiting to sign in',
-        'Enrolled, but they have not set a password yet — until they do there is no account.',
+      table('Waiting for a login',
+        'Enrolled the old way, by an email address, and never given a login.',
         waiting.map(function (e) {
           return [e.full_name || '—', e.position || '', unitOf(e), e.email || ''];
         }), ['Name', 'Position', 'Unit', 'Email']);

@@ -209,6 +209,85 @@
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function isUuid(v) { return typeof v === 'string' && UUID_RE.test(v); }
 
+  /* ---------- sign-in names ----------
+
+     A login is a username the system makes from somebody's name. Supabase will
+     only sign in an email address, so each username is kept as one nobody sees
+     or types: juan.delacruz is stored as juan.delacruz@fcusr.invalid. ".invalid"
+     is reserved worldwide for exactly this — it can never be a real address, so
+     nothing can ever be mailed to it or reach a stranger.
+
+     The server makes the final choice and adds a number where a name is taken
+     (backend/supabase/usernames.sql); this only suggests. */
+  var LOGIN_DOMAIN = 'fcusr.invalid';
+
+  // What was typed at the door, as the address Supabase knows it by.
+  function loginToEmail(v) {
+    var t = String(v || '').trim().toLowerCase();
+    if (!t) return '';
+    return t.indexOf('@') >= 0 ? t : t + '@' + LOGIN_DOMAIN;
+  }
+
+  function isUsernameLogin(addr) {
+    var t = String(addr || '').trim().toLowerCase();
+    return t.length > LOGIN_DOMAIN.length + 1 &&
+      t.slice(-(LOGIN_DOMAIN.length + 1)) === '@' + LOGIN_DOMAIN;
+  }
+
+  // How a login is shown: the username alone, or the address for somebody who
+  // still signs in with one.
+  function loginLabel(addr) {
+    var t = String(addr || '').trim().toLowerCase();
+    return isUsernameLogin(t) ? t.slice(0, -(LOGIN_DOMAIN.length + 1)) : t;
+  }
+
+  var NAME_PARTICLES = ['de', 'del', 'dela', 'la', 'las', 'los', 'delos', 'san', 'santa', 'sta',
+                        'sto', 'santo', 'van', 'von', 'di', 'da', 'dos', 'das', 'le'];
+  var NAME_SUFFIXES = ['jr', 'sr', 'ii', 'iii', 'iv', 'v'];
+
+  /* "Juan D. Dela Cruz" and "Dela Cruz, Juan D." both suggest juan.delacruz.
+     First given name, then the whole surname; middle initials and Jr./III left
+     out; accents taken off (Dueño → dueno). */
+  function usernameFor(name) {
+    var s = String(name || '');
+    if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    s = s.toLowerCase();
+    var clean = function (w) { return w.replace(/[^a-z0-9]/g, ''); };
+    var words = function (t) {
+      return t.split(/[\s]+/).map(clean).filter(function (w) {
+        return w && NAME_SUFFIXES.indexOf(w) < 0;
+      });
+    };
+
+    var given, surname;
+    var comma = s.indexOf(',');
+    if (comma >= 0) {
+      surname = words(s.slice(0, comma));
+      given = words(s.slice(comma + 1)).filter(function (w) { return w.length > 1; });
+    } else {
+      var all = words(s);
+      var first = all.shift() || '';
+      var rest = all.filter(function (w) { return w.length > 1; });
+      surname = rest.length ? [rest.pop()] : [];
+      while (rest.length && NAME_PARTICLES.indexOf(rest[rest.length - 1]) >= 0) {
+        surname.unshift(rest.pop());
+      }
+      given = first ? [first] : [];
+    }
+    var out = (given[0] || '') + (given[0] && surname.length ? '.' : '') + surname.join('');
+    out = out.slice(0, 24).replace(/\.$/, '');
+    return /^[a-z]/.test(out) ? out : 'member' + out;
+  }
+
+  /* Two spellings of one name compare equal: "Dela Cruz, Juan" and "Juan Dela
+     Cruz", with or without accents and full stops. */
+  function nameKey(n) {
+    var s = String(n || '');
+    if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/).filter(Boolean).sort().join(' ');
+  }
+
   /* ---------- tiny DOM helpers ---------- */
 
   function el(sel, root) { return (root || document).querySelector(sel); }
@@ -232,6 +311,8 @@
   }
 
   global.U = {
+    LOGIN_DOMAIN: LOGIN_DOMAIN, loginToEmail: loginToEmail, loginLabel: loginLabel,
+    isUsernameLogin: isUsernameLogin, usernameFor: usernameFor, nameKey: nameKey,
     TZ: TZ, MONTHS: MONTHS, DAYS: DAYS,
     today: today, nowStamp: nowStamp, parse: parse, isValidDate: isValidDate,
     fmtDate: fmtDate, fmtDateShort: fmtDateShort, fmtDateTiny: fmtDateTiny, fmtStamp: fmtStamp,

@@ -250,6 +250,38 @@
       });
     },
 
+    /* A new person's login: a username the server picks from the suggestion
+       (adding a number where it is taken) and the password handed over.
+       Answers with the username. `replaces` is an address somebody was enrolled
+       under before usernames, whose enrolment this takes over. */
+    createLogin: function (m) {
+      return sbFetch('/rest/v1/rpc/create_login', {
+        method: 'POST',
+        body: {
+          p_base: m.username || '', p_password: m.password,
+          p_full_name: m.full_name || '', p_position: m.position || '',
+          p_unit_id: m.unit_id, p_access: m.access || 'officer',
+          p_event_ids: m.eventIds || [], p_is_head: !!m.isHead,
+          p_replaces: m.replaces || null
+        }
+      }).catch(function (err) {
+        if (err && err.status === 404) throw notSetUp('usernames.sql');
+        throw err;
+      });
+    },
+
+    /* Somebody who signs in with an email address, moved onto a username with a
+       new password. The same account: nothing of theirs moves. */
+    switchToUsername: function (email, username, password) {
+      return sbFetch('/rest/v1/rpc/switch_to_username', {
+        method: 'POST',
+        body: { p_email: email, p_base: username || '', p_password: password }
+      }).catch(function (err) {
+        if (err && err.status === 404) throw notSetUp('usernames.sql');
+        throw err;
+      });
+    },
+
     /* Everybody enrolled who has no login — volunteers included, who come in
        through a different door and do not always show on the roster. */
     waiting: function () {
@@ -531,12 +563,6 @@
       });
     },
 
-    // Supabase Auth owns the password, so a change is one call and the app
-    // never sees or stores the old one.
-    changePassword: function (newPassword) {
-      return sbFetch('/auth/v1/user', { method: 'PUT', body: { password: newPassword } });
-    },
-
     audit: function () {
       return sbFetch('/rest/v1/audit_log?select=*&order=created_at.desc&limit=100');
     }
@@ -626,7 +652,8 @@
     needsPassword: function () { try { return driver().needsPassword; } catch (e) { return true; } },
     session: function () { return session; },
     timed: timed,
-    signIn: function (e, p) { return driver().signIn(e, p); },
+    // A username or, for somebody not yet moved across, an email address.
+    signIn: function (e, p) { return driver().signIn(U.loginToEmail(e), p); },
     signUp: function (e, p) { return driver().signUp(e, p); },
     signOut: function () { return driver().signOut(); },
     /* Called once at start-up: picks a stored session back up so a refresh does
@@ -643,6 +670,16 @@
       var d = driver();
       return d.createMember ? d.createMember(m)
         : Promise.reject(new Error('Creating accounts needs the online version.'));
+    },
+    createLogin: function (m) {
+      var d = driver();
+      return d.createLogin ? d.createLogin(m)
+        : Promise.reject(new Error('Making logins needs the online version.'));
+    },
+    switchToUsername: function (email, username, pw) {
+      var d = driver();
+      return d.switchToUsername ? d.switchToUsername(email, username, pw)
+        : Promise.reject(new Error('Changing a sign-in needs the online version.'));
     },
     waiting: function () {
       var d = driver();
@@ -681,14 +718,6 @@
       return d.setHead ? d.setHead(e, h) : Promise.resolve(true);
     },
     withdraw: function (email) { return driver().withdraw(email); },
-    audit: function () { return driver().audit(); },
-    changePassword: function (pw) {
-      var d = driver();
-      if (!d.changePassword) {
-        return Promise.reject(new Error(
-          d.name + ' uses your Google account for sign-in, so passwords are changed in Google, not here.'));
-      }
-      return d.changePassword(pw);
-    }
+    audit: function () { return driver().audit(); }
   };
 })(window);

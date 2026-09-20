@@ -48,9 +48,9 @@
           'stays on this device.</span></div>'
         : '') +
 
-      '<div class="field"><label for="gate-email">Email</label>' +
-      '<input type="email" id="gate-email" autocomplete="username" inputmode="email" ' +
-      'autocapitalize="off" spellcheck="false" placeholder="you@filamer.edu.ph"></div>' +
+      '<div class="field"><label for="gate-email">Username</label>' +
+      '<input type="text" id="gate-email" autocomplete="username" ' +
+      'autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="juan.delacruz"></div>' +
 
       '<div class="field"><label for="gate-pass">Password</label>' +
       '<input type="password" id="gate-pass" autocomplete="current-password">' +
@@ -67,8 +67,8 @@
         'style="margin-top:8px">Forgot your password?</button>') +
 
       '<p class="gate-foot">' +
-        'Your email and the password a national executive gave you. ' +
-        'You can change it once you are in.' +
+        'The username and password you were given. ' +
+        'Signed in with an email address before? That still works until you are moved across.' +
       '</p>' +
 
       '</div>';
@@ -123,9 +123,9 @@
     UI.modal({
       title: 'Forgotten password',
       body:
-        '<p class="small">Ask a national executive. They can set a new password for ' +
-        (prefill ? U.esc(prefill) : 'your address') + ' in the app and tell you what it is, ' +
-        'and you can change it yourself once you are in.</p>' +
+        '<p class="small">Ask a national executive, or your Governor if you are a volunteer. ' +
+        'They can set a new password for ' +
+        (prefill ? U.esc(U.loginLabel(prefill)) : 'you') + ' in a moment and tell you what it is.</p>' +
         '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-top:14px">' +
         '<div class="strong" style="margin-bottom:4px">For the executive</div>' +
         '<div class="small">Settings &rarr; People &rarr; Who can sign in &rarr; ' +
@@ -147,8 +147,10 @@
       var addr = (email.value || '').trim();
       var pw = pass.value || '';
 
-      if (!Auth.isOffline() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
-        problem = 'That email address does not look right.';
+      /* A username, or the email address of somebody not yet moved across.
+         Backend.signIn turns a username into the address Supabase knows. */
+      if (!Auth.isOffline() && !/^[^@\s]+(@[^@\s]+\.[^@\s]+)?$/.test(addr)) {
+        problem = addr ? 'That username does not look right — no spaces.' : 'Type your username.';
         return (opts.redraw || App.render)();
       }
 
@@ -179,8 +181,8 @@
            Accounts are made when somebody is added now. There is no first visit
            to handle, so the honest answer is the short one. */
         if (err && err.badCredentials && !Auth.isOffline()) {
-          problem = 'That password was not accepted. Ask a national executive to ' +
-            'set one for you \u2014 they can do it in a moment.';
+          problem = 'That username and password did not match. Check the spelling, or ask a ' +
+            'national executive to set a new password \u2014 they can do it in a moment.';
         } else {
           problem = err.message || 'That did not work.';
         }

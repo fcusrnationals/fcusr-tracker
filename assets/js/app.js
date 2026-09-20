@@ -62,7 +62,7 @@
       } else {
         // The door still holds even if its own screen did not load.
         viewEl.innerHTML = UI.empty('Sign in to continue',
-          'This tracker belongs to the FCUSR. Sign in with the address you were enrolled with.',
+          'This tracker belongs to the FCUSR. Sign in with the username and password you were given.',
           '<button type="button" class="btn btn-primary" id="gate-fallback">Sign in</button>');
         var gf = viewEl.querySelector('#gate-fallback');
         if (gf) gf.addEventListener('click', function () { Auth.promptSignIn(); });
@@ -578,14 +578,14 @@
       '<button type="button" data-set="who" disabled style="opacity:1;cursor:default">' +
         UI.icon('users') + '<span><strong>' + U.esc(who.name) + '</strong><br>' +
         '<span class="tiny muted">' + U.esc(who.position || '') +
-        (who.position && who.unitName ? ' · ' : '') + U.esc(who.unitName || '') + '</span></span>' +
+        (who.position && who.unitName ? ' · ' : '') + U.esc(who.unitName || '') + '</span>' +
+        (who.email ? '<br><span class="tiny muted">Signed in as ' + U.esc(U.loginLabel(who.email)) + '</span>' : '') +
+        '</span>' +
       '</button>' +
       '<div class="sep"></div>' +
-      '<button type="button" data-set="password">Change my password</button>' +
       '<button type="button" class="danger" data-set="out">Sign out</button>';
 
     UI.openMenu(anchor, items, function (action) {
-      if (action === 'password') return Auth.changePassword();
       if (action === 'out') return signOutFlow();
     });
   }

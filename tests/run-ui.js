@@ -353,7 +353,30 @@ check('Settings opens for an executive', !!$('[data-add-person]'));
    how a person could be added with no way to ever log in. */
 check('adding somebody lives there', !!$('[data-add-person]'));
 check('the officer list can be generated', !!$('[data-roster]'));
-check('a person can change their own password', !!$('[data-change-pw]'));
+/* Passwords are made by the system and handed over; nobody changes their own,
+   so the list an executive keeps stays true. */
+check('nobody is offered a way to change their own password', !$('[data-change-pw]'));
+
+/* Thirty people across ten colleges is not a list anybody reads. One fold per
+   unit, counted, with your own open. */
+{
+  const cn = S.units().find((u) => u.code === 'CN');
+  S.addPerson({ name: 'Nurse, Test', unitId: cn.id, position: 'Governor' });
+  goto('#/settings');
+  const folds = $$('[data-people-group]');
+  check('the directory is folded up by unit', folds.length >= 2,
+    folds.map((f) => f.getAttribute('data-people-group')).join(', ') || 'one flat list');
+  check('your own unit is open', folds[0].getAttribute('data-collapsed') === 'false');
+  check('and the others are not', folds.slice(1).every((f) => f.getAttribute('data-collapsed') === 'true'));
+  check('each one says how many are in it',
+    /person|people/.test(folds[1].querySelector('.group-meta').textContent));
+  const nursing = folds.find((f) => f.getAttribute('data-people-group') === cn.id);
+  click(nursing.querySelector('.group-head'));
+  check('opening one shows its people', nursing.getAttribute('data-collapsed') === 'false' &&
+    /Nurse, Test/.test(nursing.textContent));
+  click(nursing.querySelector('.group-head'));
+  check('and it closes again', nursing.getAttribute('data-collapsed') === 'true');
+}
 
 // Now become a volunteer enrolled into exactly one event.
 // A national activity that is still running: a volunteer's access is derived
@@ -815,7 +838,7 @@ console.log('\n--- the person form asks what somebody is ---');
   check('and what it says is what gets saved here',
     /data\.access = accSel && accSel\.value === 'volunteer'/.test(src));
   check('and what gets sent to the server',
-    /access: data\.access/.test(src),
+    /access: saved\.access/.test(src),
     'the form still hard-codes what it enrols people as');
 
   /* Being put on an activity adds an activity. It is not a demotion, and it
@@ -823,7 +846,7 @@ console.log('\n--- the person form asks what somebody is ---');
   check('helping at an activity does not demote an officer',
     /var keepsOfficer = !!\(existing && existing\.access !== 'volunteer'\)/.test(src));
   check('and does not move them into another unit for the afternoon',
-    /keepsOfficer \? \(existing\.unitId \|\| e\.unitId\) : e\.unitId/.test(src));
+    /keepsOfficer \? \(p\.unitId \|\| e\.unitId\) : e\.unitId/.test(src));
 
   const sync = fs.readFileSync(path.join(ROOT, 'assets/js/sync.js'), 'utf8');
   check('and a change of office is noticed without closing the tab',
@@ -834,18 +857,18 @@ console.log('\n--- the person form asks what somebody is ---');
 console.log('\n--- adding somebody hands over a password ---');
 {
   const src = fs.readFileSync(path.join(ROOT, 'assets/js/forms.js'), 'utf8');
-  check('the person form creates the account', /Backend\.createMember\(/.test(src));
+  check('the person form makes a login', /makeLogin\(saved\)/.test(src) && /Backend\.createLogin\(/.test(src));
   check('with a password generated for them', /var pw = suggestPassword\(\)/.test(src));
-  check('and shows it once, to hand over', /invitedDialog\(data\.name, addr, pw\)/.test(src));
+  check('and a username made from their name', /username: U\.usernameFor\(person\.name\)/.test(src));
+  check('and shows it once, to hand over', /invitedDialog\(login\)/.test(src));
+  check('the person form asks for no email address', !/id="f-email"/.test(src));
 
   /* Only for a new person or a new address. Everything else is an edit, and an
      edit that resets somebody's password and signs them out everywhere is not an
      edit anybody meant to make. */
-  check('a password is only issued for a new person or a new address',
-    /var needsWayIn = isNew \|\| !before \|\| before !== addr\.toLowerCase\(\)/.test(src),
-    'every save of the person form still issues a new password');
-  check('an edit goes the way that never touches a password',
-    /if \(!needsWayIn\) \{\s*Backend\.enrol\(details\)/.test(src));
+  check('an edit to somebody with a login goes the way that never touches a password',
+    /if \(saved\.email\) \{\s*Backend\.enrol\(/.test(src),
+    'every save of the person form would issue a new login');
   check('there is a way to give everybody still waiting one',
     /data-give-all/.test(src) && /Backend\.waiting\(\)/.test(src));
   check('asked of the server, not read off the screen',
@@ -858,9 +881,37 @@ console.log('\n--- adding somebody hands over a password ---');
   check('the door no longer signs anybody up on a guess',
     !/function firstTime\(/.test(door));
   check('a refused password says so, and who can fix it',
-    /not accepted/.test(door) && /national executive/.test(door));
+    /did not match/.test(door) && /national executive/.test(door));
+  check('the door asks for a username', /<label for="gate-email">Username<\/label>/.test(door));
   check('the forgotten-password answer offers no email',
     !/sendReset|recover/.test(door));
+}
+
+/* ---------------- a name becomes a username ---------------- */
+console.log('\n--- names become usernames, and lists are read the way people paste them ---');
+{
+  const UU = window.U;
+  [['Juan D. Dela Cruz', 'juan.delacruz'], ['Dela Cruz, Juan D.', 'juan.delacruz'],
+   ['Dueño, Kyla', 'kyla.dueno'], ['Pedro Santos Jr.', 'pedro.santos'],
+   ['Ma. Theresa Delos Santos', 'ma.delossantos'], ['Cher', 'cher'], ['', 'member']]
+    .forEach(([name, want]) => check('"' + name + '" becomes ' + want, UU.usernameFor(name) === want, UU.usernameFor(name)));
+  check('a typed username is the hidden address', UU.loginToEmail(' Juan.DelaCruz ') === 'juan.delacruz@fcusr.invalid');
+  check('an email address is left as it is', UU.loginToEmail('me@gmail.com') === 'me@gmail.com');
+  check('and the hidden address is shown as the username', UU.loginLabel('juan.delacruz@fcusr.invalid') === 'juan.delacruz');
+  check('.invalid, which can never be a real address', UU.LOGIN_DOMAIN === 'fcusr.invalid');
+
+  const F = window.Forms;
+  const pasted = F.readPeopleList('name\tposition\nAna Reyes\tSecretary\nDela Cruz, Juan\tGovernor\n\nana reyes\tAuditor', false, '');
+  check('a pasted list with a header is read by column', pasted.length === 3 && pasted[0].position === 'Secretary');
+  check('a comma inside a pasted name is part of the name', pasted[1].name === 'Dela Cruz, Juan');
+  check('the same person twice is caught', pasted[2].problem === 'Listed twice');
+  const typed = F.readPeopleList('Ana Reyes\nBen Cruz', false, '');
+  check('plain names, one per line, are enough', typed.length === 2 && typed[1].name === 'Ben Cruz' && !typed[1].position);
+  const csv = F.readPeopleList('name,email,position\n"Dela Cruz, Juan",juan@x.com,Governor\n', true, '');
+  check('a CSV from the old way is read, and its email column ignored',
+    csv.length === 1 && csv[0].name === 'Dela Cruz, Juan' && csv[0].position === 'Governor');
+  const bare = F.readPeopleList('Juan Dela Cruz,juan@x.com,Governor', true, '');
+  check('even without a header row', bare[0].name === 'Juan Dela Cruz' && bare[0].position === 'Governor');
 }
 
 /* ---------------- My tasks is the signed-in person's ---------------- */
@@ -883,10 +934,10 @@ console.log('\n--- the roster import gives the people it added a password ---');
 {
   const src = fs.readFileSync(path.join(ROOT, 'assets/js/forms.js'), 'utf8');
   const imp = src.slice(src.indexOf('var made = Store.addPeople('), src.indexOf('var made = Store.addPeople(') + 1800);
-  check('it creates accounts rather than bare enrolments', /issueAll\(withEmail/.test(imp) &&
-    !/Backend\.enrol\(/.test(imp), 'the import still makes no account');
+  check('it makes logins rather than bare enrolments', /makeLogins\(made/.test(imp) &&
+    !/Backend\.enrol\(/.test(imp), 'the import still makes no login');
   check('only for the people it actually added, not every line pasted',
-    /var withEmail = made\.filter/.test(imp),
+    /makeLogins\(made, save\)/.test(imp),
     'people already in the directory would be re-enrolled as officers of this unit');
   check('nothing anywhere still describes the first-time screen',
     !/password you will remember|set that password the first time/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')));

@@ -270,6 +270,86 @@ window.fetch = function (url, opts) {
     return reply(200, email);
   }
 
+  /* create_login: usernames.sql. A username made from the suggestion, with a
+     number added where it is taken, stored behind the hidden address. It never
+     touches an existing login — the second Juan Dela Cruz must not reset the
+     first one's password. */
+  if (u.indexOf('/rest/v1/rpc/create_login') === 0) {
+    const actor = SB.profiles[who];
+    if (!actor || actor.access !== 'officer') return reply(403, { message: 'Your account cannot add anyone.' });
+    const actorUnit = units.find((x) => x.id === actor.unit_id) || { kind: 'national' };
+    if (actorUnit.kind !== 'national') {
+      if (!actor.is_head || actor.unit_id !== body.p_unit_id) {
+        return reply(400, { message: 'You may not add members for that unit.' });
+      }
+      if (body.p_access !== 'volunteer') {
+        return reply(400, { message: 'A province may add volunteers only.' });
+      }
+    }
+    if (!body.p_password || String(body.p_password).length < 8) {
+      return reply(400, { message: 'A password must be at least eight characters.' });
+    }
+    const old = String(body.p_replaces || '').toLowerCase().trim();
+    if (old && SB.users[old]) return reply(400, { message: old + ' already has a login.' });
+
+    let base = String(body.p_base || body.p_full_name || '').toLowerCase()
+      .replace(/[^a-z0-9.]/g, '').replace(/\.{2,}/g, '.').replace(/^\.+|\.+$/g, '').slice(0, 24);
+    if (!/^[a-z]/.test(base)) base = 'member' + base;
+    let name = base, n = 1;
+    while (SB.users[name + '@fcusr.invalid'] || SB.enrolments[name + '@fcusr.invalid']) name = base + (++n);
+    const email = name + '@fcusr.invalid';
+
+    SB.calls = SB.calls || [];
+    SB.calls.push({ fn: 'create_login', body: body });
+    const id = 'user-' + (++SB.n);
+    SB.users[email] = { id: id, email: email, password: body.p_password };
+    SB.profiles[id] = {
+      id: id, email: email, full_name: body.p_full_name || name,
+      position: body.p_position || '', unit_id: body.p_unit_id,
+      access: body.p_access || 'officer', is_head: !!body.p_is_head, active: true,
+      units: units.find((x) => x.id === body.p_unit_id)
+    };
+    SB.enrolments[email] = {
+      email: email, full_name: body.p_full_name || '', position: body.p_position || '',
+      unit_id: body.p_unit_id, access: body.p_access || 'officer',
+      event_ids: body.p_event_ids || [], claimed_at: new Date().toISOString()
+    };
+    (body.p_event_ids || []).forEach((ev) => SB.members.push({ event_id: ev, profile_id: id }));
+    if (old) delete SB.enrolments[old];
+    return reply(200, name);
+  }
+
+  if (u.indexOf('/rest/v1/rpc/switch_to_username') === 0) {
+    const actor = SB.profiles[who];
+    const actorUnit = actor && units.find((x) => x.id === actor.unit_id);
+    if (!actor || actor.access !== 'officer' || !actorUnit || actorUnit.kind !== 'national') {
+      return reply(400, { message: 'You may not change that member\'s sign-in.' });
+    }
+    const old = String(body.p_email || '').toLowerCase().trim();
+    const user = SB.users[old];
+    if (!user) return reply(400, { message: 'There is no login for ' + old + ' yet.' });
+    if (/@fcusr\.invalid$/.test(old)) return reply(400, { message: 'Already signs in with a username.' });
+    if (actor.email === old) return reply(400, { message: 'You cannot switch your own sign-in.' });
+    if (!body.p_password || String(body.p_password).length < 8) {
+      return reply(400, { message: 'A password must be at least eight characters.' });
+    }
+    let base = String(body.p_base || '').toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 24) || 'member';
+    let name = base, n = 1;
+    while (SB.users[name + '@fcusr.invalid']) name = base + (++n);
+    const email = name + '@fcusr.invalid';
+    delete SB.users[old];
+    SB.users[email] = { id: user.id, email: email, password: body.p_password };
+    Object.keys(SB.profiles).forEach((k) => {
+      if (SB.profiles[k].email === old) { SB.profiles[k].email = email; SB.profiles[k].active = true; }
+    });
+    if (SB.enrolments[old]) {
+      SB.enrolments[email] = Object.assign({}, SB.enrolments[old], { email: email });
+      delete SB.enrolments[old];
+    }
+    Object.keys(SB.tokens).forEach((t) => { if (SB.tokens[t].userId === user.id) delete SB.tokens[t]; });
+    return reply(200, name);
+  }
+
   if (u.indexOf('/rest/v1/rpc/waiting_members') === 0) {
     const actor = SB.profiles[who];
     if (!actor) return reply(403, { message: 'no' });
@@ -289,7 +369,7 @@ window.fetch = function (url, opts) {
     if (!actor || actor.access !== 'officer' || !actorUnit || actorUnit.kind !== 'national') {
       return reply(403, { message: 'You may not set that member\'s password.' });
     }
-    if (actor.email === email) return reply(400, { message: 'Use Change my password for your own.' });
+    if (actor.email === email) return reply(400, { message: 'You cannot set your own password here. Ask another national executive.' });
     if (!SB.users[email]) {
       return reply(400, { message: 'Nobody has signed in with that address yet.' });
     }
@@ -547,8 +627,8 @@ const FILES = [
 
     check('the list opens', !!acc, txt().slice(0, 70));
     check('it names the person who has not signed in', /Waiting One/.test(txt()));
-    check('and says they are waiting', /Waiting to sign in/i.test(txt()));
-    check('the ones with accounts are listed apart', /Has an account/.test(txt()));
+    check('and says they have no login', /Without a login/i.test(txt()));
+    check('the ones who can sign in are listed apart', /Can sign in/.test(txt()));
     check('somebody who claimed theirs is on the signed-in side', /Rhea/.test(txt()));
     /* There is no invitation without a password any more. "Copy invite" sent
        instructions for a first-time screen that no longer exists; somebody who
@@ -1104,6 +1184,187 @@ const FILES = [
     await Auth.signOut();
   }
 
+  /* ---------------- usernames ----------------
+     Nothing to type but a name. The login is made from it, handed over on one
+     screen, and never changes when the person is promoted, moved or renamed. */
+  console.log('\n--- adding somebody gives them a username ---');
+  {
+    const D = window.document;
+    const click = (el) => el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const top = () => [...D.querySelectorAll('.modal-backdrop')].pop();
+    // What a handover dialog shows, read from the page the way a person reads it.
+    const handed = () => {
+      const st = [...(top() ? top().querySelectorAll('.card strong') : [])].map((x) => x.textContent.trim());
+      return { username: st[0] || '', password: st[1] || '' };
+    };
+    const sheetRows = () => [...(top() ? top().querySelectorAll('.task-meta') : [])].map((m) => {
+      const st = [...m.querySelectorAll('strong')].map((x) => x.textContent.trim());
+      return { username: st[0] || '', password: st[1] || '' };
+    }).filter((r) => r.username);
+    const closeAll = () => D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+    const nat = Store.nationalUnitId();
+
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    closeAll();
+
+    window.Forms.personForm(null, { unitId: nat });
+    check('the person form has no email box', !top().querySelector('#f-email'));
+    check('and says a login will be made', /username and password are made/i.test(top().textContent));
+    top().querySelector('#f-name').value = 'Juan D. Dela Cruz';
+    top().querySelector('#f-position').value = 'Senator';
+    click(top().querySelector('[data-save]'));
+    await wait(120);
+
+    const shown = top() ? top().textContent.replace(/\s+/g, ' ') : '';
+    const pw = handed().password;
+    check('saving shows the username made from the name', handed().username === 'juan.delacruz', shown.slice(0, 120));
+    check('and a password to hand over', pw.length >= 8, pw);
+    check('the login exists on the server', !!SB.users['juan.delacruz@fcusr.invalid']);
+    const juan = Store.people().find((p) => p.name === 'Juan D. Dela Cruz');
+    check('and the directory entry is joined to it',
+      juan && juan.email === 'juan.delacruz@fcusr.invalid', juan && juan.email);
+    check('nothing tells them to change it', !/change it/i.test(shown));
+    closeAll();
+
+    window.Forms.personForm(null, { unitId: nat });
+    top().querySelector('#f-name').value = 'Dela Cruz, Juan';
+    click(top().querySelector('[data-save]'));
+    await wait(120);
+    check('a second person with the same name gets a number, not the first one’s login',
+      handed().username === 'juan.delacruz2' && SB.users['juan.delacruz@fcusr.invalid'].password === pw,
+      handed().username);
+    closeAll();
+
+    // Promoted and moved: nothing about how they sign in changes.
+    const loginsBefore = (SB.calls || []).length;
+    window.Forms.personForm(juan.id);
+    check('editing them says how they sign in', /Signs in as juan\.delacruz/.test(top().textContent.replace(/\s+/g, ' ')));
+    top().querySelector('#f-position').value = 'Vice President';
+    click(top().querySelector('[data-save]'));
+    await wait(120);
+    check('saving an edit makes no new login', (SB.calls || []).length === loginsBefore);
+    const jp = Object.keys(SB.profiles).map((k) => SB.profiles[k]).find((x) => x.email === 'juan.delacruz@fcusr.invalid');
+    check('the promotion reached their account', jp && jp.position === 'Vice President', jp && jp.position);
+    check('their password is untouched', SB.users['juan.delacruz@fcusr.invalid'].password === pw);
+    closeAll();
+
+    // A whole list at once.
+    window.Forms.importPeopleForm(nat);
+    const paste = top().querySelector('#r-paste');
+    check('the list takes pasted names', !!paste);
+    paste.value = 'Ana Reyes\tSecretary\nBen Cruz\tTreasurer\nAna Reyes\tSecretary\nJuan D. Dela Cruz\tSenator';
+    paste.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await wait(250);
+    const prev = top().querySelector('#r-preview').textContent.replace(/\s+/g, ' ');
+    check('it counts who is ready', /2 people ready, 2 skipped/.test(prev), prev.slice(0, 80));
+    check('and says why the others are skipped', /Listed twice/.test(prev) && /Already in this unit/.test(prev));
+    click(top().querySelector('[data-save]'));
+    await wait(250);
+    const sheet = top().textContent.replace(/\s+/g, ' ');
+    check('one sheet for everybody added', /2 people can sign in now/.test(sheet), sheet.slice(0, 80));
+    check('with each username on it', /ana\.reyes/.test(sheet) && /ben\.cruz/.test(sheet));
+    check('and a way to download it', !!top().querySelector('[data-csv-sheet]'));
+    check('their directory entries are joined to their logins',
+      Store.people().filter((p) => /^(ana\.reyes|ben\.cruz)@fcusr\.invalid$/.test(p.email)).length === 2);
+    closeAll();
+
+    // A volunteer, from the activity they are helping with.
+    const ev = Store.addEvent({ title: 'Blood drive', unitId: nat, dateStart: window.U.addDays(window.U.today(), 5) });
+    window.Forms.volunteerForm(ev.id);
+    check('the volunteer form asks for no email', !top().querySelector('#v-email'));
+    top().querySelector('#v-name').value = 'Carla Diaz';
+    top().querySelector('#v-position').value = 'Registration';
+    click(top().querySelector('[data-save]'));
+    await wait(150);
+    check('a volunteer gets a username too', handed().username === 'carla.diaz', handed().username);
+    const carla = Object.keys(SB.profiles).map((k) => SB.profiles[k]).find((x) => x.email === 'carla.diaz@fcusr.invalid');
+    check('as a volunteer, on that activity',
+      carla && carla.access === 'volunteer' && SB.members.some((m) => m.profile_id === carla.id && m.event_id === ev.id));
+    closeAll();
+
+    await Auth.signOut();
+    check('they sign in with the username, however it is capitalised',
+      !!(await Auth.signIn('Juan.DelaCruz', pw)) && Auth.current().name === 'Juan D. Dela Cruz');
+    await Auth.signOut();
+
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+
+    // Moving somebody who still signs in with an email address.
+    SB.users['old.leader@filamer.edu.ph'] = { id: 'u-oldleader', password: 'their-old-pass', email: 'old.leader@filamer.edu.ph' };
+    SB.enrolments['old.leader@filamer.edu.ph'] = {
+      email: 'old.leader@filamer.edu.ph', full_name: 'Maria S. Santos', position: 'Senator',
+      unit_id: NAT, access: 'officer', event_ids: []
+    };
+    claimEnrolment(SB.users['old.leader@filamer.edu.ph']);
+    const maria = Store.addPerson({ name: 'Maria S. Santos', unitId: nat, email: 'old.leader@filamer.edu.ph' });
+
+    window.Forms.rosterList();
+    await wait(100);
+    const list = top();
+    /* A national executive was handed every account in the Republic in one run.
+       One fold per unit, and their own already open. */
+    const groups = [...list.querySelectorAll('[data-acc-group]')];
+    check('the list is folded up by unit', groups.length >= 2,
+      groups.map((g) => g.getAttribute('data-acc-group')).join(', ') || 'one flat list');
+    check('with the unit of whoever is looking open, and the rest closed',
+      groups[0].getAttribute('data-collapsed') === 'false' &&
+      groups.slice(1).every((g) => g.getAttribute('data-collapsed') === 'true'),
+      groups.map((g) => g.getAttribute('data-acc-group') + '=' + g.getAttribute('data-collapsed')).join(' '));
+    check('each fold says how many are in it', /person|people/.test(groups[0].querySelector('.group-meta').textContent));
+    click(groups[1].querySelector('.group-head'));
+    check('and another opens when asked for', groups[1].getAttribute('data-collapsed') === 'false');
+
+    check('somebody on an email address is offered a username',
+      !!list.querySelector('[data-switch-one="old.leader@filamer.edu.ph"]'));
+    check('you are not offered one on yourself',
+      !list.querySelector('[data-switch-one="president@filamer.edu.ph"]'));
+    check('nobody already on a username is offered one',
+      !list.querySelector('[data-switch-one="juan.delacruz@fcusr.invalid"]'));
+    check('a username is shown as a username', /Username juan\.delacruz/.test(list.textContent.replace(/\s+/g, ' ')));
+    click(list.querySelector('[data-switch-one="old.leader@filamer.edu.ph"]'));
+    await wait(30);
+    click(top().querySelector('[data-ok]'));
+    await wait(200);
+    const sw = top().textContent.replace(/\s+/g, ' ');
+    const newPw = (sheetRows().find((r) => r.username === 'maria.santos') || {}).password || '';
+    check('they are moved to a username', /maria\.santos/.test(sw) && !!SB.users['maria.santos@fcusr.invalid'], sw.slice(0, 120));
+    check('same account', SB.users['maria.santos@fcusr.invalid'] && SB.users['maria.santos@fcusr.invalid'].id === 'u-oldleader');
+    check('the old email sign-in is gone', !SB.users['old.leader@filamer.edu.ph']);
+    check('their directory entry follows', Store.person(maria.id).email === 'maria.santos@fcusr.invalid');
+    closeAll();
+    await Auth.signOut();
+    check('the new username and password let them in', !!(await Auth.signIn('maria.santos', newPw)));
+    check('the old address does not', await Auth.signOut().then(() =>
+      Auth.signIn('old.leader@filamer.edu.ph', 'their-old-pass').then(() => false, () => true)));
+
+    // Everybody at once.
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    window.Forms.rosterList();
+    await wait(100);
+    const onEmail = Object.keys(SB.users).filter((e) => !/@fcusr\.invalid$/.test(e) && e !== 'president@filamer.edu.ph' &&
+      Object.keys(SB.profiles).some((k) => SB.profiles[k].email === e));
+    check('there is a button to move everybody', !!top().querySelector('[data-switch-all]') && onEmail.length > 0,
+      onEmail.length + ' on email');
+    click(top().querySelector('[data-switch-all]'));
+    await wait(30);
+    click(top().querySelector('[data-ok]'));
+    await wait(400);
+    const left = Object.keys(SB.users).filter((e) => !/@fcusr\.invalid$/.test(e) &&
+      Object.keys(SB.profiles).some((k) => SB.profiles[k].email === e));
+    check('everybody else is on a username now', left.length === 1 && left[0] === 'president@filamer.edu.ph', left.join(', '));
+    check('and the whole list comes out on one sheet',
+      new RegExp(onEmail.length + ' (person|people) can sign in now').test(top().textContent));
+    closeAll();
+
+    // Nobody changes their own.
+    window.App.go('#/settings');
+    window.App.render();
+    check('there is no Change my password anywhere', !D.querySelector('[data-change-pw]') &&
+      typeof Auth.changePassword === 'undefined');
+    await Auth.signOut();
+  }
+
   /* ---------------- a delete too big for one address ----------------
      Every id rides in the address of the request. Three hundred of them is well
      past what a server will accept, so deleting an activity with a long task
@@ -1212,12 +1473,16 @@ const FILES = [
     check('and it asks for both halves',
       !!D.querySelector('#gate-email') && !!D.querySelector('#gate-pass'));
 
-    // A bad address never reaches the network.
+    check('it asks for a username, not an email address',
+      /Username/.test(D.querySelector('label[for="gate-email"]').textContent) &&
+      D.querySelector('#gate-email').type === 'text');
+
+    // A username with a space in it never reaches the network.
     const before = SB.requests.length;
-    D.querySelector('#gate-email').value = 'not-an-address';
+    D.querySelector('#gate-email').value = 'juan dela cruz';
     D.querySelector('#gate-pass').value = 'whatever';
     D.querySelector('.gate-go').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    check('a malformed address is caught here', SB.requests.length === before);
+    check('a malformed username is caught here', SB.requests.length === before);
     check('and it says so', /does not look right/i.test(txt()), txt().slice(0, 80));
 
     /* ---- a password the door will not take ----
@@ -1246,8 +1511,8 @@ const FILES = [
       !SB.users['newbie@filamer.edu.ph'],
       'an account was created from a guess at the door');
     check('and they are not signed in', !Auth.signedIn());
-    check('the door says the password was not accepted',
-      /not accepted/i.test(txt()), txt().slice(0, 110));
+    check('the door says the username and password did not match',
+      /did not match/i.test(txt()), txt().slice(0, 110));
     check('and says who can fix it',
       /national executive/i.test(txt()), txt().slice(0, 140));
     check('and stays the door rather than opening a dialog',

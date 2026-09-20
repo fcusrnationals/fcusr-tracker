@@ -1196,9 +1196,10 @@
 
   /* ---------- volunteers ---------- */
 
-  /* Taking on one helper for one activity. Three questions, because the other
-     two — which unit, and which event — are already settled by where you were
-     standing when you pressed the button. */
+  /* Taking on one helper for one activity. Two questions — their name and what
+     they are doing — because the unit and the event are already settled by where
+     you were standing when you pressed the button, and the login is made for
+     them. */
   function volunteerForm(eventId) {
     var e = Store.event(eventId);
     if (!e) return;
@@ -1209,18 +1210,14 @@
         control: '<input type="text" id="v-name" data-autofocus maxlength="80" placeholder="Juan D. Dela Cruz">'
       }) +
       field({
-        name: 'email', label: 'Email', required: true,
-        control: '<input type="text" id="v-email" maxlength="120" placeholder="juan@filamer.edu.ph">',
-        hint: 'This is how they sign in. They choose their own password afterwards.'
-      }) +
-      field({
         name: 'position', label: 'Role in this activity',
         control: '<input type="text" id="v-position" maxlength="60" placeholder="e.g. Logistics Volunteer">',
         hint: 'A label printed on reports. It does not change what they can open.'
       }) +
       '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-      '<div class="small"><strong>' + U.esc(e.title) + '</strong> only, and only while it is running. ' +
-      'When this activity is completed their access ends by itself.</div></div>';
+      '<div class="small">They get a username and password to sign in with, shown on the next ' +
+      'screen. They reach <strong>' + U.esc(e.title) + '</strong> only, and only while it is ' +
+      'running.</div></div>';
 
     UI.modal({
       title: 'Add a volunteer',
@@ -1228,37 +1225,61 @@
       footer: '<button type="button" class="btn" data-close>Cancel</button>' +
         '<button type="button" class="btn btn-primary" data-save>Add volunteer</button>',
       onMount: function (root, close) {
-        root.querySelector('[data-save]').addEventListener('click', function () {
+        var save = root.querySelector('[data-save]');
+        function submit() {
           clearErrors(root);
           var name = root.querySelector('#v-name').value.trim();
-          var addr = root.querySelector('#v-email').value.trim();
           var position = root.querySelector('#v-position').value.trim();
-
           if (!name) return showError(root, 'name', 'Enter their name.');
-          if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
-            return showError(root, 'email', 'That email address does not look right.');
-          }
-          var already = Store.personByEmail(addr);
+
+          var already = findInUnit(name, e.unitId);
           if (already && (already.eventIds || []).indexOf(eventId) >= 0) {
-            return showError(root, 'email', already.name + ' is already on this activity.');
+            return showError(root, 'name', already.name + ' is already on this activity.');
           }
 
-          enrolVolunteer({ name: name, email: addr, position: position }, e)
-            .then(function () {
+          save.disabled = true;
+          save.textContent = 'One moment…';
+          enrolVolunteer({ name: name, position: position }, e)
+            .then(function (login) {
               close();
+              if (login) return invitedDialog(login);
               UI.toast(name + ' added to ' + e.title + '.');
             })
-            .catch(function (err) { showError(root, 'email', err.message || 'That could not be added.'); });
+            .catch(function (err) {
+              save.disabled = false;
+              save.textContent = 'Add volunteer';
+              if (err && err.setupMissing) { close(); return setupNeeded(err.message); }
+              showError(root, 'name', err.message || 'That could not be added.');
+            });
+        }
+        save.addEventListener('click', submit);
+        root.querySelector('#v-name').addEventListener('keydown', function (ev) {
+          if (ev.key === 'Enter') { ev.preventDefault(); submit(); }
         });
       }
     });
   }
 
-  /* One helper, recorded on the device and — once Supabase is connected — with
-     the backend too. Someone already in the directory is put on this activity as
-     well rather than entered twice. */
+  /* Somebody in this unit's directory under this name — exactly one of them.
+     Two people sharing a name is exactly when guessing would put the wrong one
+     on an activity, so then the answer is nobody and a new entry is made. */
+  function findInUnit(name, unitId) {
+    var want = U.nameKey(name);
+    if (!want) return null;
+    var same = Store.people({ unitId: unitId }).filter(function (p) {
+      return U.nameKey(p.name) === want;
+    });
+    return same.length === 1 ? same[0] : null;
+  }
+
+  /* One helper onto one activity, recorded on the device and — once Supabase is
+     connected — on the server. Somebody already in the unit is put on this
+     activity as well rather than entered twice.
+
+     Answers with the login made for them, to hand over, or null when they
+     already had one (or there is no server to make one on). */
   function enrolVolunteer(v, e) {
-    var existing = Store.personByEmail(v.email);
+    var existing = findInUnit(v.name, e.unitId);
     var eventIds = existing
       ? (existing.eventIds || []).concat([e.id]).filter(function (x, i, a) { return a.indexOf(x) === i; })
       : [e.id];
@@ -1270,32 +1291,35 @@
        activity; it is not a demotion. */
     var keepsOfficer = !!(existing && existing.access !== 'volunteer');
     var access = keepsOfficer ? 'officer' : 'volunteer';
+    var p;
 
     if (existing) {
-      Store.updatePerson(existing.id, {
+      p = Store.updatePerson(existing.id, {
         eventIds: eventIds, access: access, active: true,
         position: v.position || existing.position
       });
     } else {
-      Store.addPerson({
-        name: v.name, position: v.position, email: v.email,
+      p = Store.addPerson({
+        name: v.name, position: v.position,
         unitId: e.unitId, access: 'volunteer', eventIds: eventIds
       });
     }
 
-    return Backend.enrol({
-      email: v.email, full_name: v.name, position: v.position,
-      /* An officer keeps the unit they hold office in. Filing them under the
-         activity's unit would move a National officer into a college for the
-         sake of one afternoon's help. */
-      unit_id: keepsOfficer ? (existing.unitId || e.unitId) : e.unitId,
-      access: access, eventIds: eventIds
-    }).catch(function (err) {
-      // Offline there is no server to record it on. The helper is still on the
-      // activity so work can be assigned; the login follows once it is connected.
-      if (Auth.isOffline()) return;
-      throw err;
-    });
+    // Offline there is no server. The helper is on the activity so work can be
+    // assigned; a login follows once it is connected.
+    if (!global.Auth || Auth.isOffline()) return Promise.resolve(null);
+
+    if (p.email) {
+      return Backend.enrol({
+        email: p.email, full_name: p.name, position: p.position,
+        /* An officer keeps the unit they hold office in. Filing them under the
+           activity's unit would move a National officer into a college for the
+           sake of one afternoon's help. */
+        unit_id: keepsOfficer ? (p.unitId || e.unitId) : e.unitId,
+        access: access, eventIds: eventIds, isHead: !!p.isHead
+      }).then(function () { return null; });
+    }
+    return makeLogin(p);
   }
 
   /* ---------- importing a list ----------
@@ -1328,196 +1352,250 @@
     return rows.filter(function (r) { return r.some(function (c) { return c.trim() !== ''; }); });
   }
 
-  /* Reads the header row so the columns can be in any order, and copes with a
-     file that has no header at all by assuming name, email, role. */
-  function readVolunteerCSV(text) {
-    var rows = parseCSV(text);
-    if (!rows.length) return { rows: [], error: 'That file is empty.' };
+  /* A list of people, pasted or from a file, as rows of name, position and
+     committee.
+
+     Pasted straight out of Google Sheets or Excel, the columns arrive separated
+     by tabs; typed, it is one name per line — and a name may carry a comma
+     ("Dela Cruz, Juan"), which is why a pasted line is never split on commas. A
+     file is CSV. Either may start with a header row naming the columns, in any
+     order. An email column, from a sheet made for the old way, is ignored. */
+  function readPeopleList(text, fromFile, unitId) {
+    var rows = fromFile
+      ? parseCSV(text)
+      : String(text || '').split(/\r\n|\r|\n/).map(function (l) { return l.split('\t'); })
+          .filter(function (r) { return r.some(function (c) { return c.trim() !== ''; }); });
+    if (!rows.length) return [];
 
     var head = rows[0].map(function (h) { return h.trim().toLowerCase(); });
-    var looksLikeHeader = head.some(function (h) {
-      return h === 'name' || h === 'email' || h.indexOf('e-mail') >= 0;
+    var hasHeader = head.some(function (h) {
+      return h === 'name' || h === 'full name' || h === 'full_name' ||
+        h === 'position' || h === 'role' || h === 'email';
     });
-
-    var col = { name: 0, email: 1, position: 2 };
-    if (looksLikeHeader) {
+    var col = { name: 0, position: 1, committee: 2 };
+    if (hasHeader) {
+      col = { name: -1, position: -1, committee: -1 };
       head.forEach(function (h, i) {
-        if (h === 'name' || h === 'full name' || h === 'full_name') col.name = i;
-        else if (h === 'email' || h === 'e-mail' || h === 'email address') col.email = i;
-        else if (h === 'position' || h === 'role' || h === 'committee') col.position = i;
+        if (col.name < 0 && (h === 'name' || h === 'full name' || h === 'full_name')) col.name = i;
+        else if (col.position < 0 && (h === 'position' || h === 'role')) col.position = i;
+        else if (col.committee < 0 && h === 'committee') col.committee = i;
       });
+      if (col.name < 0) col.name = 0;
       rows = rows.slice(1);
     }
 
     var seen = {};
-    var out = rows.map(function (r, n) {
-      var name = (r[col.name] || '').trim();
-      var addr = (r[col.email] || '').trim().toLowerCase();
-      var position = (r[col.position] || '').trim();
+    return rows.map(function (r, n) {
+      // Without a header, an address from an old sheet is simply stepped over.
+      var cells = hasHeader ? r : r.filter(function (c) { return c.indexOf('@') < 0; });
+      var cell = function (i) { return i >= 0 ? String(cells[i] || '').trim() : ''; };
+      var name = cell(col.name);
+      var key = U.nameKey(name);
       var problem = '';
       if (!name) problem = 'No name';
-      else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) problem = 'Email does not look right';
-      else if (seen[addr]) problem = 'Listed twice in this file';
-      if (!problem) seen[addr] = true;
-      return { line: n + (looksLikeHeader ? 2 : 1), name: name, email: addr, position: position, problem: problem };
+      else if (seen[key]) problem = 'Listed twice';
+      else if (unitId && findInUnit(name, unitId)) problem = 'Already in this unit';
+      if (key) seen[key] = true;
+      return {
+        line: n + (hasHeader ? 2 : 1),
+        name: name, position: cell(col.position), committee: cell(col.committee),
+        problem: problem
+      };
+    }).filter(function (r) { return r.name || r.position; });
+  }
+
+  /* The paste box and the file button, shared by both lists so they cannot
+     drift apart. `onRows` is told what was read, every time it changes. */
+  function listInput(prefix, example) {
+    return '<div class="field" style="margin-top:12px"><label for="' + prefix + '-paste">' +
+      'Paste the names</label>' +
+      '<textarea id="' + prefix + '-paste" rows="7" spellcheck="false" placeholder="' +
+      U.esc(example) + '"></textarea>' +
+      '<div class="hint">One person per line. Copying the columns straight out of Google Sheets ' +
+      'or Excel works: name first, then position.</div></div>' +
+      '<div class="row" style="margin:6px 0 12px">' +
+      '<label class="btn btn-sm">' + UI.icon('upload') + 'Or choose a CSV file' +
+      '<input type="file" id="' + prefix + '-csv" accept=".csv,text/csv,text/plain" hidden></label>' +
+      '</div>' +
+      '<div id="' + prefix + '-preview"></div>';
+  }
+
+  function wireListInput(root, prefix, unitId, onRows) {
+    var paste = root.querySelector('#' + prefix + '-paste');
+    var file = root.querySelector('#' + prefix + '-csv');
+    paste.addEventListener('input', U.debounce(function () {
+      onRows(readPeopleList(paste.value, false, unitId));
+    }, 150));
+    file.addEventListener('change', function (ev) {
+      var f = ev.target.files && ev.target.files[0];
+      if (!f) return;
+      if (f.size > 2 * 1024 * 1024) return UI.toast('That file is very large — split it into smaller ones.', 'error');
+      var reader = new FileReader();
+      reader.onload = function () {
+        paste.value = '';
+        onRows(readPeopleList(String(reader.result), true, unitId));
+      };
+      reader.onerror = function () { UI.toast('That file could not be read.', 'error'); };
+      reader.readAsText(f);
     });
-    return { rows: out, error: '' };
+  }
+
+  function listPreview(rows, noun, nouns) {
+    var good = rows.filter(function (r) { return !r.problem; });
+    var bad = rows.filter(function (r) { return r.problem; });
+    if (!rows.length) return '';
+    return '<p class="small strong" style="margin:4px 0 8px">' + U.plural(good.length, noun, nouns) +
+      ' ready' + (bad.length ? ', ' + bad.length + ' skipped' : '') + '</p>' +
+      '<div class="list" style="max-height:240px;overflow:auto">' +
+      rows.slice(0, 200).map(function (r) {
+        return '<div class="task"><span class="task-main" style="cursor:default">' +
+          '<span class="task-title">' + U.esc(r.name || '(no name)') + '</span>' +
+          '<span class="task-meta">' + U.esc(r.position || 'No position') +
+          (r.name ? '<span class="sep">·</span>' + U.esc(U.usernameFor(r.name)) : '') +
+          '</span></span>' +
+          (r.problem
+            ? '<span class="task-right"><span class="chip st-overdue"><span class="dot"></span>' +
+              U.esc(r.problem) + '</span></span>'
+            : '') +
+          '</div>';
+      }).join('') + '</div>' +
+      (rows.length > 200 ? '<p class="tiny muted">Showing the first 200 of ' + rows.length + '.</p>' : '') +
+      '<p class="tiny muted" style="margin-top:6px">The username beside each name is a suggestion. ' +
+      'Where one is taken a number is added, and the sheet at the end shows the real ones.</p>';
   }
 
   function importVolunteersForm(eventId) {
     var e = Store.event(eventId);
     if (!e) return;
-    var parsed = null;
+    var parsed = [];
 
     UI.modal({
-      title: 'Import volunteers',
+      title: 'Add a list of volunteers',
       wide: true,
       body:
-        '<p class="small">A spreadsheet with one helper per row, saved as <strong>CSV</strong>. ' +
-        'In Excel or Google Sheets: <em>File → Download → Comma-separated values</em>.</p>' +
-        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-        '<div class="small strong" style="margin-bottom:4px">Columns</div>' +
-        '<div class="small muted">A header row of <code>name, email, role</code>. ' +
-        'The order does not matter, and anything else in the file is ignored. ' +
-        'Everyone imported here joins <strong>' + U.esc(e.title) + '</strong> as a volunteer.</div></div>' +
-        '<div class="row" style="margin:14px 0">' +
-        '<label class="btn">' + UI.icon('upload') + 'Choose the file' +
-        '<input type="file" id="v-csv" accept=".csv,text/csv,text/plain" hidden></label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" data-sample>Download a blank one</button>' +
-        '</div>' +
-        '<div id="v-preview"></div>',
+        '<p class="small" style="margin-top:0">Everyone here joins <strong>' + U.esc(e.title) +
+        '</strong> as a volunteer, and each gets a username and password — all shown on one ' +
+        'sheet at the end.</p>' +
+        listInput('v', 'Juan D. Dela Cruz Logistics\nMaria S. Santos Registration'),
       footer: '<button type="button" class="btn" data-close>Cancel</button>' +
-        '<button type="button" class="btn btn-primary" data-save disabled>Import</button>',
+        '<button type="button" class="btn btn-primary" data-save disabled>Add them</button>',
       onMount: function (root, close) {
         var save = root.querySelector('[data-save]');
         var preview = root.querySelector('#v-preview');
 
-        root.querySelector('[data-sample]').addEventListener('click', function () {
-          UI.downloadFile('FCUSR-volunteers-template.csv',
-            'name,email,role\nJuan D. Dela Cruz,juan@filamer.edu.ph,Logistics Volunteer\n',
-            'text/csv');
-        });
-
-        root.querySelector('#v-csv').addEventListener('change', function (ev) {
-          var f = ev.target.files && ev.target.files[0];
-          if (!f) return;
-          if (f.size > 2 * 1024 * 1024) {
-            preview.innerHTML = '<p class="small error-text" hidden="false">That file is very large — ' +
-              'split it into a few smaller ones.</p>';
-            return;
-          }
-          var reader = new FileReader();
-          reader.onload = function () {
-            var res = readVolunteerCSV(String(reader.result));
-            parsed = res.rows;
-            var good = parsed.filter(function (r) { return !r.problem; });
-            var bad = parsed.filter(function (r) { return r.problem; });
-
-            preview.innerHTML =
-              '<div class="section-head" style="margin-top:4px"><h2>' +
-              U.plural(good.length, 'volunteer') + ' ready</h2>' +
-              (bad.length ? '<span class="section-note">' + U.plural(bad.length, 'row') +
-                ' will be skipped</span>' : '') + '</div>' +
-              '<div class="list" style="max-height:260px;overflow:auto">' +
-              parsed.slice(0, 200).map(function (r) {
-                return '<div class="task"><span class="task-main" style="cursor:default">' +
-                  '<span class="task-title">' + U.esc(r.name || '(no name)') + '</span>' +
-                  '<span class="task-meta">' + U.esc(r.email || '—') +
-                  (r.position ? '<span class="sep">·</span>' + U.esc(r.position) : '') +
-                  '</span></span><span class="task-right">' +
-                  (r.problem
-                    ? '<span class="chip st-overdue"><span class="dot"></span>' + U.esc(r.problem) + '</span>'
-                    : '<span class="chip st-done"><span class="dot"></span>Line ' + r.line + '</span>') +
-                  '</span></div>';
-              }).join('') + '</div>' +
-              (parsed.length > 200 ? '<p class="tiny muted">Showing the first 200 of ' +
-                parsed.length + '.</p>' : '');
-
-            save.disabled = good.length === 0;
-            save.textContent = 'Import ' + U.plural(good.length, 'volunteer');
-          };
-          reader.onerror = function () { UI.toast('That file could not be read.', 'error'); };
-          reader.readAsText(f);
+        wireListInput(root, 'v', e.unitId, function (rows) {
+          parsed = rows;
+          preview.innerHTML = listPreview(rows, 'volunteer');
+          var n = rows.filter(function (r) { return !r.problem; }).length;
+          save.disabled = !n;
+          save.textContent = n ? 'Add ' + U.plural(n, 'volunteer') : 'Add them';
         });
 
         save.addEventListener('click', function () {
-          var queue = (parsed || []).filter(function (r) { return !r.problem; });
+          var queue = parsed.filter(function (r) { return !r.problem; });
           if (!queue.length) return;
           save.disabled = true;
 
-          var done = 0, failed = [];
-          // One at a time, so a rejected row names itself instead of the whole
-          // import failing as one lump.
-          queue.reduce(function (chain, r) {
+          var logins = [], failed = [], added = 0;
+          // One at a time, so a refused row names itself instead of the whole
+          // list failing as one lump.
+          queue.reduce(function (chain, r, i) {
             return chain.then(function () {
-              return enrolVolunteer(r, e).then(function () { done++; }, function (err) {
-                failed.push(r.email + ' — ' + (err.message || 'refused'));
-              }).then(function () {
-                save.textContent = 'Importing… ' + (done + failed.length) + ' of ' + queue.length;
+              save.textContent = 'Adding ' + (i + 1) + ' of ' + queue.length + '…';
+              return enrolVolunteer(r, e).then(function (login) {
+                added++;
+                if (login) logins.push(login);
+              }, function (err) {
+                failed.push({ name: r.name, why: (err && err.message) || 'refused' });
               });
             });
           }, Promise.resolve()).then(function () {
             close();
-            if (!failed.length) {
-              UI.toast(U.plural(done, 'volunteer') + ' added to ' + e.title + '.');
-            } else {
-              UI.modal({
-                title: 'Imported with ' + U.plural(failed.length, 'problem'),
-                body: '<p class="small">' + U.plural(done, 'volunteer') + ' went in. These did not:</p>' +
-                  '<ul class="small" style="padding-left:18px;line-height:1.7">' +
-                  failed.slice(0, 30).map(function (m) { return '<li>' + U.esc(m) + '</li>'; }).join('') +
-                  '</ul>',
-                footer: '<button type="button" class="btn btn-primary" data-close>Close</button>'
-              });
-            }
+            if (logins.length || failed.length) return passwordSheet(logins, failed);
+            UI.toast(U.plural(added, 'volunteer') + ' added to ' + e.title + '.');
           });
         });
       }
     });
   }
 
-  /* The events a volunteer for this unit could be put on. Volunteers help with
-     their own unit's activities, so the list follows the unit picker. */
-  /* What to tell somebody who has just been given an account. Shared by the
-     enrolment form and the person form, so the instruction cannot be right in
-     one and stale in the other — which is exactly what happened when the door
-     stopped having a "Set my password" button and only one of them was updated. */
-  /* What to send somebody, now that their account exists before they do
-     anything. There is no first-time screen to explain, because there is no
-     first time: the account is made when they are added and the password is the
-     one handed over. */
-  function invitedDialog(name, addr, password) {
-    var line = 'FCUSR Task Tracker\n' +
-      'https://fcusrnationals.github.io/fcusr-tracker/\n' +
-      'Email: ' + addr + '\n' +
-      'Password: ' + password + '\n' +
-      'Change it once you are in: Settings \u2192 Change my password.';
+  var SITE = 'https://fcusrnationals.github.io/fcusr-tracker/';
+
+  /* What to hand somebody who has just been given a login: the site, their
+     username and their password. There is nothing for them to set up and
+     nothing to change — this is the whole of it. */
+  function invitedDialog(login) {
+    var line = 'FCUSR Task Tracker\n' + SITE + '\n' +
+      'Username: ' + login.username + '\n' +
+      'Password: ' + login.password;
 
     UI.modal({
-      title: name + ' can sign in now',
+      title: login.name + ' can sign in now',
       body:
-        '<p class="small">Their account is made. Send them this \u2014 it is the whole of ' +
-        'what they need.</p>' +
+        '<p class="small">Give them these. It is the whole of what they need.</p>' +
         '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-        '<div class="small" style="line-height:1.9">' +
-        '<div>Email: <strong>' + U.esc(addr) + '</strong></div>' +
+        '<div class="small" style="line-height:2">' +
+        '<div>Username: <strong style="font-size:16px">' + U.esc(login.username) + '</strong></div>' +
         '<div>Password: <strong style="font-size:16px;letter-spacing:.3px">' +
-        U.esc(password) + '</strong></div>' +
+        U.esc(login.password) + '</strong></div>' +
         '</div></div>' +
         '<button type="button" class="btn btn-block" style="margin-top:12px" data-copy-line>' +
         'Copy the message to send them</button>' +
         '<p class="small muted" style="margin-top:12px">This is the only time the password is ' +
-        'shown. If it is lost, set a new one from this list \u2014 nobody has to be added ' +
-        'again.</p>',
+        'shown. If it is lost, set a new one from <strong>Who can sign in</strong> — their ' +
+        'username stays the same.</p>',
       footer: '<button type="button" class="btn btn-primary" data-close>Done</button>',
       onMount: function (root) {
         var b = root.querySelector('[data-copy-line]');
         if (b) b.addEventListener('click', function () {
-          UI.copyText(line).then(function () { UI.toast('Copied \u2014 send it to ' + name + '.'); })
+          UI.copyText(line).then(function () { UI.toast('Copied — send it to ' + login.name + '.'); })
             .catch(function (e) { UI.toast(e.message, 'error'); });
         });
       }
     });
+  }
+
+  /* Makes one person's login and writes it onto their directory entry, which is
+     what joins the entry to the account: whose tasks are whose, what they may
+     read. Answers with what goes on the sheet. */
+  function makeLogin(person, opts) {
+    opts = opts || {};
+    var pw = suggestPassword();
+    return Backend.createLogin({
+      username: U.usernameFor(person.name),
+      password: pw,
+      full_name: person.name, position: person.position || '',
+      unit_id: person.unitId || Store.nationalUnitId(),
+      access: person.access === 'volunteer' ? 'volunteer' : 'officer',
+      eventIds: person.access === 'volunteer' ? (person.eventIds || []) : [],
+      isHead: !!person.isHead,
+      replaces: opts.replaces || null
+    }).then(function (username) {
+      username = typeof username === 'string' ? username : '';
+      if (!username) throw new Error('The server made no username.');
+      if (person.id && Store.person(person.id)) {
+        Store.updatePerson(person.id, { email: U.loginToEmail(username), claimed: true });
+      }
+      return {
+        name: person.name, position: person.position || '',
+        access: person.access === 'volunteer' ? 'volunteer' : 'officer',
+        username: username, password: pw
+      };
+    });
+  }
+
+  // Everybody in a list, one at a time, so one refusal does not lose the rest.
+  function makeLogins(people, btn) {
+    var done = [], failed = [];
+    return people.reduce(function (chain, person, i) {
+      return chain.then(function () {
+        if (btn) btn.textContent = 'Making logins ' + (i + 1) + ' of ' + people.length + '…';
+        return makeLogin(person).then(function (login) { done.push(login); }, function (err) {
+          if (err && err.setupMissing) throw err;
+          failed.push({ name: person.name, why: (err && err.message) || 'refused' });
+        });
+      });
+    }, Promise.resolve()).then(function () { return { done: done, failed: failed }; });
   }
 
   /* ---------- one unit's roster ----------
@@ -1578,7 +1656,7 @@
           '</span>' +
           '<span class="task-meta">' + U.esc(p.position || 'No position') +
             '<span class="sep">\u00b7</span>' +
-            U.esc(p.email || 'no sign-in') + '</span></span>' +
+            U.esc(p.email ? U.loginLabel(p.email) : 'no login yet') + '</span></span>' +
           (president && p.access !== 'volunteer'
             ? '<span class="task-right"><button type="button" class="btn btn-sm" ' +
               'data-up-head="' + U.esc(p.id) + '">' +
@@ -1659,199 +1737,66 @@
   /* ---------- a whole council at once ----------
 
      Typing sixteen officers in one at a time is how a system gets abandoned in
-     week one. A spreadsheet with a row each, saved as CSV.
-
-     The email column is optional here, and that is the difference from the
-     volunteer import: a council roster is full of people who do the work and
-     never sign in. A row with an address gets an account waiting for it; a row
-     without one is simply somebody tasks can be given to. */
-
-  function readRosterCSV(text) {
-    var rows = parseCSV(text);
-    if (!rows.length) return { rows: [], error: 'That file is empty.' };
-
-    var head = rows[0].map(function (h) { return h.trim().toLowerCase(); });
-    var looksLikeHeader = head.some(function (h) {
-      return h === 'name' || h === 'email' || h === 'position' || h.indexOf('e-mail') >= 0;
-    });
-
-    var col = { name: 0, position: 1, email: 2 };
-    if (looksLikeHeader) {
-      head.forEach(function (h, i) {
-        if (h === 'name' || h === 'full name' || h === 'full_name') col.name = i;
-        else if (h === 'email' || h === 'e-mail' || h === 'email address') col.email = i;
-        else if (h === 'position' || h === 'role') col.position = i;
-        else if (h === 'committee') col.committee = i;
-      });
-      rows = rows.slice(1);
-    }
-
-    var seen = {};
-    var out = [];
-    rows.forEach(function (r, n) {
-      var name = (r[col.name] || '').trim();
-      // A trailing blank line in a spreadsheet is not a person.
-      if (!name && !(r[col.email] || '').trim()) return;
-
-      var addr = (r[col.email] || '').trim().toLowerCase();
-      var problem = '';
-      if (!name) problem = 'No name';
-      else if (addr && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) problem = 'That email does not look right';
-      else if (addr && seen[addr]) problem = 'That email is listed twice in this file';
-      else if (addr && Store.personByEmail(addr)) problem = 'Already in the directory';
-      if (!problem && addr) seen[addr] = true;
-
-      out.push({
-        line: n + (looksLikeHeader ? 2 : 1),
-        name: name, email: addr,
-        position: (r[col.position] || '').trim(),
-        committee: (col.committee !== undefined ? (r[col.committee] || '') : '').trim(),
-        problem: problem
-      });
-    });
-    return { rows: out, error: '' };
-  }
+     week one. Paste the names, or choose a spreadsheet, and every one of them
+     comes out with a username and a password on one sheet. */
 
   function importPeopleForm(unitId) {
     var u = Store.unit(unitId);
     if (!u) return;
-    var parsed = null;
+    var parsed = [];
+    var online = !!(global.Auth && !Auth.isOffline());
 
     UI.modal({
       title: 'Add a list to ' + u.name,
       wide: true,
       body:
-        '<p class="small" style="margin-top:0">A spreadsheet with one person per row, saved as ' +
-        '<strong>CSV</strong>. In Excel or Google Sheets: <em>File \u2192 Download \u2192 ' +
-        'Comma-separated values</em>.</p>' +
-        '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-        '<div class="small strong" style="margin-bottom:4px">Columns</div>' +
-        '<div class="small muted">A header row of <code>name, position, email</code>. The order ' +
-        'does not matter and anything else in the file is ignored.<br><br>' +
-        '<strong>Email is optional.</strong> With one, that person can sign in and see their own ' +
-        'tasks. Without one, they are somebody work can be assigned to \u2014 which is most of a ' +
-        'council. Everybody here joins <strong>' + U.esc(u.name) + '</strong>.</div></div>' +
-        '<div class="row" style="margin:14px 0">' +
-        '<label class="btn">' + UI.icon('upload') + 'Choose the file' +
-        '<input type="file" id="r-csv" accept=".csv,text/csv,text/plain" hidden></label>' +
-        '<button type="button" class="btn btn-ghost btn-sm" data-sample>Download a blank one</button>' +
-        '</div>' +
-        '<div id="r-preview"></div>',
+        '<p class="small" style="margin-top:0">Everybody here joins <strong>' + U.esc(u.name) +
+        '</strong>' + (online
+          ? ' and gets a username and password to sign in with — all of them on one sheet ' +
+            'at the end, ready to copy or download.'
+          : '. Logins are made once the tracker is connected to its server.') + '</p>' +
+        listInput('r', 'Juan D. Dela Cruz Governor\nMaria S. Santos Secretary'),
       footer: '<button type="button" class="btn" data-close>Cancel</button>' +
         '<button type="button" class="btn btn-primary" data-save disabled>Add them</button>',
       onMount: function (root, close) {
         var save = root.querySelector('[data-save]');
         var preview = root.querySelector('#r-preview');
 
-        root.querySelector('[data-sample]').addEventListener('click', function () {
-          UI.downloadFile('FCUSR-' + U.slug(u.name) + '-roster.csv',
-            'name,position,email\n' +
-            'Juan D. Dela Cruz,Governor,juan@filamer.edu.ph\n' +
-            'Maria S. Santos,Secretary,\n',
-            'text/csv');
-        });
-
-        root.querySelector('#r-csv').addEventListener('change', function (ev) {
-          var f = ev.target.files && ev.target.files[0];
-          if (!f) return;
-          if (f.size > 2 * 1024 * 1024) {
-            preview.innerHTML = '<div class="error-text">That file is very large \u2014 ' +
-              'split it into a few smaller ones.</div>';
-            return;
-          }
-          var reader = new FileReader();
-          reader.onload = function () {
-            var res = readRosterCSV(String(reader.result));
-            parsed = res.rows;
-            var good = parsed.filter(function (r) { return !r.problem; });
-            var bad = parsed.filter(function (r) { return r.problem; });
-
-            preview.innerHTML =
-              (res.error ? '<div class="error-text">' + U.esc(res.error) + '</div>' : '') +
-              '<p class="small strong">' + U.plural(good.length, 'person', 'people') +
-              ' ready' + (bad.length ? ', ' + bad.length + ' skipped' : '') + '</p>' +
-              (good.length
-                ? '<div class="list">' + good.slice(0, 12).map(function (r) {
-                    return '<div class="task"><span class="task-main" style="cursor:default">' +
-                      '<span class="task-title">' + U.esc(r.name) + '</span>' +
-                      '<span class="task-meta">' + U.esc(r.position || 'No position') +
-                      '<span class="sep">\u00b7</span>' +
-                      U.esc(r.email || 'no sign-in') + '</span></span></div>';
-                  }).join('') +
-                  (good.length > 12 ? '<div class="task"><span class="task-main" ' +
-                    'style="cursor:default"><span class="task-meta">and ' +
-                    (good.length - 12) + ' more</span></span></div>' : '') +
-                  '</div>'
-                : '') +
-              (bad.length
-                ? '<p class="small muted" style="margin-top:10px">Skipped: ' +
-                  bad.slice(0, 6).map(function (r) {
-                    return 'line ' + r.line + ' (' + U.esc(r.problem) + ')';
-                  }).join(', ') + (bad.length > 6 ? ', and more' : '') + '</p>'
-                : '');
-
-            save.disabled = !good.length;
-          };
-          reader.readAsText(f);
+        wireListInput(root, 'r', unitId, function (rows) {
+          parsed = rows;
+          preview.innerHTML = listPreview(rows, 'person', 'people');
+          var n = rows.filter(function (r) { return !r.problem; }).length;
+          save.disabled = !n;
+          save.textContent = n ? 'Add ' + U.plural(n, 'person', 'people') : 'Add them';
         });
 
         save.addEventListener('click', function () {
-          var good = (parsed || []).filter(function (r) { return !r.problem; });
+          var good = parsed.filter(function (r) { return !r.problem; });
           if (!good.length) return;
           save.disabled = true;
-          save.textContent = 'Adding\u2026';
+          save.textContent = 'Adding…';
 
           /* Everybody first, in one write. Going through addPerson per line saved
-             the whole store and redrew the whole app once per name, which is a
-             fair trade for one person typed into a form and a hang for a college
-             pasting its roster in. */
-          /* Only the people this import actually added get an account.
-
-             It used to enrol every line of the paste, including people the
-             directory already held and so skipped — which quietly re-enrolled
-             an existing volunteer as an officer of this unit while their entry
-             still said volunteer. And it used the old enrolment, which made no
-             account at all, then told the executive to send people instructions
-             for a first-time screen that no longer exists. */
+             the whole store and redrew the whole app once per name. */
           var made = Store.addPeople(good.map(function (r) {
             return {
               name: r.name, position: r.position, committee: r.committee,
-              email: r.email, unitId: unitId, access: 'officer'
+              unitId: unitId, access: 'officer'
             };
           }));
-          var added = made.length;
-          var skipped = good.length - added;
-          var withEmail = made.filter(function (p) { return !!p.email; });
 
-          if (withEmail.length && !(global.Auth && Auth.isOffline())) {
+          if (!online) {
             close();
-            return issueAll(withEmail.map(function (p) {
-              return { email: p.email, full_name: p.name, position: p.position,
-                       unit_id: unitId, access: 'officer', event_ids: [], is_head: false };
-            }), null).then(function () {
-              if (skipped) {
-                UI.toast(U.plural(skipped, 'line') + ' skipped \u2014 already in the directory.');
-              }
-            });
+            return UI.toast(U.plural(made.length, 'person', 'people') + ' added to ' + u.name + '.');
           }
 
-          var chain = Promise.resolve();
-          var invited = 0, failed = 0;
-          chain.then(function () {
+          makeLogins(made, save).then(function (res) {
             close();
-            UI.modal({
-              title: U.plural(added, 'person', 'people') + ' added to ' + u.name,
-              body: '<p class="small">' +
-                'None of them gave an email address, so they cannot sign in \u2014 they are ' +
-                'people work can be assigned to. Give one an address later and they get a ' +
-                'password then.</p>' +
-                (skipped ? '<p class="small muted">' + U.plural(skipped, 'line') +
-                  ' skipped \u2014 already in the directory.</p>' : '') +
-                (failed ? '<p class="small error-text">' + U.plural(failed, 'account') +
-                  ' could not be created on the server. They are in the list here; try enrolling ' +
-                  'them again in a moment.</p>' : ''),
-              footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
-            });
+            passwordSheet(res.done, res.failed);
+          }).catch(function (err) {
+            close();
+            if (err && err.setupMissing) return setupNeeded(err.message);
+            UI.toast(err.message || 'They were added here, but no logins could be made.', 'error');
           });
         });
       }
@@ -1860,28 +1805,12 @@
 
   /* ---------- who can sign in ----------
 
-     Enrolling somebody creates a row saying the address may have an account,
-     not an account. Until that person turns up and sets a password there is
-     nothing to sign in with — and with sixteen officers spread across nine
-     colleges, the question that decides whether a term starts on time is
-     simply "who still has not". Nothing showed it, so nobody could chase it.
-
-     Two lists, then: waiting, and in. Both come from the server, filtered by
-     the same rules that decide what anyone may see, so an LGU head gets their
-     own college and the nationals get the Republic. */
-
-  function inviteLink() {
-    var l = global.location;
-    return l ? (l.origin + l.pathname) : '';
-  }
-
-  /* groupMessage() and personalMessage() were here: the text copied from
-     "Copy the message for the group chat" and "Copy invite". Both told somebody
-     to open the site, type a password they would remember, and be asked to set
-     it the first time — a screen that no longer exists, because accounts are
-     made when a person is added. Anybody who followed them would have been told
-     their password was not accepted. There is no invitation without a password
-     now, so those buttons give one. */
+     Everybody with a login, from the server, filtered by the same rules that
+     decide what anyone may see — so a Governor gets their own college and the
+     National government the Republic. From here an executive sets a forgotten
+     password, moves somebody still signing in with an email address onto a
+     username, gives a login to anybody enrolled the old way who never had one,
+     and removes people. */
 
   function rosterList() {
     var offline = !global.Auth || Auth.isOffline();
@@ -1908,7 +1837,7 @@
           }
           dl.disabled = true;
           RosterPDF.save(last).then(function () {
-            UI.toast('Downloaded. It carries no passwords — this system holds none.');
+            UI.toast('Downloaded. It carries no passwords.');
           }).catch(function (err) {
             UI.toast(err.message || 'The list could not be made.', 'error');
           }).then(function () { dl.disabled = false; });
@@ -1921,7 +1850,7 @@
           Promise.all([Backend.pending(), Backend.roster()]).then(function (r) {
             last = { pending: r[0] || [], roster: r[1] || [] };
             /* While we have the server's version, put the directory right. It
-               knows which unit each address was enrolled into, and until this
+               knows which unit each login was enrolled into, and until this
                existed the local copy could disagree without anybody noticing —
                which is how officers went missing from their own Governor's
                assignee list. */
@@ -1940,43 +1869,168 @@
           wire();
         }
 
+        function busy(b, text) { b.disabled = true; b.textContent = text; }
+        function idle(b, text) { b.disabled = false; b.textContent = text; }
+
+        /* The people still signing in with an email address, other than whoever
+           is holding the phone — switching your own sign-in would throw you out
+           halfway through the list. */
+        function emailLogins() {
+          var mine = String((Auth.current() && Auth.current().email) || '').toLowerCase();
+          return merge(last.pending, last.roster).filter(function (p) {
+            return p.hasAccount && !U.isUsernameLogin(p.email) &&
+              String(p.email || '').toLowerCase() !== mine;
+          });
+        }
+
+        /* One person, or everybody, off an email address and onto a username.
+           Same account: their tasks, activities and history stay theirs. */
+        function switchAll(rows) {
+          var done = [], failed = [];
+          return rows.reduce(function (chain, r) {
+            return chain.then(function () {
+              var pw = suggestPassword();
+              var name = r.full_name || r.email;
+              return Backend.switchToUsername(r.email, U.usernameFor(name), pw).then(function (username) {
+                username = typeof username === 'string' ? username : '';
+                if (!username) throw new Error('The server made no username.');
+                var person = Store.personByEmail(r.email);
+                if (person) Store.updatePerson(person.id, { email: U.loginToEmail(username), claimed: true });
+                done.push({ name: name, position: r.position || '', access: r.access,
+                            username: username, password: pw });
+              }).catch(function (err) {
+                if (err && err.setupMissing) throw err;
+                failed.push({ name: name, why: (err && err.message) || 'refused' });
+              });
+            });
+          }, Promise.resolve()).then(function () { return { done: done, failed: failed }; });
+        }
+
+        /* Anybody enrolled the old way, by an address, who never got a login. */
+        function giveLogins(rows) {
+          var done = [], failed = [];
+          return rows.reduce(function (chain, r) {
+            return chain.then(function () {
+              var person = Store.personByEmail(r.email) || {
+                name: r.full_name || r.email.split('@')[0], position: r.position,
+                unitId: r.unit_id, access: r.access, eventIds: r.event_ids, isHead: r.is_head
+              };
+              return makeLogin({
+                id: person.id, name: person.name, position: r.position || person.position,
+                unitId: r.unit_id || person.unitId, access: r.access || person.access,
+                eventIds: r.event_ids || person.eventIds || [], isHead: !!r.is_head
+              }, { replaces: r.email }).then(function (login) { done.push(login); }, function (err) {
+                if (err && err.setupMissing) throw err;
+                failed.push({ name: person.name, why: (err && err.message) || 'refused' });
+              });
+            });
+          }, Promise.resolve()).then(function () { return { done: done, failed: failed }; });
+        }
+
+        function finished(res) {
+          load();
+          passwordSheet(res.done, res.failed);
+        }
+        function trouble(err) {
+          load();
+          if (err && err.setupMissing) return setupNeeded(err.message);
+          UI.toast((err && err.message) || 'That could not be done.', 'error');
+        }
+
         function wire() {
-          /* One person at a time, from their row. What the server knows about them
-             — their unit, their activities — is asked for rather than guessed from
-             the row, which only carries a name and an address. */
+          U.els('[data-acc-unit]', host).forEach(function (b) {
+            b.addEventListener('click', function () {
+              var name = b.getAttribute('data-acc-unit');
+              var g = host.querySelector('[data-acc-group="' + name + '"]');
+              var open = g.getAttribute('data-collapsed') === 'true';
+              openAccountUnits[name] = open;
+              g.setAttribute('data-collapsed', String(!open));
+              b.setAttribute('aria-expanded', String(open));
+            });
+          });
+
+          U.els('[data-switch-one]', host).forEach(function (b) {
+            b.addEventListener('click', function () {
+              var addr = String(b.getAttribute('data-switch-one') || '').toLowerCase();
+              var row = emailLogins().filter(function (p) { return p.email.toLowerCase() === addr; })[0];
+              if (!row) return;
+              UI.confirm({
+                title: 'Give ' + (row.full_name || addr) + ' a username?',
+                message: 'From now on they sign in with a username and a new password instead of ' +
+                  addr + '. Both are shown on the next screen.',
+                detail: 'They are signed out everywhere until they use the new ones. Their tasks, ' +
+                  'activities and history stay exactly as they are.',
+                confirmLabel: 'Give them a username',
+                tone: 'primary'
+              }).then(function (ok) {
+                if (!ok) return;
+                busy(b, 'One moment…');
+                switchAll([row]).then(finished, trouble);
+              });
+            });
+          });
+
+          var switchEvery = host.querySelector('[data-switch-all]');
+          if (switchEvery) switchEvery.addEventListener('click', function () {
+            var rows = emailLogins();
+            if (!rows.length) return UI.toast('Everybody already signs in with a username.');
+            UI.confirm({
+              title: 'Move ' + U.plural(rows.length, 'person', 'people') + ' to usernames?',
+              message: 'Each one gets a username and a new password, all on one sheet you can copy ' +
+                'or download. Their old email sign-in stops working.',
+              detail: 'Everybody moved is signed out until they use the new ones, so hand the ' +
+                'sheet out straight away. You stay as you are.',
+              confirmLabel: 'Move them all',
+              tone: 'primary'
+            }).then(function (ok) {
+              if (!ok) return;
+              busy(switchEvery, 'Moving them…');
+              switchAll(rows).then(finished, trouble);
+            });
+          });
+
           U.els('[data-give-one]', host).forEach(function (b) {
             b.addEventListener('click', function () {
               var addr = String(b.getAttribute('data-give-one') || '').toLowerCase();
-              b.disabled = true;
-              b.textContent = 'One moment\u2026';
+              busy(b, 'One moment…');
               Backend.waiting().then(function (rows) {
                 var mine = (rows || []).filter(function (r) {
                   return String(r.email || '').toLowerCase() === addr;
                 });
                 if (!mine.length) {
-                  b.disabled = false;
-                  b.textContent = 'Give a password';
-                  return UI.toast('They already have an account \u2014 use Set password instead.');
+                  idle(b, 'Give a login');
+                  return UI.toast('They already have a login — use Set password instead.');
                 }
-                return issueAll(mine, null).then(function () { load(); });
-              }).catch(function (err) {
-                b.disabled = false;
-                b.textContent = 'Give a password';
-                if (err && err.setupMissing) return setupNeeded(err.message);
-                UI.toast(err.message || 'That could not be done.', 'error');
-              });
+                return giveLogins(mine).then(finished);
+              }).catch(trouble);
             });
           });
 
-          /* One word, one meaning. This used to be "Withdraw", and a withdrawn
-             person stayed on the list under a heading of their own with every
-             button taken away — so the only way back was to enrol the address
-             again, which did not work either. Now: Remove takes them off the
-             list, and Add someone puts them back. */
-          /* Somebody has forgotten theirs. There is no emailed link — sending
-             mail needs a sender configured in Supabase, and without one that
-             button only reports an error. So the executive sets a password and
-             says it out loud, which is what happens in the office anyway. */
+          var giveAll = host.querySelector('[data-give-all]');
+          if (giveAll) giveAll.addEventListener('click', function () {
+            busy(giveAll, 'Finding them…');
+            Backend.waiting().then(function (rows) {
+              rows = rows || [];
+              if (!rows.length) {
+                idle(giveAll, 'Give them all a login');
+                return UI.toast('Nobody is waiting — everyone enrolled has a login.');
+              }
+              return UI.confirm({
+                title: 'Give ' + U.plural(rows.length, 'person', 'people') + ' a login?',
+                message: 'Each one gets a username and a password, all on one sheet you can copy or ' +
+                  'download.',
+                confirmLabel: 'Give them all a login',
+                tone: 'primary'
+              }).then(function (ok) {
+                if (!ok) return idle(giveAll, 'Give them all a login');
+                busy(giveAll, 'Making logins…');
+                return giveLogins(rows).then(finished);
+              });
+            }).catch(trouble);
+          });
+
+          /* Somebody has forgotten theirs. The executive makes a new one and
+             hands it over; the username does not change. */
           U.els('[data-setpw]', host).forEach(function (b) {
             b.addEventListener('click', function () {
               var email = b.getAttribute('data-setpw');
@@ -1984,22 +2038,19 @@
               var working = false;
 
               UI.modal({
-                title: 'Set a password for ' + name,
+                title: 'New password for ' + name,
                 body:
-                  '<p class="small">They will be signed out everywhere and will use this ' +
-                  'from now on. If their account was switched off, this switches it back on. ' +
-                  'Tell them what it is, and tell them to change it once they are in ' +
-                  '\u2014 Settings &rarr; Change my password.</p>' +
+                  '<p class="small">They are signed out everywhere and use this from now on. ' +
+                  'If their login was switched off, this switches it back on.</p>' +
                   '<div class="field" style="margin-top:14px"><label for="sp-a">New password</label>' +
                   '<input type="text" id="sp-a" autocomplete="off" spellcheck="false" ' +
                   'data-autofocus value="' + U.esc(suggestPassword()) + '"></div>' +
-                  '<div class="hint">Shown as plain text on purpose: you have to be able to ' +
-                  'read it out. At least eight characters.</div>' +
+                  '<div class="hint">Made for you, and shown as plain text so it can be read out. ' +
+                  'You can type a different one — at least eight characters.</div>' +
                   '<div class="error-text" data-err hidden></div>' +
-                  '<p class="small muted">You cannot see the password they had. It is stored ' +
-                  'scrambled and nobody can read it back \u2014 not even you \u2014 which is ' +
-                  'why a new one has to be set rather than looked up.</p>',
-                footer: '<button type="button" class="btn" data-close>Close</button>' +
+                  '<p class="small muted">Nobody can look up the password they had. It is stored ' +
+                  'scrambled, which is why a new one is set rather than found.</p>',
+                footer: '<button type="button" class="btn" data-close>Cancel</button>' +
                   '<button type="button" class="btn btn-primary" data-go>Set it</button>',
                 onMount: function (root2, close) {
                   var input = root2.querySelector('#sp-a');
@@ -2007,31 +2058,21 @@
                   var go = root2.querySelector('[data-go]');
                   go.addEventListener('click', function () {
                     if (working) return;
-                    var pw = input.value || '';
+                    var pw = (input.value || '').trim();
                     if (pw.length < 8) {
                       err.hidden = false;
-                      err.textContent = 'Too short \u2014 use at least eight characters.';
+                      err.textContent = 'Too short — use at least eight characters.';
                       return;
                     }
                     working = true;
-                    go.disabled = true;
-                    go.textContent = 'One moment\u2026';
+                    busy(go, 'One moment…');
                     Auth.setMemberPassword(email, pw).then(function () {
                       close();
-                      UI.modal({
-                        title: 'Done',
-                        body: '<p class="small">' + U.esc(name) + ' can sign in with:</p>' +
-                          '<p class="strong" style="font-size:20px;letter-spacing:.5px;' +
-                          'margin:10px 0;word-break:break-all">' + U.esc(pw) + '</p>' +
-                          '<p class="small muted">This is the only time it is shown. Give it to ' +
-                          'them now, and ask them to change it once they are in.</p>',
-                        footer: '<button type="button" class="btn btn-primary" data-close>Right</button>'
-                      });
+                      invitedDialog({ name: name, username: U.loginLabel(email), password: pw });
                     }).catch(function (e) {
                       working = false;
-                      go.disabled = false;
-                      go.textContent = 'Set it';
-                      if (e && e.setupMissing) { close(); return setupNeeded(); }
+                      idle(go, 'Set it');
+                      if (e && e.setupMissing) { close(); return setupNeeded(e.message); }
                       err.hidden = false;
                       err.textContent = (e && e.message) || 'That could not be set.';
                     });
@@ -2041,49 +2082,8 @@
             });
           });
 
-          /* Everybody still waiting, given an account and a password in one go.
-
-             These are people enrolled under the old way, where the account was
-             the person's to create on their first visit — and who therefore sat
-             waiting for a screen that never worked for them. Volunteers included,
-             who come in through a different door and do not all show on this
-             list, which is why the server is asked rather than the screen read. */
-          var giveAll = host.querySelector('[data-give-all]');
-          if (giveAll) giveAll.addEventListener('click', function () {
-            giveAll.disabled = true;
-            giveAll.textContent = 'Finding them\u2026';
-
-            Backend.waiting().then(function (rows) {
-              rows = rows || [];
-              if (!rows.length) {
-                giveAll.disabled = false;
-                giveAll.textContent = 'Give them all a password';
-                return UI.toast('Nobody is waiting \u2014 everyone enrolled has an account.');
-              }
-              return UI.confirm({
-                title: 'Give ' + U.plural(rows.length, 'person', 'people') + ' a password?',
-                message: 'Each one gets an account and a password you can hand over. ' +
-                  'Nobody has to set anything up on their first visit.',
-                detail: 'The passwords are shown once, on the next screen. Copy them before ' +
-                  'closing it \u2014 though a lost one can always be set again from this list.',
-                confirmLabel: 'Give them all a password',
-                tone: 'primary'
-              }).then(function (ok) {
-                if (!ok) {
-                  giveAll.disabled = false;
-                  giveAll.textContent = 'Give them all a password';
-                  return;
-                }
-                return issueAll(rows, giveAll);
-              });
-            }).catch(function (err) {
-              giveAll.disabled = false;
-              giveAll.textContent = 'Give them all a password';
-              if (err && err.setupMissing) return setupNeeded(err.message);
-              UI.toast(err.message || 'They could not be found.', 'error');
-            });
-          });
-
+          /* One word, one meaning. Remove takes them off the list and their login
+             with them; Add someone puts them back, with a new login. */
           U.els('[data-remove]', host).forEach(function (b) {
             b.addEventListener('click', function () {
               var email = b.getAttribute('data-remove');
@@ -2092,15 +2092,12 @@
               UI.confirm({
                 title: 'Remove ' + name + '?',
                 message: waiting
-                  ? 'The enrolment for ' + email + ' is removed, so nobody can claim it. ' +
-                    'Use this when an address was wrong or the person is no longer coming in.'
-                  : 'Their account and sign-in for ' + email + ' are deleted. Their tasks, ' +
-                    'letters and everything they filed stay exactly where they are, and ' +
-                    'their name still reads correctly on all of it.',
-                detail: waiting
-                  ? 'You can enrol the address again at any time.'
-                  : 'This cannot be undone. Adding them again gives them a new account on the ' +
-                    'same address \u2014 they choose a password as if it were their first day.',
+                  ? 'Their enrolment is removed. Use this when the person is no longer coming in.'
+                  : 'Their login (' + U.loginLabel(email) + ') is deleted and they can no longer ' +
+                    'sign in. Their tasks, letters and everything they filed stay where they are, ' +
+                    'and their name still reads correctly on all of it.',
+                detail: 'This cannot be undone. Adding them again gives them a new username and ' +
+                  'password.',
                 confirmLabel: 'Remove'
               }).then(function (ok) {
                 if (!ok) return;
@@ -2110,7 +2107,7 @@
                   load();
                 }).catch(function (err) {
                   b.disabled = false;
-                  if (err && err.setupMissing) return setupNeeded();
+                  if (err && err.setupMissing) return setupNeeded(err.message);
                   UI.toast(err.message || 'That could not be done.', 'error');
                 });
               });
@@ -2124,8 +2121,8 @@
   function offlineBody() {
     var people = Store.people();
     return '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
-      '<div class="strong" style="margin-bottom:3px">No accounts yet</div>' +
-      '<div class="small">The Supabase project has not been connected, so nobody signs in and ' +
+      '<div class="strong" style="margin-bottom:3px">No logins yet</div>' +
+      '<div class="small">The tracker has not been connected to its server, so nobody signs in and ' +
       'everything stays on this device. The people below are names on tasks, not logins.</div></div>' +
       (people.length
         ? '<div class="list" style="margin-top:14px">' + people.map(function (p) {
@@ -2139,18 +2136,10 @@
 
   /* One person, one row.
 
-     These were two lists laid side by side — waiting enrolments from one table,
-     accounts from another — and somebody can be in both. An officer withdrawn
-     under the old rules kept their account while losing their enrolment; enrol
-     them again and they appear under "Waiting to sign in", which is where the
-     Set password button is deliberately not offered, because somebody waiting
-     has no account to set one on. Except she did have one. She had signed in
-     for months.
-
-     So it is not "waiting or not" that decides anything here. It is whether an
-     account exists, which is the only thing that says whether a password can be
-     set — and merging the two lists on the address is what makes that
-     answerable at all. */
+     Waiting enrolments come from one table and logins from another, and
+     somebody can be in both. It is whether a login exists that decides what can
+     be done — set a password, or give one — and merging the two lists on the
+     sign-in is what makes that answerable at all. */
   function merge(pending, roster) {
     var byEmail = {};
     var key = function (e) { return String(e || '').trim().toLowerCase(); };
@@ -2168,9 +2157,6 @@
       var k = key(e.email);
       if (!k) return;
       if (byEmail[k]) {
-        /* Enrolled again over an account that already exists. They do not need
-           an invitation; they need their password set, or removing properly. */
-        byEmail[k].reEnrolled = true;
         if (e.full_name) byEmail[k].full_name = e.full_name;
         if (e.position) byEmail[k].position = e.position;
         return;
@@ -2194,115 +2180,156 @@
     var accounts = all.filter(function (p) { return p.hasAccount; });
     var canSignIn = accounts.filter(function (p) { return p.active; });
     var mine = (global.Auth && Auth.current()) ? Auth.current().email : '';
+    var onEmail = accounts.filter(function (p) {
+      return !U.isUsernameLogin(p.email) &&
+        String(p.email || '').toLowerCase() !== String(mine || '').toLowerCase();
+    });
 
-    /* Not styled as an alarm. On the first day of a term everybody is waiting,
-       and a screen that is red the moment it is doing its job teaches people to
-       stop reading it. The count on the section below carries the urgency. */
     var html = '<div class="where-now" style="margin-bottom:16px">' +
       '<span class="wn-label">Where things stand</span>' +
       '<span class="wn-line">' + U.plural(canSignIn.length, 'person', 'people') + ' can sign in' +
-      (waiting.length ? ' \u00b7 ' + waiting.length + ' still to set a password' : '') + '</span>' +
-      (waiting.length
-        ? '<span class="wn-note">Nobody can be chased into a system they have not opened. ' +
-          'Send them the link.</span>'
+      (waiting.length ? ' · ' + waiting.length + ' without a login' : '') + '</span>' +
+      (onEmail.length
+        ? '<span class="wn-note">' + U.plural(onEmail.length, 'person', 'people') +
+          ' still sign in with an email address.</span>'
         : '') +
       '</div>';
 
+    if (onEmail.length) {
+      html += '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-bottom:16px">' +
+        '<div class="strong" style="margin-bottom:4px">Move everyone to usernames</div>' +
+        '<div class="small" style="margin-bottom:10px">Each person gets a username and a new ' +
+        'password, all on one sheet. Try it on one person first with <strong>Give them a ' +
+        'username</strong> on their row, and check they can sign in.</div>' +
+        '<button type="button" class="btn btn-sm btn-primary" data-switch-all>Move ' +
+        U.plural(onEmail.length, 'person', 'people') + ' to usernames</button></div>';
+    }
+
     if (waiting.length) {
       html += '<div class="section" style="margin-bottom:18px">' +
-        '<div class="section-head"><h2>Waiting to sign in ' +
+        '<div class="section-head"><h2>Without a login ' +
         '<span class="chip st-overdue"><span class="dot"></span>' + waiting.length + '</span></h2></div>' +
-        '<p class="small muted" style="margin:0 2px 10px">Enrolled, but they have not opened the site ' +
-        'and set a password yet. Until they do there is no account &mdash; only your enrolment.</p>' +
+        '<p class="small muted" style="margin:0 2px 10px">Enrolled the old way, by an email address, ' +
+        'and never given a login.</p>' +
         '<div class="row" style="margin-bottom:10px">' +
         '<button type="button" class="btn btn-sm btn-primary" data-give-all>' +
-        'Give them all a password</button></div>' +
+        'Give them all a login</button></div>' +
         '<div class="list">' + waiting.map(function (e) { return row(e, mine); }).join('') +
         '</div></div>';
     }
 
     html += '<div class="section">' +
-      '<div class="section-head"><h2>Has an account' +
+      '<div class="section-head"><h2>Can sign in' +
       (accounts.length ? ' <span class="chip chip-plain">' + accounts.length + '</span>' : '') +
       '</h2></div>';
     html += accounts.length
-      ? '<div class="list">' + accounts.map(function (p) { return row(p, mine); }).join('') + '</div>'
-      : '<p class="small muted" style="margin:0 2px">Nobody has set a password yet.</p>';
+      ? accountsByUnit(accounts, mine)
+      : '<p class="small muted" style="margin:0 2px">Nobody has a login yet.</p>';
     html += '</div>';
 
     return html;
   }
 
-  /* The site is ahead of its database. Not a mistake anybody made at this
-     screen, and not something a toast should carry away after four seconds —
-     nothing on this page will work until somebody runs the file. */
-  /* One at a time, so one refusal does not lose the rest — and so the list at the
-     end can say honestly which of them worked. */
-  function issueAll(rows, btn) {
-    var done = [];
-    var failed = [];
-    var chain = Promise.resolve();
+  /* Who can sign in, one unit at a time.
 
-    rows.forEach(function (r, i) {
-      chain = chain.then(function () {
-        if (btn) btn.textContent = 'Giving ' + (i + 1) + ' of ' + rows.length + '\u2026';
-        var pw = suggestPassword();
-        return Backend.createMember({
-          email: r.email, password: pw,
-          full_name: r.full_name || '', position: r.position || '',
-          unit_id: r.unit_id, access: r.access || 'volunteer',
-          eventIds: r.event_ids || [], isHead: !!r.is_head
-        }).then(function () {
-          done.push({ name: r.full_name || r.email, email: r.email,
-                      password: pw, access: r.access || 'volunteer' });
-        }).catch(function (e) {
-          failed.push({ name: r.full_name || r.email, email: r.email,
-                        why: (e && e.message) || 'refused' });
-        });
-      });
+     The National government looking at this screen was handed every account in
+     the Republic in one run: thirty-odd names, ten colleges, no way to answer
+     "who from Nursing can sign in" except by reading all of them. Each unit is a
+     fold with its own count now. Your own opens; the rest wait to be asked. */
+  var openAccountUnits = {};
+
+  function accountsByUnit(rows, mine) {
+    var natName = Store.unitName(Store.nationalUnitId());
+    var myUnitName = '';
+    rows.forEach(function (p) {
+      if (String(p.email || '').toLowerCase() === String(mine || '').toLowerCase()) {
+        myUnitName = (p.units && p.units.name) || '';
+      }
+    });
+    if (!myUnitName && global.Auth && Auth.signedIn()) myUnitName = Auth.current().unitName || '';
+
+    var groups = {}, order = [];
+    rows.forEach(function (p) {
+      var name = (p.units && p.units.name) || 'No unit';
+      if (!groups[name]) { groups[name] = []; order.push(name); }
+      groups[name].push(p);
     });
 
-    return chain.then(function () {
-      if (btn) { btn.disabled = false; btn.textContent = 'Give them all a password'; }
-      passwordSheet(done, failed);
+    if (order.length === 1) {
+      return '<div class="list">' + rows.map(function (p) { return row(p, mine); }).join('') + '</div>';
+    }
+
+    order.sort(function (a, b) {
+      if (a === b) return 0;
+      if (a === natName) return -1;
+      if (b === natName) return 1;
+      if (a === 'No unit') return 1;
+      if (b === 'No unit') return -1;
+      return a.localeCompare(b);
     });
+
+    return order.map(function (name) {
+      var list = groups[name];
+      var open = openAccountUnits[name] === undefined ? (name === myUnitName) : !!openAccountUnits[name];
+      var off = list.filter(function (p) { return !p.active; }).length;
+      return '<div class="group" data-collapsed="' + !open + '" data-acc-group="' + U.esc(name) + '">' +
+        '<button type="button" class="group-head" data-acc-unit="' + U.esc(name) + '" ' +
+        'aria-expanded="' + open + '">' + UI.icon('chevronDown', 'caret') +
+        '<span class="group-title">' + U.esc(name) + '</span>' +
+        '<span class="group-meta">' + U.plural(list.length, 'person', 'people') +
+        (off ? ' \u00b7 <span class="late">' + off + ' cannot sign in</span>' : '') +
+        '</span></button>' +
+        '<div class="group-body"><div class="list">' +
+        list.map(function (p) { return row(p, mine); }).join('') +
+        '</div></div></div>';
+    }).join('');
   }
 
-  /* Shown once. Everything needed to hand each person their way in, in one
-     block somebody can copy into a group chat or read down a phone. */
+  /* Shown once. Everything needed to hand each person their way in, to copy
+     into a group chat or download and print. */
   function passwordSheet(done, failed) {
-    var lines = ['FCUSR Task Tracker — https://fcusrnationals.github.io/fcusr-tracker/', ''];
+    done = done || [];
+    failed = failed || [];
+    var lines = ['FCUSR Task Tracker — ' + SITE, ''];
     done.forEach(function (d) {
-      lines.push(d.name + '  —  ' + d.email + '  —  ' + d.password);
+      lines.push(d.name + '  —  username: ' + d.username + '  —  password: ' + d.password);
     });
-    lines.push('', 'Change your password once you are in: Settings \u2192 Change my password.');
+
+    var csvCell = function (v) { return '"' + String(v || '').replace(/"/g, '""') + '"'; };
+    var csv = ['Name,Position,Username,Password'].concat(done.map(function (d) {
+      return [d.name, d.position, d.username, d.password].map(csvCell).join(',');
+    })).join('\r\n') + '\r\n';
 
     UI.modal({
       title: U.plural(done.length, 'person', 'people') + ' can sign in now',
       wide: true,
       body:
         (done.length
-          ? '<p class="small">Copy this before closing. It is the only time these are shown ' +
-            '\u2014 though any of them can be set again from this list afterwards.</p>' +
+          ? '<p class="small">Give each person their username and password. <strong>Copy or ' +
+            'download this before closing</strong> — the passwords are not shown again, ' +
+            'though any of them can be set again from Who can sign in.</p>' +
+            '<p class="small muted">Sign in at ' + U.esc(SITE) + '</p>' +
             '<div class="list">' + done.map(function (d) {
               return '<div class="task"><span class="task-main" style="cursor:default">' +
                 '<span class="task-title">' + U.esc(d.name) +
-                (d.access === 'volunteer'
-                  ? ' <span class="chip chip-plain">volunteer</span>' : '') + '</span>' +
-                '<span class="task-meta">' + U.esc(d.email) + '</span></span>' +
-                '<span class="task-right"><code style="font-size:14px">' +
-                U.esc(d.password) + '</code></span></div>';
+                (d.access === 'volunteer' ? ' <span class="chip chip-plain">volunteer</span>' : '') +
+                '</span>' +
+                '<span class="task-meta">Username <strong>' + U.esc(d.username) + '</strong>' +
+                '<span class="sep">·</span>Password <strong>' + U.esc(d.password) +
+                '</strong></span></span></div>';
             }).join('') + '</div>' +
-            '<button type="button" class="btn btn-block btn-primary" style="margin-top:12px" ' +
-            'data-copy-sheet>Copy them all</button>'
-          : '<p class="small">Nobody was given a password.</p>') +
+            '<div class="row" style="margin-top:12px">' +
+            '<button type="button" class="btn btn-primary" data-copy-sheet>Copy them all</button>' +
+            '<button type="button" class="btn" data-csv-sheet>' + UI.icon('download') +
+            'Download as a spreadsheet</button></div>'
+          : '<p class="small">Nobody was given a login.</p>') +
 
         (failed.length
           ? '<div class="gate-note" style="margin-top:14px">' + UI.icon('alert') +
             '<span><strong>' + U.plural(failed.length, 'person', 'people') +
             ' could not be given one.</strong><br>' +
             failed.map(function (f) {
-              return U.esc(f.name) + ' \u2014 ' + U.esc(f.why);
+              return U.esc(f.name) + ' — ' + U.esc(f.why);
             }).join('<br>') + '</span></div>'
           : ''),
       footer: '<button type="button" class="btn btn-primary" data-close>Done</button>',
@@ -2313,6 +2340,11 @@
             .then(function () { UI.toast('Copied.'); })
             .catch(function (e) { UI.toast(e.message, 'error'); });
         });
+        var c = root.querySelector('[data-csv-sheet]');
+        if (c) c.addEventListener('click', function () {
+          UI.downloadFile('FCUSR-logins-' + U.today() + '.csv', csv, 'text/csv');
+          UI.toast('Downloaded. Keep it somewhere only you can open.');
+        });
       }
     });
   }
@@ -2321,16 +2353,15 @@
      does not have to be kept in step with it by hand. */
   function fileOf(why) {
     var m = /backend\/supabase\/([\w.-]+)/.exec(String(why || ''));
-    return m ? m[1] : 'remove.sql';
+    return m ? m[1] : 'usernames.sql';
   }
 
   function setupNeeded(why) {
     UI.modal({
       title: 'One setup step is missing',
       body:
-        '<p class="small">The site has been updated but the database has not, so removing ' +
-        'somebody and setting a password cannot work yet. Nothing is broken and nothing has ' +
-        'been lost.</p>' +
+        '<p class="small">The site has been updated but the database has not, so this cannot ' +
+        'work yet. Nothing is broken and nothing has been lost.</p>' +
         '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);margin-top:14px">' +
         '<div class="strong" style="margin-bottom:4px">What to do</div>' +
         '<ol class="small" style="padding-left:18px;line-height:1.8;margin:0">' +
@@ -2344,48 +2375,60 @@
     });
   }
 
-  /* Something an officer can read down a phone line without spelling it. No
-     l/1/O/0, and a number on the end because eight characters is the floor. */
+  /* Something that can be read out across a room without spelling it: two
+     ordinary words and a number with no 0 or 1 in it. */
+  var PASSWORD_WORDS = ['filamer', 'republic', 'roxas', 'capiz', 'gazette', 'session', 'quorum',
+    'charter', 'plenary', 'banner', 'council', 'senate', 'motion', 'ballot', 'summit', 'harbor',
+    'mango', 'island', 'river', 'lantern', 'anchor', 'garden', 'thunder', 'candle', 'compass',
+    'marble', 'meadow', 'orchid', 'pepper', 'rocket', 'silver', 'tiger', 'violet', 'window',
+    'basket', 'cotton', 'falcon', 'guitar', 'jasmine', 'kettle'];
   function suggestPassword() {
-    var words = ['filamer', 'republic', 'roxas', 'capiz', 'gazette', 'session',
-                 'quorum', 'charter', 'plenary', 'banner'];
     var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
-    return pick(words) + '-' + pick(words) + '-' + (100 + Math.floor(Math.random() * 900));
+    var c = global.crypto;
+    if (c && c.getRandomValues) {
+      pick = function (a) {
+        var n = new Uint32Array(1);
+        c.getRandomValues(n);
+        return a[n[0] % a.length];
+      };
+    }
+    var digits = String(100 + Math.floor(Math.random() * 900)).replace(/[01]/g, '7');
+    return pick(PASSWORD_WORDS) + '-' + pick(PASSWORD_WORDS) + '-' + digits;
   }
 
   function row(p, mine) {
     var email = p.email || '';
-    var name = p.full_name || email || 'Somebody';
+    var name = p.full_name || U.loginLabel(email) || 'Somebody';
     var isMe = mine && email && mine.toLowerCase() === email.toLowerCase();
     var waiting = !!p.waiting;
+    var onEmail = p.hasAccount && !U.isUsernameLogin(email);
 
     var meta = [p.position || 'No position'];
     if (p.units && p.units.name) meta.push(p.units.name);
 
-    /* Two states worth saying out loud, because both used to be invisible and
-       both are the reason somebody is standing in the office unable to get in. */
     var note = '';
     if (p.hasAccount && !p.active) {
       note = ' <span class="chip st-overdue"><span class="dot"></span>cannot sign in</span>';
-    } else if (p.reEnrolled) {
-      note = ' <span class="chip chip-plain">enrolled again</span>';
     }
 
     return '<div class="task"><span class="task-main" style="cursor:default">' +
       '<span class="task-title">' + U.esc(name) +
         (isMe ? ' <span class="chip chip-plain">you</span>' : '') + note + '</span>' +
-      '<span class="task-meta">' + meta.map(U.esc).join('<span class="sep">\u00b7</span>') + '</span>' +
-      '<span class="task-meta">' + U.esc(email) + '</span>' +
+      '<span class="task-meta">' + meta.map(U.esc).join('<span class="sep">·</span>') + '</span>' +
+      '<span class="task-meta">' + (waiting ? 'Enrolled as ' + U.esc(email)
+        : (onEmail ? 'Signs in with ' : 'Username ') + '<strong>' + U.esc(U.loginLabel(email)) + '</strong>') +
+      '</span>' +
       '</span>' +
       (isMe ? '' :
         '<span class="task-right" style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end">' +
         (waiting
           ? '<button type="button" class="btn btn-sm btn-primary" data-give-one="' + U.esc(email) +
-            '" data-name="' + U.esc(name) + '">Give a password</button>'
+            '" data-name="' + U.esc(name) + '">Give a login</button>'
           : '') +
-        /* Offered on the one thing that decides it: whether an account exists.
-           It used to hang off "is this person in the waiting list", which put it
-           out of reach of exactly the people who needed it. */
+        (onEmail
+          ? '<button type="button" class="btn btn-sm btn-primary" data-switch-one="' + U.esc(email) +
+            '" data-name="' + U.esc(name) + '">Give them a username</button>'
+          : '') +
         (p.hasAccount
           ? '<button type="button" class="btn btn-sm" data-setpw="' + U.esc(email) +
             '" data-name="' + U.esc(name) + '">Set password</button>'
@@ -2396,33 +2439,48 @@
       '</div>';
   }
 
-  /* The same grouping the screen uses. It used to do its own — waiting from one
-     table, accounts from another — so somebody in both appeared twice, and
-     anybody switched off appeared in neither. A list that disagrees with the
-     screen it was printed from is worse than no list. */
+  /* The same grouping the screen uses, so a list printed from it agrees with it. */
   function asText(last) {
     var all = merge(last.pending, last.roster);
     var waiting = all.filter(function (p) { return p.waiting; });
     var accounts = all.filter(function (p) { return p.hasAccount; });
     var line = function (p) {
       return '  ' + (p.full_name || '—') + '  —  ' + (p.position || 'No position') +
-        '  —  ' + (p.email || '') +
+        '  —  ' + U.loginLabel(p.email) +
         (p.hasAccount && !p.active ? '  —  CANNOT SIGN IN' : '');
     };
 
     var lines = ['FCUSR Task Tracker — who can sign in', U.fmtDate(U.today()), ''];
     if (waiting.length) {
-      lines.push('WAITING TO SIGN IN (' + waiting.length + ')');
+      lines.push('WITHOUT A LOGIN (' + waiting.length + ')');
       waiting.forEach(function (e) { lines.push(line(e)); });
       lines.push('');
     }
-    lines.push('HAS AN ACCOUNT (' + accounts.length + ')');
+    lines.push('CAN SIGN IN (' + accounts.length + ')');
     if (!accounts.length) lines.push('  nobody yet');
     accounts.forEach(function (p) { lines.push(line(p)); });
     return lines.join('\n') + '\n';
   }
 
   /* ---------- person ---------- */
+
+  /* How this person signs in, said on the form rather than asked. */
+  function loginNote(p, isNew) {
+    if (!global.Auth || Auth.isOffline()) return '';
+    var body;
+    if (p && p.email) {
+      body = U.isUsernameLogin(p.email)
+        ? 'Signs in as <strong>' + U.esc(U.loginLabel(p.email)) + '</strong>. Changing their ' +
+          'name, position or unit does not change it, or their password.'
+        : 'Signs in with <strong>' + U.esc(p.email) + '</strong>. To move them to a username, ' +
+          'use <strong>Who can sign in</strong>.';
+    } else {
+      body = (isNew ? 'When you add them' : 'When you save') + ', a username and password are ' +
+        'made for them and shown on the next screen to hand over.';
+    }
+    return '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300);' +
+      'margin-bottom:14px"><div class="small">' + body + '</div></div>';
+  }
 
   function personForm(personId, opts) {
     opts = opts || {};
@@ -2466,19 +2524,11 @@
         control: UI.suggestInput('f-committee', d.committee, Store.committees(), 'Optional')
       }) +
       '</div>' +
-      /* One form, because "add a person" and "enrol someone" were two doors to
-         the same room. Somebody in the directory can be given work; somebody
-         with an email can also sign in. That is one difference, and it belongs
-         on one field rather than in a choice made before the form opens. */
-      field({
-        name: 'email', label: 'Email',
-        control: '<input type="email" id="f-email" maxlength="120" autocapitalize="off" ' +
-          'spellcheck="false" value="' + U.esc(d.email || '') + '" placeholder="juan@filamer.edu.ph">',
-        hint: d.email
-          ? 'They can sign in with this address.'
-          : 'Optional. With an address they can sign in and see their own tasks; without one ' +
-            'they are simply somebody work can be assigned to.'
-      }) +
+      /* No email address to type. Somebody added here is given a username made
+         from their name and a password, both shown when they are saved. An
+         address was the one thing on this form that could be mistyped into a
+         login nobody could use. */
+      loginNote(p, isNew) +
 
       /* What this person IS, asked plainly.
 
@@ -2519,69 +2569,41 @@
           };
           var uSel = root.querySelector('#f-unit');
           if (uSel) data.unitId = uSel.value;
-          var addr = (root.querySelector('#f-email').value || '').trim();
-          if (addr && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) {
-            return showError(root, 'email', 'That email address does not look right.');
-          }
-          data.email = addr;
-          if (!data.name) return showError(root, 'name', 'Enter the officer’s name.');
+          if (!data.name) return showError(root, 'name', 'Enter their name.');
 
           var accSel = root.querySelector('#f-access');
           data.access = accSel && accSel.value === 'volunteer' ? 'volunteer' : 'officer';
 
-          /* The directory refuses a second entry for an address it already
-             holds, and says whose it is — shown on the field, rather than
-             leaving the dialog sitting there with nothing apparently happening. */
+          var saved;
           try {
-            if (isNew) Store.addPerson(data);
+            if (isNew) saved = Store.addPerson(data);
             else {
               data.active = root.querySelector('#f-active').checked;
-              Store.updatePerson(personId, data);
+              saved = Store.updatePerson(personId, data);
             }
           } catch (err) {
-            return showError(root, /already/.test(err.message) ? 'email' : 'name', err.message);
+            return showError(root, 'name', err.message);
           }
 
-          /* An address means an account. Enrolling records the decision; the
-             person sets their own password the first time they open the site,
-             which is why the app never handles anybody else's. */
-          if (!addr || (global.Auth && Auth.isOffline())) {
+          if (!global.Auth || Auth.isOffline()) {
             close();
             return UI.toast(isNew ? 'Person added.' : 'Person saved.');
           }
 
-          /* The account is made here, with a password to hand over, rather than
-             left for the person to create on their first visit. That gap is
-             where every enrolment fault this council hit actually lived: an
-             enrolment and an account that could disagree, and a person stuck
-             between them with nobody able to see why. */
-          /* A password only when the address is new to this person.
-
-             This used to issue one on every save. For somebody who already had a
-             login, making an account is the same act as setting their password —
-             so correcting a misspelt name or moving somebody to a new position
-             changed their password and signed them out of every device they were
-             on. They found out when their phone asked them to sign in again, with
-             a password they had never been told.
-
-             A new person, or an address being given for the first time, needs a
-             way in. Anybody else is having their details changed, and the details
-             go through the path that has never touched a password. */
-          var before = String(d.email || '').trim().toLowerCase();
-          var needsWayIn = isNew || !before || before !== addr.toLowerCase();
-
-          var details = {
-            email: addr, full_name: data.name, position: data.position,
-            unit_id: data.unitId || Store.nationalUnitId(),
-            access: data.access,
-            eventIds: data.access === 'volunteer' ? (d.eventIds || []) : [],
-            isHead: !!d.isHead
-          };
-
-          if (!needsWayIn) {
-            Backend.enrol(details).then(function () {
+          /* Somebody who already has a login is having their details changed:
+             name, position, unit, what they are. That goes through the path that
+             never touches a password or a username, so promoting, demoting or
+             moving somebody changes nothing about how they sign in. */
+          if (saved.email) {
+            Backend.enrol({
+              email: saved.email, full_name: saved.name, position: saved.position,
+              unit_id: saved.unitId || Store.nationalUnitId(),
+              access: saved.access,
+              eventIds: saved.access === 'volunteer' ? (saved.eventIds || []) : [],
+              isHead: !!saved.isHead
+            }).then(function () {
               close();
-              UI.toast(data.name + ' saved. Their password is unchanged.');
+              UI.toast(saved.name + ' saved. Their username and password are unchanged.');
             }).catch(function (err) {
               close();
               if (err && err.setupMissing) return setupNeeded(err.message);
@@ -2590,17 +2612,19 @@
             return;
           }
 
-          var pw = suggestPassword();
-          details.password = pw;
-          Backend.createMember(details).then(function () {
+          // Nobody with a login yet: make one, and show it to hand over.
+          var btn = root.querySelector('[data-save]');
+          btn.disabled = true;
+          btn.textContent = 'Making their login…';
+          makeLogin(saved).then(function (login) {
             close();
-            invitedDialog(data.name, addr, pw);
+            invitedDialog(login);
           }).catch(function (err) {
             close();
             if (err && err.setupMissing) return setupNeeded(err.message);
-            UI.toast(err.message || 'Saved here, but the account could not be created.', 'error');
+            UI.toast((err && err.message) ||
+              'Saved here, but their login could not be made. Open them and save again to retry.', 'error');
           });
-          return;
         }
         root.querySelector('[data-save]').addEventListener('click', submit);
         root.querySelector('#f-name').addEventListener('keydown', function (e) {
@@ -2618,7 +2642,7 @@
     receiveForm: receiveForm, releaseForm: releaseForm, insertStopForm: insertStopForm,
     askIfInternal: askIfInternal,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,
-    readVolunteerCSV: readVolunteerCSV, parseCSV: parseCSV,
+    readPeopleList: readPeopleList, parseCSV: parseCSV,
     eventForm: eventForm, taskForm: taskForm, taskView: taskView, personForm: personForm,
     rosterList: rosterList, unitPeopleForm: unitPeopleForm,
     importPeopleForm: importPeopleForm,

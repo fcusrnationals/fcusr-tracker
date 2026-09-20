@@ -38,15 +38,14 @@
       U.plural(people.length, 'person', 'people') +
         (mineOnly ? ' \u00b7 ' + Store.unitName(myUnit) : ''),
       '<div style="padding:14px">' +
-      '<p class="small muted">One form for everybody. Give somebody an email address and they ' +
-      'can sign in; leave it out and they are simply somebody work can be assigned to. ' +
-      'A person&rsquo;s ' +
+      '<p class="small muted">Add somebody and they are given a username and a password to sign ' +
+      'in with — nothing to type but their name. Forgotten passwords are set again from ' +
+      '<strong>Who can sign in</strong>. A person&rsquo;s ' +
       '<strong>position</strong> is only a label printed on reports &mdash; what they can actually ' +
       'reach is decided by the two settings below.</p>' +
       '<div class="row" style="margin:12px 0">' +
         '<button type="button" class="btn btn-primary" data-add-person>' + UI.icon('plus') + 'Add someone</button>' +
         '<button type="button" class="btn" data-roster>' + UI.icon('users') + 'Who can sign in</button>' +
-        '<button type="button" class="btn" data-change-pw>Change my password</button>' +
         '<button type="button" class="btn" data-my-handover>' + UI.icon('check') + 'Before you hand over</button>' +
       '</div>' +
       '<div class="card" style="background:var(--gold-50);border-color:var(--gold-300)">' +
@@ -76,7 +75,7 @@
         : '') +
 
       (people.length
-        ? '<div class="list">' + people.map(personRow).join('') + '</div>'
+        ? peopleByUnit(people, myUnit)
         : UI.empty('No one yet', 'Add your officers so tasks can be assigned.')) +
       '<p class="tiny muted" style="margin:10px 16px 14px">Deactivating keeps their name on the ' +
       'work they did. Removing takes them off the list and leaves that work unassigned.</p>');
@@ -483,6 +482,57 @@
     '</div>';
   }
 
+  /* The directory, one unit at a time.
+
+     A national executive holds thirty-odd people spread across ten colleges, and
+     a single list of all of them is not something anybody reads: the question at
+     this screen is always "who is in this unit". So each unit is a fold with its
+     own count. Your own unit is open; the rest are one line each until asked
+     for. A unit with nobody in it is not drawn at all. */
+  var openUnits = {};
+
+  function peopleByUnit(people, myUnit) {
+    var nat = Store.nationalUnitId();
+    var groups = {}, order = [];
+    people.forEach(function (p) {
+      var key = Store.unit(p.unitId) ? p.unitId : '__none__';
+      if (!groups[key]) { groups[key] = []; order.push(key); }
+      groups[key].push(p);
+    });
+
+    // The National government first, then the units by name, then anybody whose
+    // unit has been deleted — last, because they are a fault to fix, not a unit.
+    order.sort(function (a, b) {
+      if (a === b) return 0;
+      if (a === nat) return -1;
+      if (b === nat) return 1;
+      if (a === '__none__') return 1;
+      if (b === '__none__') return -1;
+      return Store.unitName(a).localeCompare(Store.unitName(b));
+    });
+
+    if (order.length === 1) {
+      return '<div class="list">' + groups[order[0]].map(personRow).join('') + '</div>';
+    }
+
+    return order.map(function (key) {
+      var rows = groups[key];
+      /* Open on the unit whoever is looking belongs to — a Governor opening this
+         wants their own council, not a list of colleges to click through. */
+      var open = openUnits[key] === undefined ? (key === myUnit) : !!openUnits[key];
+      var inactive = rows.filter(function (p) { return p.active === false; }).length;
+      return '<div class="group" data-collapsed="' + !open + '" data-people-group="' + U.esc(key) + '">' +
+        '<button type="button" class="group-head" data-people-unit="' + U.esc(key) + '" ' +
+        'aria-expanded="' + open + '">' + UI.icon('chevronDown', 'caret') +
+        '<span class="group-title">' +
+        U.esc(key === '__none__' ? 'No unit' : Store.unitName(key)) + '</span>' +
+        '<span class="group-meta">' + U.plural(rows.length, 'person', 'people') +
+        (inactive ? ' \u00b7 ' + inactive + ' inactive' : '') + '</span></button>' +
+        '<div class="group-body"><div class="list">' + rows.map(personRow).join('') +
+        '</div></div></div>';
+    }).join('');
+  }
+
   function personRow(p) {
     var s = Store.stats(Store.tasks({ assigneeId: p.id }));
     return '<div class="task">' +
@@ -588,8 +638,6 @@
       });
     });
 
-    var cpw = root.querySelector('[data-change-pw]');
-    if (cpw) cpw.addEventListener('click', function () { Auth.changePassword(); });
 
 
     var mh = root.querySelector('[data-my-handover]');
@@ -652,6 +700,17 @@
         var next = o.active === false;
         Store.setOfficeActive(o.id, next);
         UI.toast(next ? o.name + ' reactivated.' : o.name + ' set inactive.');
+      });
+    });
+
+    U.els('[data-people-unit]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var key = b.getAttribute('data-people-unit');
+        var g = root.querySelector('[data-people-group="' + key + '"]');
+        var open = g.getAttribute('data-collapsed') === 'true';
+        openUnits[key] = open;
+        g.setAttribute('data-collapsed', String(!open));
+        b.setAttribute('aria-expanded', String(open));
       });
     });
 

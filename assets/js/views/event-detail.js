@@ -298,8 +298,8 @@
         return '<div class="task"><span class="task-main" style="cursor:default">' +
           '<span class="task-title">' + U.esc(v.name) + '</span>' +
           '<span class="task-meta">' + U.esc(v.position || 'Volunteer') +
-            '<span class="sep">·</span>' + U.esc(v.email) +
-            (v.claimed ? '' : '<span class="sep">·</span>has not set a password yet') +
+            '<span class="sep">·</span>' +
+            (v.email ? U.esc(U.loginLabel(v.email)) : 'no login yet') +
           '</span></span>' +
           '<span class="task-right">' +
           '<button type="button" class="btn btn-sm" data-drop-volunteer="' + U.esc(v.id) + '">Remove</button>' +
