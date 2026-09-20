@@ -167,6 +167,89 @@ async function asPerson(browser, role) {
   });
   if (!underDone) odd.push('the finished directive is not under Done');
 
+  /* ---- what this person may see ----
+     The separation, asserted rather than assumed: who opens Settings, which
+     panels they get, whose people are in the directory, and whose activities
+     and letters are on the screen. */
+  const seen = await page.evaluate(async (role) => {
+    const V = () => document.getElementById('view');
+    const txt = () => V().innerText;
+    const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+    const go = async (hash) => { location.hash = hash; await pause(150); };
+    const out = {};
+
+    await go('#/settings');
+    out.settingsText = txt().slice(0, 160);
+    out.panels = [...V().querySelectorAll('[data-panel]')].map((d) => d.getAttribute('data-panel'));
+    out.peopleUnits = [...(V().querySelector('#people-unit') || { options: [] }).options].map((o) => o.text);
+    out.directory = [...V().querySelectorAll('.task-title')].map((n) => n.textContent.trim());
+
+    await go('#/events');
+    out.eventUnits = [...V().querySelectorAll('.unit-code')].map((n) => n.textContent.trim());
+    out.eventTitles = [...V().querySelectorAll('.er-title')].map((n) => n.textContent.trim());
+
+    await go('#/letters');
+    out.lettersText = txt().slice(0, 120);
+
+    await go('#/overview');
+    out.overviewText = txt().slice(0, 120);
+
+    out.tabsHidden = [...document.querySelectorAll('.tab')]
+      .filter((t) => t.hidden).map((t) => t.getAttribute('data-route'));
+    out.settingsButtonHidden = document.getElementById('btn-settings').hidden;
+
+    // What a unit head may take on: a college adds volunteers, never officers.
+    if (role === 'governor') {
+      Forms.personForm(null, {});
+      const md = [...document.querySelectorAll('.modal-backdrop')].pop();
+      out.accessOptions = [...(md.querySelector('#f-access') || { options: [] }).options].map((o) => o.value);
+      out.unitPicker = !!md.querySelector('#f-unit') && md.querySelector('#f-unit').tagName === 'SELECT';
+      document.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+    }
+    return out;
+  }, role);
+
+  const national = R.unit === NAT;
+  if (R.access === 'volunteer') {
+    if (!/Not available to volunteers|President/.test(seen.settingsText)) {
+      odd.push('a volunteer reached Settings by typing the address');
+    }
+    if (!seen.settingsButtonHidden) odd.push('the Settings button is shown to a volunteer');
+    ['overview', 'directives', 'letters'].forEach((r) => {
+      if (seen.tabsHidden.indexOf(r) < 0) odd.push('a volunteer still has the ' + r + ' tab');
+    });
+    if (seen.eventTitles.length !== 1) {
+      odd.push('a volunteer sees ' + seen.eventTitles.length + ' activities, not only the one they were taken on for');
+    }
+  } else if (R.head) {
+    const want = national ? ['access', 'term', 'units', 'offices', 'roles', 'letterhead', 'sync', 'backup', 'data']
+                          : ['access', 'template', 'sync', 'backup'];
+    const missing = want.filter((k) => seen.panels.indexOf(k) < 0);
+    const extra = seen.panels.filter((k) => want.indexOf(k) < 0);
+    if (missing.length || extra.length) {
+      odd.push('Settings panels wrong: missing ' + (missing.join(', ') || 'none') +
+        ', unexpected ' + (extra.join(', ') || 'none'));
+    }
+    if (!national) {
+      if (seen.peopleUnits.length) odd.push('a Governor is asked which unit to show — they have one');
+      if (seen.accessOptions && (seen.accessOptions.length !== 1 || seen.accessOptions[0] !== 'volunteer')) {
+        odd.push('a Governor is offered a level the database will refuse: ' + (seen.accessOptions || []).join(', '));
+      }
+      if (seen.unitPicker) odd.push('a Governor can file somebody under another unit');
+      const others = seen.eventUnits.filter((c) => c && c !== 'CN');
+      if (others.length) odd.push('a Governor sees another unit\'s activities: ' + others.join(', '));
+    }
+  } else {
+    // An officer who is not the head of their unit: Settings is not theirs.
+    if (!/President/.test(seen.settingsText)) {
+      odd.push('Settings opened for an officer who is not a head');
+    }
+    if (!national) {
+      const others = seen.eventUnits.filter((c) => c && c !== 'CN');
+      if (others.length) odd.push('a college officer sees another unit\'s activities: ' + others.join(', '));
+    }
+  }
+
   // ---- every control, everywhere ----
   let clicks = 0;
   for (const route of ROUTES) {

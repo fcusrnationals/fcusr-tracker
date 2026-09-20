@@ -1,0 +1,15 @@
+{
+  "name": "FCUSR Task Tracker",
+  "short_name": "FCUSR Tracker",
+  "description": "The Filamer Christian University Student Republic's activities, tasks, letters and reports.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FBF7EE",
+  "theme_color": "#C9A227",
+  "icons": [
+    { "src": "assets/img/fcusr-seal-small.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "assets/img/fcusr-seal.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

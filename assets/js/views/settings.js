@@ -153,6 +153,29 @@
       listEditor('committees', 'Committees', Store.committees()) +
       '</div>');
 
+    /* ---- a unit head's own template ----
+       A Governor may set their own council's template — the database has
+       allowed exactly that since the separation rules went in — and had no
+       screen to do it from, because the whole letterhead panel is the
+       President's. This is that one row, and nothing else on the page. */
+    if (mineOnly) {
+      var myUnit2 = Store.unit(myUnit);
+      html += section('template', 'Letter template',
+        myUnit2 && myUnit2.letterhead ? 'Your own' : 'The Republic\u2019s',
+        '<div style="padding:14px">' +
+        '<p class="small muted" style="margin-top:0">' + U.esc(Store.unitName(myUnit)) +
+        ' prints its Event Task Report and end-of-term summary on the Republic\u2019s template ' +
+        'unless you upload one of your own. The Accomplishment Report always uses the official ' +
+        'FCUSR letterhead and is not affected.</p>' +
+        '<div class="card" style="background:var(--st-on-hold-bg);border-color:var(--st-on-hold-bd);margin-bottom:12px">' +
+        '<div class="strong" style="margin-bottom:6px">Keep the same measurements</div>' +
+        '<div class="small" style="line-height:1.7">A4 portrait, 210 &times; 297 mm ' +
+        '(1240 &times; 1754 pixels is ideal). Leave the middle of the page empty: the top 58 mm ' +
+        'and bottom 52 mm are yours, and 22 mm down each side. PNG or JPG, under 3 MB.</div></div>' +
+        (myUnit2 ? '<div class="list">' + unitTemplateRow(myUnit2) + '</div>' : '') +
+        '</div>');
+    }
+
     /* ---- letterhead ---- */
     if (!mineOnly) html += section('letterhead', 'Letter templates',
       U.plural(Store.units({ activeOnly: true }).filter(function (u) { return !!u.letterhead; }).length,
@@ -428,7 +451,7 @@
      active, whatever had been chosen. */
   var ALL_TABS = ['access', 'term', 'units', 'offices', 'roles',
                   'letterhead', 'sync', 'backup', 'data'];
-  var UNIT_HEAD_TABS = ['access', 'sync', 'backup'];
+  var UNIT_HEAD_TABS = ['access', 'template', 'sync', 'backup'];
 
   var active = '';
 
@@ -486,18 +509,18 @@
 
      A national executive holds thirty-odd people spread across ten colleges, and
      a single list of all of them is not something anybody reads: the question at
-     this screen is always "who is in this unit". So each unit is a fold with its
-     own count. Your own unit is open; the rest are one line each until asked
-     for. A unit with nobody in it is not drawn at all. */
-  var openUnits = {};
+     this screen is always "who is in this unit". So the unit is picked from a
+     dropdown and only that unit's people are drawn. A Governor has one unit and
+     sees no picker at all. */
+  var shownUnit = '';
 
   function peopleByUnit(people, myUnit) {
     var nat = Store.nationalUnitId();
-    var groups = {}, order = [];
+    var counts = {}, order = [];
     people.forEach(function (p) {
       var key = Store.unit(p.unitId) ? p.unitId : '__none__';
-      if (!groups[key]) { groups[key] = []; order.push(key); }
-      groups[key].push(p);
+      if (counts[key] === undefined) { counts[key] = 0; order.push(key); }
+      counts[key]++;
     });
 
     // The National government first, then the units by name, then anybody whose
@@ -511,26 +534,26 @@
       return Store.unitName(a).localeCompare(Store.unitName(b));
     });
 
-    if (order.length === 1) {
-      return '<div class="list">' + groups[order[0]].map(personRow).join('') + '</div>';
-    }
+    var nameOf = function (key) {
+      return key === '__none__' ? 'No unit' : Store.unitName(key);
+    };
 
-    return order.map(function (key) {
-      var rows = groups[key];
-      /* Open on the unit whoever is looking belongs to — a Governor opening this
-         wants their own council, not a list of colleges to click through. */
-      var open = openUnits[key] === undefined ? (key === myUnit) : !!openUnits[key];
-      var inactive = rows.filter(function (p) { return p.active === false; }).length;
-      return '<div class="group" data-collapsed="' + !open + '" data-people-group="' + U.esc(key) + '">' +
-        '<button type="button" class="group-head" data-people-unit="' + U.esc(key) + '" ' +
-        'aria-expanded="' + open + '">' + UI.icon('chevronDown', 'caret') +
-        '<span class="group-title">' +
-        U.esc(key === '__none__' ? 'No unit' : Store.unitName(key)) + '</span>' +
-        '<span class="group-meta">' + U.plural(rows.length, 'person', 'people') +
-        (inactive ? ' \u00b7 ' + inactive + ' inactive' : '') + '</span></button>' +
-        '<div class="group-body"><div class="list">' + rows.map(personRow).join('') +
-        '</div></div></div>';
-    }).join('');
+    // Whatever was chosen last, else your own unit, else the first there is.
+    var picked = order.indexOf(shownUnit) >= 0 ? shownUnit
+      : order.indexOf(myUnit) >= 0 ? myUnit : order[0];
+    var rows = people.filter(function (p) {
+      return (Store.unit(p.unitId) ? p.unitId : '__none__') === picked;
+    });
+
+    return (order.length > 1
+      ? '<div class="field" style="margin:0 0 12px"><label for="people-unit">Show</label>' +
+        '<select id="people-unit">' + order.map(function (key) {
+          return '<option value="' + U.esc(key) + '"' + (key === picked ? ' selected' : '') + '>' +
+            U.esc(nameOf(key)) + ' \u2014 ' + U.esc(U.plural(counts[key], 'person', 'people')) +
+            '</option>';
+        }).join('') + '</select></div>'
+      : '') +
+      '<div class="list">' + rows.map(personRow).join('') + '</div>';
   }
 
   function personRow(p) {
@@ -703,15 +726,10 @@
       });
     });
 
-    U.els('[data-people-unit]', root).forEach(function (b) {
-      b.addEventListener('click', function () {
-        var key = b.getAttribute('data-people-unit');
-        var g = root.querySelector('[data-people-group="' + key + '"]');
-        var open = g.getAttribute('data-collapsed') === 'true';
-        openUnits[key] = open;
-        g.setAttribute('data-collapsed', String(!open));
-        b.setAttribute('aria-expanded', String(open));
-      });
+    var unitPick = root.querySelector('#people-unit');
+    if (unitPick) unitPick.addEventListener('change', function () {
+      shownUnit = unitPick.value;
+      App.render();
     });
 
     U.els('[data-add-person]', root).forEach(function (b) {

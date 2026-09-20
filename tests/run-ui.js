@@ -416,25 +416,22 @@ check('the officer list can be generated', !!$('[data-roster]'));
    so the list an executive keeps stays true. */
 check('nobody is offered a way to change their own password', !$('[data-change-pw]'));
 
-/* Thirty people across ten colleges is not a list anybody reads. One fold per
-   unit, counted, with your own open. */
+/* Thirty people across ten colleges is not a list anybody reads: the unit is
+   picked from a dropdown and only that unit is drawn. */
 {
   const cn = S.units().find((u) => u.code === 'CN');
   S.addPerson({ name: 'Nurse, Test', unitId: cn.id, position: 'Governor' });
   goto('#/settings');
-  const folds = $$('[data-people-group]');
-  check('the directory is folded up by unit', folds.length >= 2,
-    folds.map((f) => f.getAttribute('data-people-group')).join(', ') || 'one flat list');
-  check('your own unit is open', folds[0].getAttribute('data-collapsed') === 'false');
-  check('and the others are not', folds.slice(1).every((f) => f.getAttribute('data-collapsed') === 'true'));
-  check('each one says how many are in it',
-    /person|people/.test(folds[1].querySelector('.group-meta').textContent));
-  const nursing = folds.find((f) => f.getAttribute('data-people-group') === cn.id);
-  click(nursing.querySelector('.group-head'));
-  check('opening one shows its people', nursing.getAttribute('data-collapsed') === 'false' &&
-    /Nurse, Test/.test(nursing.textContent));
-  click(nursing.querySelector('.group-head'));
-  check('and it closes again', nursing.getAttribute('data-collapsed') === 'true');
+  const pick = $('#people-unit');
+  check('the directory is picked by unit', !!pick,
+    'still one flat list of everybody');
+  check('with a count on every unit', /person|people/.test(pick.options[0].text), pick.options[0].text);
+  check('it opens on your own unit', pick.value === S.nationalUnitId(), pick.value);
+  check('showing that unit and no other', !/Nurse, Test/.test(text()));
+  setValue(pick, cn.id);
+  check('picking another shows theirs', /Nurse, Test/.test(text()) &&
+    $('#people-unit').value === cn.id);
+  setValue($('#people-unit'), S.nationalUnitId());
 }
 
 // Now become a volunteer enrolled into exactly one event.
@@ -1019,6 +1016,24 @@ console.log('\n--- a directive with tasks of its own ---');
   S.deleteEvent(set.id);
 }
 
+/* ---------------- installed on a phone ---------------- */
+console.log('\n--- the tracker installs like an app ---');
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+  check('the page points at a manifest', /<link rel="manifest" href="manifest\.json/.test(html));
+  check('and the security policy allows it to be read',
+    /manifest-src 'self'/.test(html), 'the browser will refuse the manifest');
+  check('it opens full screen, under the council\u2019s name',
+    manifest.display === 'standalone' && /FCUSR/.test(manifest.name));
+  check('with an icon big enough for Android to install it',
+    manifest.icons.some((i) => parseInt(i.sizes, 10) >= 192), JSON.stringify(manifest.icons.map((i) => i.sizes)));
+  manifest.icons.forEach((i) => {
+    check('the icon ' + i.src + ' is in the project', fs.existsSync(path.join(ROOT, i.src)));
+  });
+  check('and iPhone is given the same icon', /apple-touch-icon/.test(html));
+}
+
 /* ---------------- a name becomes a username ---------------- */
 console.log('\n--- names become usernames, and lists are read the way people paste them ---');
 {
@@ -1157,28 +1172,46 @@ console.log('\n--- the letters tracker ---');
   goto('#/letters/' + L.id);
   check('a letter opens on its own screen', text().includes('Request to use the gymnasium'));
   check('the trail lists every office', $$('.trail-stop').length === 2);
-  check('only the office holding it offers a button', $$('[data-receive]').length === 1);
-  check('and it is the first one', $('[data-receive]').getAttribute('data-receive') === L.stops[0].id);
+  check('only the office holding it offers the next step', $$('[data-step-in]').length === 1);
+  check('and the step is named after that office', /Handed in today/.test(text()));
 
-  // Hand it over, through the real dialog. Queries are scoped to the dialog on
-  // top: an earlier screen or a stale modal must not answer for it.
+  /* Walking a letter round used to be two dialogs per office. The common path —
+     handed in today, signed — is one tap now, from the list or from the letter,
+     with the way back on the message it leaves behind. */
+  goto('#/letters');
+  // The row belonging to this letter, among the others still moving.
+  const ourRow = () => $('[data-open-letter="' + L.id + '"]').closest('.letter-item');
+  check('the row itself offers the next step', !!ourRow().querySelector('[data-step-in]') &&
+    /Hand in at/.test(ourRow().textContent), 'a letter still has to be opened to move it');
+  click(ourRow().querySelector('[data-step-in]'));
+  check('one tap records the hand-over', !!S.letter(L.id).stops[0].receivedAt);
+  check('and names the office when nobody gave a name',
+    S.letter(L.id).stops[0].receivedBy === S.officeName(dean.id), S.letter(L.id).stops[0].receivedBy);
+  check('the message offers a way back', !!window.document.querySelector('.toast-undo'));
+  click(window.document.querySelector('.toast-undo'));
+  check('which puts it back', !S.letter(L.id).stops[0].receivedAt);
+
+  goto('#/letters/' + L.id);
   const dlg = () => $$('.modal-backdrop').pop();
   const inDlg = (sel) => dlg().querySelector(sel);
 
-  click($('[data-receive]'));
+  // The dialog is still there for a different date or a name.
+  click($('[data-step-more]'));
   check('the hand-over dialog opens', !!dlg() && !!inDlg('#f-rby'));
   setValue(inDlg('#f-rby'), 'Mrs. Ferrer');
   click(inDlg('[data-save]'));
   check('the hand-over is recorded', S.letter(L.id).stops[0].receivedBy === 'Mrs. Ferrer');
   const has = (phrase, o) => text().toLowerCase().includes(phrase + ' ' + S.officeName(o.id).toLowerCase());
   check('the screen now names the office', has('with', dean), text().slice(0, 140));
-  check('and offers the outcome next', $$('[data-release]').length === 1);
+  check('and offers the outcome next', !!$('[data-step-ok]'));
 
-  // A blank receiver is refused.
-  click($('[data-release]'));
+  // Sent back always needs a reason, so it opens the form with that chosen.
+  click($('[data-step-back]'));
   const outcomes = Array.from(dlg().querySelectorAll('[data-outcome]'));
   check('the three outcomes are offered', outcomes.length === 3);
-  click(outcomes.find((b) => b.getAttribute('data-outcome') === 'Returned for revision'));
+  check('with "sent back" already chosen',
+    outcomes.find((b) => b.getAttribute('data-outcome') === 'Returned for revision')
+      .classList.contains('is-active'));
   click(inDlg('[data-save]'));
   check('sending it back demands a reason', !!inDlg('.field.has-error'));
   setValue(inDlg('#f-xnote'), 'Budget breakdown missing');
@@ -1193,10 +1226,34 @@ console.log('\n--- the letters tracker ---');
   check('a second run at that office is waiting', $$('.trail-stop').length === 3);
   check('the return is still shown', /returned for revision/i.test(text()));
   check('with the reason', text().includes('Budget breakdown missing'));
-  check('and the next hand-over is ready', $$('[data-receive]').length === 1);
+  check('and the next hand-over is ready', !!$('[data-step-in]'));
 
+  /* Handed in and signed the same day, which is most of them, in one tap. */
+  click($('[data-step-both]'));
+  check('one tap can do both', S.letter(L.id).stops[1].outcome === 'Approved' &&
+    !!S.letter(L.id).stops[1].receivedAt);
+  check('and the letter moves on to the next office',
+    S.currentStop(S.letter(L.id)).officeId === osa.id, S.letterWhere(S.letter(L.id)));
+
+  goto('#/letters/' + L.id);
+  click($('[data-more]'));
+  const undoItem = $$('.menu button').find((b) => /Undo the last step/.test(b.textContent));
+  check('the last step can be taken back from the menu', !!undoItem);
+  click(undoItem);
+  check('which undid the outcome', S.letter(L.id).stops[1].outcome === '',
+    S.letter(L.id).stops[1].outcome);
+  goto('#/letters/' + L.id);
+  click($('[data-step-ok]'));
+  check('and it can be recorded again in one tap', S.letter(L.id).stops[1].outcome === 'Approved');
+
+  /* Sitting at an office far longer than that office takes is what "needs a
+     chase" means, so the fixture has to have sat. */
+  S.raw().letters.find((x) => x.id === L.id).stops[2].receivedAt = window.U.addDays(window.U.today(), -40);
+  S.raw().letters.find((x) => x.id === L.id).stops[2].receivedBy = 'Front desk';
+  S.save();
   goto('#/overview');
-  check('a letter needing a chase reaches the Overview', text().includes('Request to use the gymnasium'));
+  check('a letter needing a chase reaches the Overview', text().includes('Request to use the gymnasium'),
+    S.letterWhere(S.letter(L.id)));
 
   goto('#/events/' + ev.id);
   // The activity's sections are tabs now, so the letters live behind their own.

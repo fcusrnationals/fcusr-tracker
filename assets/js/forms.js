@@ -1011,6 +1011,139 @@
      The clerk who takes the letter in will never use this app, so their name is
      typed by whoever handed it over. That makes this a logbook rather than a
      signature, which is worth being plain about on the form itself. */
+  /* ---------- walking a letter round ----------
+
+     Every step used to be a dialog: open the letter, find the office holding
+     it, press a button, fill in who took it, save; come back later, press
+     another, choose the outcome, save. Two forms per office, and an executive
+     with six letters out gave up on the screen and kept the trail in their
+     head.
+
+     What actually happens is nearly always the same: it was handed in today,
+     and it was signed. So that is one tap, from the list or from the letter,
+     with the way back on the message it leaves behind. The dialogs are still
+     there for the day somebody needs to record a different date, a note, or a
+     letter that was sent back. */
+
+  function stepKey(l, s) { return U.esc(l.id + '|' + s.id); }
+
+  function letterSteps(l, opts) {
+    opts = opts || {};
+    if (!l || l.status !== 'Routing') return '';
+    var s = Store.currentStop(l);
+    if (!s) return '';
+    var here = Store.stopName(s);
+    var k = stepKey(l, s);
+    var small = opts.compact ? ' btn-sm' : '';
+    var btn = function (attr, cls, label) {
+      return '<button type="button" class="btn' + small + cls + '" ' + attr + '="' + k + '">' +
+        U.esc(label) + '</button>';
+    };
+
+    if (!s.receivedAt) {
+      return btn('data-step-in', ' btn-primary', opts.compact ? 'Hand in at ' + here : 'Handed in today') +
+        btn('data-step-both', '', opts.compact ? 'Handed in &amp; signed' : 'Handed in and signed today') +
+        (opts.compact ? '' : btn('data-step-more', ' btn-ghost', 'Another date…'));
+    }
+    return btn('data-step-ok', ' btn-primary', opts.compact ? here + ' signed it' : 'Signed and passed on') +
+      btn('data-step-back', '', 'Sent back') +
+      (opts.compact ? '' : btn('data-step-note', ' btn-ghost', 'Seen, not signed') +
+        btn('data-step-more', ' btn-ghost', 'Another date…'));
+  }
+
+  /* Recorded, said plainly, with the way back beside it. */
+  function stepDone(letterId, message) {
+    UI.toast(message, 'success', {
+      undo: function () {
+        try {
+          var res = Store.undoLastStep(letterId);
+          UI.toast('Put back — ' + res.undone + ' was undone.');
+        } catch (err) { UI.toast(err.message, 'error'); }
+      }
+    });
+  }
+
+  function wireLetterSteps(root) {
+    var parse = function (b, name) {
+      var parts = String(b.getAttribute(name) || '').split('|');
+      return { letterId: parts[0], stopId: parts[1] };
+    };
+    var run = function (b, name, fn) {
+      var at = parse(b, name);
+      var l = Store.letter(at.letterId);
+      var s = l && l.stops.filter(function (x) { return x.id === at.stopId; })[0];
+      if (!l || !s) return;
+      try { fn(l, s, at); } catch (err) { UI.toast(err.message, 'error'); }
+    };
+
+    U.els('[data-step-in]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        run(b, 'data-step-in', function (l, s, at) {
+          Store.receiveStop(at.letterId, at.stopId, {
+            forwardedBy: Store.letterInCharge(l) === 'Unassigned' ? '' : Store.letterInCharge(l),
+            receivedAt: U.today()
+          });
+          stepDone(at.letterId, Store.stopName(s) + ' has it.');
+        });
+      });
+    });
+
+    U.els('[data-step-both]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        run(b, 'data-step-both', function (l, s, at) {
+          Store.passStop(at.letterId, at.stopId, {
+            forwardedBy: Store.letterInCharge(l) === 'Unassigned' ? '' : Store.letterInCharge(l),
+            on: U.today(), outcome: 'Approved'
+          });
+          var after = Store.letter(at.letterId);
+          stepDone(at.letterId, after.status === 'Approved'
+            ? 'Fully approved — that was the last office.'
+            : Store.stopName(s) + ' signed it. ' + Store.letterWhere(after) + '.');
+        });
+      });
+    });
+
+    U.els('[data-step-ok]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        run(b, 'data-step-ok', function (l, s, at) {
+          Store.releaseStop(at.letterId, at.stopId, { outcome: 'Approved', releasedAt: U.today() });
+          var after = Store.letter(at.letterId);
+          stepDone(at.letterId, after.status === 'Approved'
+            ? 'Fully approved — that was the last office.'
+            : Store.stopName(s) + ' signed it. ' + Store.letterWhere(after) + '.');
+        });
+      });
+    });
+
+    U.els('[data-step-note]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        run(b, 'data-step-note', function (l, s, at) {
+          Store.releaseStop(at.letterId, at.stopId, { outcome: 'Noted', releasedAt: U.today() });
+          stepDone(at.letterId, Store.stopName(s) + ' saw it and passed it on.');
+        });
+      });
+    });
+
+    // Sent back always needs a reason, so it opens the form with that chosen.
+    U.els('[data-step-back]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var at = parse(b, 'data-step-back');
+        releaseForm(at.letterId, at.stopId, { outcome: 'Returned for revision' });
+      });
+    });
+
+    U.els('[data-step-more]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var at = parse(b, 'data-step-more');
+        var l = Store.letter(at.letterId);
+        var s = l && l.stops.filter(function (x) { return x.id === at.stopId; })[0];
+        if (!l || !s) return;
+        if (s.receivedAt) releaseForm(at.letterId, at.stopId);
+        else receiveForm(at.letterId, at.stopId);
+      });
+    });
+  }
+
   function receiveForm(letterId, stopId) {
     var l = Store.letter(letterId);
     if (!l) return;
@@ -1022,10 +1155,11 @@
       '<p class="small">Handing <strong>' + U.esc(l.subject) + '</strong> in at ' +
       '<strong>' + U.esc(Store.stopName(s)) + '</strong>.</p>' +
       field({
-        name: 'receivedBy', label: 'Who received it', required: true,
+        name: 'receivedBy', label: 'Who received it',
         control: '<input type="text" id="f-rby" data-autofocus maxlength="80" ' +
-          'placeholder="Name of the person at the office">',
-        hint: 'Typed in by you — nobody at that office signs in here.'
+          'placeholder="' + U.esc(Store.stopName(s)) + '">',
+        hint: 'Optional. Left empty it records the office itself, which is the honest ' +
+          'answer when nobody at the counter gave a name.'
       }) +
       '<div class="field-row">' +
       field({
@@ -1048,7 +1182,6 @@
         function submit() {
           clearErrors(root);
           var who = root.querySelector('#f-rby').value.trim();
-          if (!who) return showError(root, 'receivedBy', 'Write down who received it.');
           try {
             Store.receiveStop(letterId, stopId, {
               receivedBy: who,
@@ -1069,24 +1202,30 @@
 
   /* What came back out of the office. "Returned for revision" is the one that
      matters most: it sends the letter backwards, not forwards. */
-  function releaseForm(letterId, stopId) {
+  function releaseForm(letterId, stopId, opts) {
+    opts = opts || {};
     var l = Store.letter(letterId);
     if (!l) return;
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return;
 
-    var outcome = 'Approved';
+    var outcome = Store.STOP_OUTCOMES.indexOf(opts.outcome) >= 0 ? opts.outcome : 'Approved';
     var body =
       '<p class="small"><strong>' + U.esc(Store.stopName(s)) + '</strong> has finished with ' +
       '<strong>' + U.esc(l.subject) + '</strong>.</p>' +
       '<div class="field"><span class="field-label">What happened <span class="req">*</span></span>' +
       '<div class="segmented" style="width:100%">' +
-        Store.STOP_OUTCOMES.map(function (o, i) {
+        Store.STOP_OUTCOMES.map(function (o) {
+          var on = o === outcome;
           return '<button type="button" data-outcome="' + U.esc(o) + '"' +
-            (i === 0 ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"') + '>' +
+            (on ? ' class="is-active" aria-pressed="true"' : ' aria-pressed="false"') + '>' +
             U.esc(o === 'Returned for revision' ? 'Sent back' : o) + '</button>';
         }).join('') +
-      '</div><div class="hint" id="outcome-hint">Signed and passed on.</div></div>' +
+      '</div><div class="hint" id="outcome-hint">' +
+      (outcome === 'Returned for revision'
+        ? 'It comes back to you. The office is not cleared, and the letter goes in again once it is fixed.'
+        : outcome === 'Noted' ? 'Seen and passed on without a signature.'
+        : 'Signed and passed on.') + '</div></div>' +
       '<div class="field-row">' +
       field({
         name: 'releasedAt', label: 'Date',
@@ -2068,15 +2207,10 @@
         }
 
         function wire() {
-          U.els('[data-acc-unit]', host).forEach(function (b) {
-            b.addEventListener('click', function () {
-              var name = b.getAttribute('data-acc-unit');
-              var g = host.querySelector('[data-acc-group="' + name + '"]');
-              var open = g.getAttribute('data-collapsed') === 'true';
-              openAccountUnits[name] = open;
-              g.setAttribute('data-collapsed', String(!open));
-              b.setAttribute('aria-expanded', String(open));
-            });
+          var unitPick = host.querySelector('#acc-unit');
+          if (unitPick) unitPick.addEventListener('change', function () {
+            shownAccountUnit = unitPick.value;
+            paint();
           });
 
           U.els('[data-switch-one]', host).forEach(function (b) {
@@ -2364,9 +2498,10 @@
 
      The National government looking at this screen was handed every account in
      the Republic in one run: thirty-odd names, ten colleges, no way to answer
-     "who from Nursing can sign in" except by reading all of them. Each unit is a
-     fold with its own count now. Your own opens; the rest wait to be asked. */
-  var openAccountUnits = {};
+     "who from Nursing can sign in" except by reading all of them. The unit is
+     picked from a dropdown instead, and a Governor — who has one unit — is not
+     asked to pick anything. */
+  var shownAccountUnit = '';
 
   function accountsByUnit(rows, mine) {
     var natName = Store.unitName(Store.nationalUnitId());
@@ -2385,9 +2520,10 @@
       groups[name].push(p);
     });
 
-    if (order.length === 1) {
-      return '<div class="list">' + rows.map(function (p) { return row(p, mine); }).join('') + '</div>';
-    }
+    var draw = function (list) {
+      return '<div class="list">' + list.map(function (p) { return row(p, mine); }).join('') + '</div>';
+    };
+    if (order.length === 1) return draw(rows);
 
     order.sort(function (a, b) {
       if (a === b) return 0;
@@ -2398,21 +2534,16 @@
       return a.localeCompare(b);
     });
 
-    return order.map(function (name) {
-      var list = groups[name];
-      var open = openAccountUnits[name] === undefined ? (name === myUnitName) : !!openAccountUnits[name];
-      var off = list.filter(function (p) { return !p.active; }).length;
-      return '<div class="group" data-collapsed="' + !open + '" data-acc-group="' + U.esc(name) + '">' +
-        '<button type="button" class="group-head" data-acc-unit="' + U.esc(name) + '" ' +
-        'aria-expanded="' + open + '">' + UI.icon('chevronDown', 'caret') +
-        '<span class="group-title">' + U.esc(name) + '</span>' +
-        '<span class="group-meta">' + U.plural(list.length, 'person', 'people') +
-        (off ? ' \u00b7 <span class="late">' + off + ' cannot sign in</span>' : '') +
-        '</span></button>' +
-        '<div class="group-body"><div class="list">' +
-        list.map(function (p) { return row(p, mine); }).join('') +
-        '</div></div></div>';
-    }).join('');
+    var picked = order.indexOf(shownAccountUnit) >= 0 ? shownAccountUnit
+      : order.indexOf(myUnitName) >= 0 ? myUnitName : order[0];
+
+    return '<div class="field" style="margin:0 0 12px"><label for="acc-unit">Show</label>' +
+      '<select id="acc-unit">' + order.map(function (name) {
+        var off = groups[name].filter(function (p) { return !p.active; }).length;
+        return '<option value="' + U.esc(name) + '"' + (name === picked ? ' selected' : '') + '>' +
+          U.esc(name) + ' \u2014 ' + U.esc(U.plural(groups[name].length, 'person', 'people')) +
+          (off ? ' \u00b7 ' + off + ' cannot sign in' : '') + '</option>';
+      }).join('') + '</select></div>' + draw(groups[picked]);
   }
 
   /* Shown once. Everything needed to hand each person their way in, to copy
@@ -2623,6 +2754,8 @@
     var d = p || { name: '', position: '', committee: '', active: true, unitId: myUnit };
     // Only the President moves people between units; a Governor's people are theirs.
     var canPickUnit = !global.Auth || Auth.isPresident() || Auth.isOffline();
+    var provinceHead = !!(global.Auth && Auth.signedIn() && !Auth.isOffline() &&
+      !Auth.isNational() && (Auth.current().unitKind === 'province'));
 
     var body =
       field({
@@ -2669,16 +2802,27 @@
          an executive promoting a volunteer changed the account and left the
          directory saying volunteer, or put them on an activity afterwards and
          silently sent them back down again. */
+      /* A province takes on volunteers; its elected and appointed posts are
+         filled by the National government. The database has always refused
+         anything else, and the form used to offer it anyway — so a Governor
+         added an officer, the person landed in the directory, and the login was
+         refused afterwards with a sentence about provinces. */
       field({
         name: 'access', label: 'What they are',
-        control: '<select id="f-access">' +
-          '<option value="officer"' + (d.access !== 'volunteer' ? ' selected' : '') + '>' +
-          'Officer &mdash; their unit\u2019s work</option>' +
-          '<option value="volunteer"' + (d.access === 'volunteer' ? ' selected' : '') + '>' +
-          'Volunteer &mdash; only the activities they are put on</option>' +
-          '</select>',
-        hint: 'An officer of the National government reaches the whole Republic. A volunteer ' +
-          'sees only the activities somebody enrols them into.'
+        control: provinceHead
+          ? '<select id="f-access"><option value="volunteer" selected>' +
+            'Volunteer &mdash; only the activities they are put on</option></select>'
+          : '<select id="f-access">' +
+            '<option value="officer"' + (d.access !== 'volunteer' ? ' selected' : '') + '>' +
+            'Officer &mdash; their unit\u2019s work</option>' +
+            '<option value="volunteer"' + (d.access === 'volunteer' ? ' selected' : '') + '>' +
+            'Volunteer &mdash; only the activities they are put on</option>' +
+            '</select>',
+        hint: provinceHead
+          ? 'A college takes on volunteers. Its elected and appointed officers are added by the ' +
+            'National government.'
+          : 'An officer of the National government reaches the whole Republic. A volunteer ' +
+            'sees only the activities somebody enrols them into.'
       }) +
       (isNew ? '' :
         '<div class="field"><label class="checkbox"><input type="checkbox" id="f-active"' + (d.active !== false ? ' checked' : '') + '>' +
@@ -2769,6 +2913,7 @@
     unitForm: unitForm,
     feedbackForm: feedbackForm, waiveFeedbackForm: waiveFeedbackForm,
     officeForm: officeForm, letterForm: letterForm,
+    letterSteps: letterSteps, wireLetterSteps: wireLetterSteps,
     receiveForm: receiveForm, releaseForm: releaseForm, insertStopForm: insertStopForm,
     askIfInternal: askIfInternal,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,

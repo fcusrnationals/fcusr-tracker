@@ -2740,8 +2740,12 @@
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return null;
     onRoute(l, s, 'record');
-    var who = str(data.receivedBy, LIMITS.name);
-    if (!who) throw new Error('Write down who received it.');
+    /* Who took it in, where anybody knows. It used to be required, and requiring
+       it is what made walking a letter round a typing exercise: the person at
+       the counter rarely gives a name, and an executive who does not have one
+       could not record the hand-over at all. The office itself is the honest
+       answer when no name was given. */
+    var who = str(data.receivedBy, LIMITS.name) || stopName(s);
     s.receivedBy = who;
     s.forwardedBy = str(data.forwardedBy, LIMITS.name);
     s.receivedAt = dateOnly(data.receivedAt) || U.today();
@@ -2783,6 +2787,77 @@
     l.updatedAt = bumpStamp(l.updatedAt);
     commit();
     return l;
+  }
+
+  /* Handed in and answered on the same day, which is most of them: one step
+     rather than two dialogs. */
+  function passStop(lid, stopId, data) {
+    data = data || {};
+    var l = letter(lid);
+    if (!l) return null;
+    var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
+    if (!s) return null;
+    if (!s.receivedAt) {
+      receiveStop(lid, stopId, {
+        receivedBy: data.receivedBy, forwardedBy: data.forwardedBy, receivedAt: data.on
+      });
+    }
+    return releaseStop(lid, stopId, {
+      outcome: data.outcome || 'Approved', releasedAt: data.on, note: data.note
+    });
+  }
+
+  /* The last thing recorded on this letter, undone.
+
+     One tap records a step now, and a tap is a thing people miss: the wrong
+     letter, the wrong office, the right office on the wrong day. Without a way
+     back, a mis-tap had to be lived with — or the whole letter deleted and
+     typed again. This takes back exactly one step and nothing else. */
+  function lastStep(l) {
+    if (!l) return null;
+    var best = null, bestAt = '';
+    l.stops.forEach(function (s) {
+      if (s.releasedAt && (!best || s.releasedAt >= bestAt)) { best = { stop: s, kind: 'released' }; bestAt = s.releasedAt; }
+    });
+    if (best) return best;
+    for (var i = l.stops.length - 1; i >= 0; i--) {
+      if (l.stops[i].receivedAt) return { stop: l.stops[i], kind: 'received' };
+    }
+    return null;
+  }
+
+  function undoLastStep(lid) {
+    var l = letter(lid);
+    if (!l) return null;
+    var step = lastStep(l);
+    if (!step) throw new Error('Nothing has been recorded on this letter yet.');
+    var s = step.stop;
+    var what;
+
+    if (step.kind === 'released') {
+      what = (s.outcome || 'The outcome') + ' at ' + stopName(s);
+      /* A return opened a fresh attempt at the same desk beneath it. Undoing
+         the return takes that empty attempt away with it, or the letter is left
+         pointing at a desk it was never sent back to. */
+      var at = l.stops.indexOf(s);
+      var nextOne = l.stops[at + 1];
+      if (wasReturned(s) && nextOne && sameDesk(nextOne, s) && !nextOne.receivedAt && !nextOne.releasedAt) {
+        l.stops.splice(at + 1, 1);
+      }
+      s.releasedAt = '';
+      s.outcome = '';
+      s.note = '';
+    } else {
+      what = 'the hand-over at ' + stopName(s);
+      s.receivedAt = '';
+      s.receivedBy = '';
+      s.forwardedBy = '';
+    }
+
+    l.status = 'Routing';
+    l.updatedAt = bumpStamp(l.updatedAt);
+    commit();
+    return { letter: l, undone: what };
   }
 
   /* Kept for data saved before a return opened its own follow-up entry: it
@@ -3694,7 +3769,8 @@
     wasReturned: wasReturned, isRepeatOf: isRepeatOf,
     isStuck: isStuck, isLetterOverdue: isLetterOverdue, letterNeedsAttention: letterNeedsAttention,
     letterWhere: letterWhere, letterProgress: letterProgress, letterStats: letterStats,
-    receiveStop: receiveStop, releaseStop: releaseStop, reopenStop: reopenStop,
+    receiveStop: receiveStop, releaseStop: releaseStop,
+    passStop: passStop, undoLastStep: undoLastStep, lastStep: lastStep, reopenStop: reopenStop,
     applyRemote: applyRemote, applyRemoteDeletion: applyRemoteDeletion,
     applyRemoteTerm: applyRemoteTerm,
     council: council, applyRemoteCouncil: applyRemoteCouncil,

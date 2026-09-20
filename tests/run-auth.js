@@ -629,7 +629,20 @@ const FILES = [
     check('it names the person who has not signed in', /Waiting One/.test(txt()));
     check('and says they have no login', /Without a login/i.test(txt()));
     check('the ones who can sign in are listed apart', /Can sign in/.test(txt()));
-    check('somebody who claimed theirs is on the signed-in side', /Rhea/.test(txt()));
+    /* One unit at a time now: the National government's own is drawn, and the
+       others are behind the picker. */
+    const unitPick = () => acc.querySelector('#acc-unit');
+    check('the list is picked by unit', !!unitPick(),
+      'every account in the Republic is still drawn in one run');
+    check('and opens on the unit of whoever is looking',
+      unitPick().value === 'FCUSR Nationals', unitPick().value);
+    const showUnit = (name) => {
+      unitPick().value = name;
+      unitPick().dispatchEvent(new window.Event('change', { bubbles: true }));
+      return new Promise((r) => setTimeout(r, 30));
+    };
+    await showUnit('College of Nursing');
+    check('somebody who claimed theirs is on the signed-in side', /Rhea/.test(txt()), txt().slice(0, 90));
     /* There is no invitation without a password any more. "Copy invite" sent
        instructions for a first-time screen that no longer exists; somebody who
        followed them was told their password was not accepted. */
@@ -653,6 +666,7 @@ const FILES = [
       !!acc.querySelector('[data-setpw="rhea.solis@filamer.edu.ph"]'),
       [...acc.querySelectorAll('[data-setpw]')]
         .map((b) => b.getAttribute('data-setpw')).join(', ') || 'none offered');
+    await showUnit('FCUSR Nationals');
     check('a waiting enrolment is not offered one',
       !acc.querySelector('[data-setpw="waiting.one@filamer.edu.ph"]'));
     check('and you are not offered it on yourself',
@@ -1302,18 +1316,11 @@ const FILES = [
     window.Forms.rosterList();
     await wait(100);
     const list = top();
-    /* A national executive was handed every account in the Republic in one run.
-       One fold per unit, and their own already open. */
-    const groups = [...list.querySelectorAll('[data-acc-group]')];
-    check('the list is folded up by unit', groups.length >= 2,
-      groups.map((g) => g.getAttribute('data-acc-group')).join(', ') || 'one flat list');
-    check('with the unit of whoever is looking open, and the rest closed',
-      groups[0].getAttribute('data-collapsed') === 'false' &&
-      groups.slice(1).every((g) => g.getAttribute('data-collapsed') === 'true'),
-      groups.map((g) => g.getAttribute('data-acc-group') + '=' + g.getAttribute('data-collapsed')).join(' '));
-    check('each fold says how many are in it', /person|people/.test(groups[0].querySelector('.group-meta').textContent));
-    click(groups[1].querySelector('.group-head'));
-    check('and another opens when asked for', groups[1].getAttribute('data-collapsed') === 'false');
+    const picker = list.querySelector('#acc-unit');
+    check('the list is picked by unit, not run together', !!picker,
+      'every account in the Republic in one run');
+    check('with a count beside each unit', /person|people/.test(picker.options[0].text),
+      picker.options[0].text);
 
     check('somebody on an email address is offered a username',
       !!list.querySelector('[data-switch-one="old.leader@filamer.edu.ph"]'));
@@ -1321,8 +1328,34 @@ const FILES = [
       !list.querySelector('[data-switch-one="president@filamer.edu.ph"]'));
     check('nobody already on a username is offered one',
       !list.querySelector('[data-switch-one="juan.delacruz@fcusr.invalid"]'));
-    check('a username is shown as a username', /Username juan\.delacruz/.test(list.textContent.replace(/\s+/g, ' ')));
-    click(list.querySelector('[data-switch-one="old.leader@filamer.edu.ph"]'));
+    /* Only the picked unit is drawn, so look through the picker for the row
+       rather than assuming which unit the fixture put them in. */
+    const showsUsername = await (async () => {
+      const opts = [...picker.options].map((o) => o.value);
+      for (const value of opts) {
+        const sel = top().querySelector('#acc-unit');
+        sel.value = value;
+        sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+        await wait(20);
+        if (/Username juan\.delacruz/.test(top().textContent.replace(/\s+/g, ' '))) return true;
+      }
+      return false;
+    })();
+    check('a username is shown as a username', showsUsername);
+    const emailRow = await (async () => {
+      const opts = [...top().querySelector('#acc-unit').options].map((o) => o.value);
+      for (const value of opts) {
+        const sel = top().querySelector('#acc-unit');
+        sel.value = value;
+        sel.dispatchEvent(new window.Event('change', { bubbles: true }));
+        await wait(20);
+        const b = top().querySelector('[data-switch-one="old.leader@filamer.edu.ph"]');
+        if (b) return b;
+      }
+      return null;
+    })();
+    check('and they can be reached from the picker', !!emailRow);
+    click(emailRow);
     await wait(30);
     click(top().querySelector('[data-ok]'));
     await wait(200);

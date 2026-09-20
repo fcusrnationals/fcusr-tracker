@@ -810,7 +810,11 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
       rgb(52 35 4 / 0.44) 74%,
       rgb(40 26 2 / 0.72) 100%);
 }
-.photo-hero-body { position: relative; z-index: 2; padding: 22px 20px 0; width: 100%; }
+/* The foot of the block is the closing-date band where there is one, and the
+   padding here where there is not — which is what went wrong when a closing
+   date was withdrawn: the band vanished and took the bottom edge with it. */
+.photo-hero-body { position: relative; z-index: 2; padding: 22px 20px; width: 100%; }
+.photo-hero-body.has-term { padding-bottom: 0; }
 /* The band is flush with the hero, so the body's side padding stops at it. */
 .photo-hero-body > .ph-term { margin-left: -20px; margin-right: -20px; width: calc(100% + 40px); }
 
@@ -1218,6 +1222,13 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
   animation: toast-in .22s cubic-bezier(.2, .9, .3, 1.2);
 }
 .toast.error { background: #8F1D1D; }
+/* The way back, on the message itself. */
+.toast-undo {
+  margin-left: 4px; border: 1px solid rgb(255 255 255 / .38); background: transparent;
+  color: #FFF; font: inherit; font-weight: 700; font-size: 12.5px;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer; flex: 0 0 auto;
+}
+.toast-undo:hover { background: rgb(255 255 255 / .14); }
 .toast.leaving { animation: toast-out .2s ease forwards; }
 .toast svg { width: 17px; height: 17px; flex: 0 0 17px; }
 .toast.success svg { color: #9BE6B4; }
@@ -1514,4 +1525,23 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 @media (max-width: 340px) {
   .tab { font-size: 9.5px; }
   .tab svg { width: 20px; height: 20px; }
+}
+
+/* The next step on a letter, at the top of it: what an executive standing at a
+   counter with the letter in their hand is there to do. */
+.letter-steps {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+.ls-label {
+  display: block; font-size: 11px; font-weight: 800; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
+}
+.ls-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ls-actions .btn { flex: 0 1 auto; }
+/* The same actions on a row in the list, so a letter can be walked round
+   without opening it. The row keeps its own card; the buttons sit under it. */
+.letter-item + .letter-item { margin-top: 8px; }
+.letter-row-steps {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  padding: 0 12px 10px; margin-top: -2px;
 }

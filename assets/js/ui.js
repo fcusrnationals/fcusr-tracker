@@ -207,16 +207,35 @@
 
   /* ---------- toasts ---------- */
 
-  function toast(message, kind) {
+  /* `opts.undo` puts a way back on the message itself.
+
+     Recording a step on a letter is one tap now, and a tap is a thing people
+     miss — the wrong letter, the wrong office. The way back has to be where the
+     mistake was made and gone by the time it is stale, which is exactly what a
+     toast is. */
+  function toast(message, kind, opts) {
+    opts = opts || {};
     var host = document.getElementById('toasts');
     var node = document.createElement('div');
     node.className = 'toast ' + (kind || 'success');
-    node.innerHTML = icon(kind === 'error' ? 'alert' : 'check') + '<span>' + U.esc(message) + '</span>';
+    node.innerHTML = icon(kind === 'error' ? 'alert' : 'check') +
+      '<span>' + U.esc(message) + '</span>' +
+      (opts.undo ? '<button type="button" class="toast-undo">' + U.esc(opts.undoLabel || 'Undo') + '</button>' : '');
     host.appendChild(node);
-    setTimeout(function () {
+
+    var life = opts.undo ? 6000 : (kind === 'error' ? 4200 : 2500);
+    var timer = setTimeout(leave, life);
+    function leave() {
       node.classList.add('leaving');
       setTimeout(function () { node.remove(); }, 220);
-    }, kind === 'error' ? 4200 : 2500);
+    }
+    if (opts.undo) {
+      node.querySelector('.toast-undo').addEventListener('click', function () {
+        clearTimeout(timer);
+        leave();
+        opts.undo();
+      });
+    }
   }
 
   /* After a redraw, briefly highlight the row that just changed so the effect of

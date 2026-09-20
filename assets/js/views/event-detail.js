@@ -417,6 +417,9 @@
       });
     });
 
+    // The letters drawn here carry their next step, so it has to be listening.
+    Forms.wireLetterSteps(root);
+
     U.els('[data-add-letter]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.letterForm(null, { eventId: e.id }); });
     });

@@ -91,13 +91,26 @@
   /* One line per letter: what it is, where it is, and who is carrying it.
      Shared with the section inside an event, so a letter looks like the same
      object wherever it appears. */
+  /* Whether whoever is looking may move this letter along. A national officer
+     reads a college's correspondence and does not walk it round. */
+  function canRecord(l) {
+    if (!global.Auth || !Auth.signedIn() || Auth.isOffline()) return true;
+    return Auth.canEditUnit(l.unitId);
+  }
+
   function row(l) {
     var p = Store.letterProgress(l);
     var stuck = Store.isStuck(l);
     var late = Store.isLetterOverdue(l);
     var e = l.eventId ? Store.event(l.eventId) : null;
 
-    return '<button type="button" class="event-row letter-row" data-open-letter="' + U.esc(l.id) + '">' +
+    /* The next step, on the row. Walking a letter round meant opening it,
+       finding the office holding it and filling in two dialogs; from here it is
+       one tap, and the message it leaves behind carries the way back. */
+    var steps = canRecord(l) && global.Forms ? Forms.letterSteps(l, { compact: true }) : '';
+
+    return '<div class="letter-item">' +
+      '<button type="button" class="event-row letter-row" data-open-letter="' + U.esc(l.id) + '">' +
       UI.ring(p.done, p.total) +
       '<span class="er-main">' +
       '<span class="er-title">' + U.esc(l.subject) + '</span>' +
@@ -115,7 +128,9 @@
         (l.status === 'Approved' ? '<span class="chip st-done"><span class="dot"></span>Approved</span>' : '') +
         (l.status === 'Declined' ? '<span class="chip st-overdue"><span class="dot"></span>Declined</span>' : '') +
         (l.status === 'Withdrawn' ? '<span class="chip chip-plain">Withdrawn</span>' : '') +
-      '</span></button>';
+      '</span></button>' +
+      (steps ? '<div class="letter-row-steps">' + steps + '</div>' : '') +
+      '</div>';
   }
 
   function mount(root) {
@@ -132,6 +147,7 @@
     U.els('[data-open-letter]', root).forEach(function (b) {
       b.addEventListener('click', function () { App.go('#/letters/' + b.getAttribute('data-open-letter')); });
     });
+    Forms.wireLetterSteps(root);
   }
 
   global.ViewLetters = { render: render, mount: mount, row: row };

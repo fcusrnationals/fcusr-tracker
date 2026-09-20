@@ -65,18 +65,24 @@
     /* The campus, the way the Hub opens. The photograph is decoration and every
        word over it is ordinary text, so nothing depends on the image arriving —
        without it the block is a dark gold panel and still reads. */
+    /* The closing-date band is the foot of the hero, and it supplies the
+       bottom edge: without it the block had no bottom padding at all, so the
+       moment a closing date was withdrawn the New event button sat flush
+       against the edge of the photograph. The hero says which it is. */
+    var strip = global.TermUI ? TermUI.heroStrip() : '';
+
     var html =
       '<div class="photo-hero">' +
       '<img class="photo-hero-img" src="assets/img/campus.jpg" alt="" aria-hidden="true" ' +
       'decoding="async">' +
-      '<div class="photo-hero-body">' +
+      '<div class="photo-hero-body' + (strip ? ' has-term' : '') + '">' +
       '<div class="hero-date">' + U.esc(U.fmtDate(U.today())) + '</div>' +
       '<div class="hero-line">' + headline + '</div>' +
       '<div class="hero-actions">' +
       '<button type="button" class="btn btn-glass" data-create-event>' + UI.icon('plus') + 'New event</button>' +
       '</div>' +
       // Below the action, so the photograph has room to be a photograph.
-      (global.TermUI ? TermUI.heroStrip() : '') +
+      strip +
       '</div></div>';
 
     html += '<div class="pills" role="group" aria-label="Filter the task list">' +
@@ -257,6 +263,7 @@
 
   function mount(root) {
     if (global.TermUI) TermUI.mountBanner(root);
+    Forms.wireLetterSteps(root);
     U.els('[data-filter]', root).forEach(function (b) {
       b.addEventListener('click', function () {
         var key = b.getAttribute('data-filter');

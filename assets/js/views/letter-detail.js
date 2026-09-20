@@ -50,7 +50,18 @@
 
     html += '<div class="row" style="margin-top:14px;gap:12px">' +
       '<div style="flex:1;min-width:150px">' + UI.progressBar(p.done, p.total) + '</div>' +
-      '</div></div>';
+      '</div>';
+
+    /* The next step, at the top, where somebody standing at a counter with the
+       letter in their hand will find it — rather than three screens down inside
+       the trail, behind a dialog. */
+    var steps = global.Forms ? Forms.letterSteps(l) : '';
+    if (steps) {
+      html += '<div class="letter-steps"><span class="ls-label">What happened next?</span>' +
+        '<div class="ls-actions">' + steps + '</div></div>';
+    }
+
+    html += '</div>';
 
     html += '<div class="section"><div class="section-head"><h2>The trail</h2>' +
       '<span class="section-note">' + p.done + ' of ' + p.total + ' offices cleared</span></div>' +
@@ -84,16 +95,12 @@
 
     var actions = '';
     if (isCurrent) {
-      if (st === 'waiting') {
-        actions = '<button type="button" class="btn btn-sm btn-primary" data-receive="' + U.esc(s.id) + '">' +
-          'Record hand-over</button>';
-      } else if (st === 'received') {
-        actions = '<button type="button" class="btn btn-sm btn-primary" data-release="' + U.esc(s.id) + '">' +
-          'Record the outcome</button>';
-      }
-      /* The commonest thing an office says is "not until so-and-so has signed".
-         Recording that should not mean editing the whole route from a counter. */
-      actions += '<button type="button" class="btn btn-sm btn-ghost" data-insert="' + U.esc(s.id) + '">' +
+      /* The steps themselves are in the band at the top of the letter, where
+         somebody holding it will look; what belongs on the row is the thing
+         that is about this office in particular. The commonest thing an office
+         says is "not until so-and-so has signed", and recording that should not
+         mean editing the whole route from a counter. */
+      actions = '<button type="button" class="btn btn-sm btn-ghost" data-insert="' + U.esc(s.id) + '">' +
         UI.icon('plus') + 'Someone must sign first</button>';
     }
 
@@ -119,12 +126,7 @@
     var l = Store.letter(params.id);
     if (!l) return;
 
-    U.els('[data-receive]', root).forEach(function (b) {
-      b.addEventListener('click', function () { Forms.receiveForm(l.id, b.getAttribute('data-receive')); });
-    });
-    U.els('[data-release]', root).forEach(function (b) {
-      b.addEventListener('click', function () { Forms.releaseForm(l.id, b.getAttribute('data-release')); });
-    });
+    Forms.wireLetterSteps(root);
     U.els('[data-insert]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.insertStopForm(l.id, b.getAttribute('data-insert')); });
     });
@@ -140,8 +142,11 @@
 
     var more = root.querySelector('[data-more]');
     if (more) more.addEventListener('click', function () {
+      var last = Store.lastStep(l);
       var items =
         '<button type="button" data-set="edit">' + UI.icon('edit') + 'Edit letter</button>' +
+        (last ? '<button type="button" data-set="undo">' + UI.icon('back') +
+          'Undo the last step</button>' : '') +
         (l.status === 'Routing'
           ? '<button type="button" data-set="declined">' + UI.icon('close') + 'Mark declined</button>' +
             '<button type="button" data-set="withdrawn">' + UI.icon('archive') + 'Withdraw it</button>'
@@ -151,6 +156,12 @@
 
       UI.openMenu(more, items, function (action) {
         if (action === 'edit') return Forms.letterForm(l.id);
+        if (action === 'undo') {
+          try {
+            var res = Store.undoLastStep(l.id);
+            return UI.toast('Undone \u2014 ' + res.undone + '.');
+          } catch (err) { return UI.toast(err.message, 'error'); }
+        }
         if (action === 'declined') { Store.setLetterStatus(l.id, 'Declined'); return UI.toast('Marked declined.'); }
         if (action === 'withdrawn') { Store.setLetterStatus(l.id, 'Withdrawn'); return UI.toast('Withdrawn.'); }
         if (action === 'routing') { Store.setLetterStatus(l.id, 'Routing'); return UI.toast('Back on the route.'); }
