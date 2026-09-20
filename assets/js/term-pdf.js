@@ -92,10 +92,14 @@
           var r = Store.report(e.id);
           var finished = e.status === 'Completed' || e.status === 'Archived';
           var link = r && r.driveLink ? r.driveLink : '';
+          /* An activity the council called off is printed as what it is. It is
+             not "not filed": nothing was held, so nothing is owed. */
           return [
             e.title,
             U.fmtRange(e.dateStart, e.dateEnd),
-            link || (finished ? 'NOT FILED' : 'NOT FINISHED')
+            Store.isCancelled(e)
+              ? 'CANCELLED' + (e.cancelReason ? ' \u2014 ' + e.cancelReason : '')
+              : link || (finished ? 'NOT FILED' : 'NOT FINISHED')
           ];
         });
         if (!body.length) return;
@@ -214,7 +218,10 @@
         });
       }
 
-      var directives = Store.tasks({ kind: 'directive' }).filter(Store.isPending);
+      /* Every piece of directive work still open: the single instructions, and
+         the tasks inside directives that hold several. Reading only the first
+         kind would leave a whole directive out of the record. */
+      var directives = Store.directiveWork({ pendingOnly: true });
       if (directives.length) {
         doc.addPage();
         sections.directives = doc.internal.getNumberOfPages();
@@ -229,10 +236,13 @@
         doc.autoTable({
           startY: dy,
           head: [['Directive', 'Held by', 'Due', 'Status']],
-          body: directives.sort(Store.byDueDate).map(function (t2) {
-            return [t2.title, Store.personName(t2.assigneeId),
-              t2.dueDate ? U.fmtDateTiny(t2.dueDate) : '—', t2.status];
-          }),
+          body: directives.sort(function (a, b) { return Store.byDueDate(a.task, b.task); })
+            .map(function (r) {
+              var t2 = r.task;
+              return [(r.setTitle ? r.setTitle + ' \u2014 ' : '') + t2.title,
+                Store.personName(t2.assigneeId),
+                t2.dueDate ? U.fmtDateTiny(t2.dueDate) : '—', t2.status];
+            }),
           theme: 'grid',
           margin: { left: BOX.left, right: BOX.left, top: BOX.top, bottom: A4.h - BOX.bottomY },
           styles: {

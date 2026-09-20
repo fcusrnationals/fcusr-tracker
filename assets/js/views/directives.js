@@ -2,7 +2,12 @@
 
    Standing instructions, errands, things the President asks for on a Tuesday.
    They need no accomplishment report and never appear in an event's PDF, which
-   is the whole point of keeping them apart from event work. */
+   is the whole point of keeping them apart from event work.
+
+   Two sizes, because council business comes in two: a single instruction —
+   "chase the adviser about the memo" — and one that is really six errands with
+   six different people on them. The second is a directive that holds tasks: the
+   same shape as an activity, minus the report nobody files on a directive. */
 (function (global) {
   'use strict';
 
@@ -25,13 +30,36 @@
     var all = Store.tasks({ kind: 'directive' });
     var s = Store.stats(all);
     var list = all.filter(FILTERS[filter].test).sort(Store.byDueDate);
+    var sets = Store.directiveSets({ excludeArchived: true }).filter(function (d) {
+      return !global.Auth || !Auth.signedIn() || Auth.canSee(d.id) || Auth.canEditEvent(d.id);
+    });
+    var mayAdd = !(global.Auth && Auth.isVolunteer());
 
     var html =
       '<div class="page-head"><div><h1>Directives</h1>' +
       '<div class="sub">Standing instructions that sit outside any event.</div></div>' +
-      (addOpen ? '' : '<button type="button" class="btn btn-primary" data-open-add>' +
-        UI.icon('plus') + 'New directive</button>') +
+      (mayAdd
+        ? '<div class="row" style="gap:6px;flex-wrap:nowrap">' +
+          '<button type="button" class="btn" data-new-set>' + UI.icon('plus') +
+          'With tasks</button>' +
+          (addOpen ? '' : '<button type="button" class="btn btn-primary" data-open-add>' +
+            UI.icon('plus') + 'New directive</button>') + '</div>'
+        : '') +
       '</div>';
+
+    /* The ones that carry work of their own, first: each is a small programme,
+       and the count beside it is the reason somebody opened this screen. */
+    if (sets.length) {
+      html += '<div class="section"><div class="section-head">' +
+        '<h2>Directives with tasks <span class="chip chip-plain">' + sets.length + '</span></h2>' +
+        '<span class="section-note">Several tasks under one instruction. No report is filed.</span>' +
+        '</div><div class="list">' + sets.map(setRow).join('') + '</div></div>';
+    }
+
+    if (sets.length && all.length) {
+      html += '<div class="section-head" style="margin-top:18px"><h2>Single directives</h2>' +
+        '<span class="section-note">One instruction, one person.</span></div>';
+    }
 
     if (all.length) {
       html += '<div class="segmented" role="group" aria-label="Filter directives" style="margin-bottom:14px">' +
@@ -46,9 +74,11 @@
     if (addOpen) html += addForm();
 
     if (!all.length) {
+      if (sets.length) return html;
       return html + UI.empty('No directives yet',
         'Use these for council business that is not tied to an activity — an errand, ' +
-        'a standing instruction, a follow-up.',
+        'a standing instruction, a follow-up. One that takes several people can hold ' +
+        'tasks of its own.',
         addOpen ? '' : '<button type="button" class="btn btn-primary" data-open-add>' +
           UI.icon('plus') + 'New directive</button>', 'tasks');
     }
@@ -66,6 +96,27 @@
         U.plural(s.overdue, 'directive') + ' past the date set for it.</p>';
     }
     return html;
+  }
+
+  /* A directive that holds tasks, drawn like an activity — the ring says how
+     much of it is done, which is the only question anybody asks of one. */
+  function setRow(d) {
+    var st = Store.eventStats(d.id);
+    var u = Store.unit(d.unitId);
+    var national = Store.nationalUnitId();
+    return '<button type="button" class="event-row" data-open-set="' + U.esc(d.id) + '">' +
+      UI.ring(st.done, st.total) +
+      '<span class="er-main"><span class="er-title">' +
+      (u && u.id !== national && u.code ? '<span class="unit-code">' + U.esc(u.code) + '</span>' : '') +
+      U.esc(d.title) + '</span>' +
+      '<span class="er-meta">' +
+      U.esc(d.dateStart || d.dateEnd ? U.fmtRange(d.dateStart, d.dateEnd) : 'No date set') +
+      '<span class="sep">·</span>' + st.done + ' of ' + st.total + ' done</span></span>' +
+      '<span class="er-chips">' +
+      (st.overdue ? '<span class="chip st-overdue"><span class="dot"></span>' + st.overdue + ' overdue</span>' : '') +
+      (st.unassigned ? '<span class="chip st-overdue"><span class="dot"></span>' +
+        st.unassigned + ' unassigned</span>' : '') +
+      '</span></button>';
   }
 
   function addForm() {
@@ -87,6 +138,14 @@
   }
 
   function mount(root) {
+    U.els('[data-open-set]', root).forEach(function (b) {
+      b.addEventListener('click', function () { App.go('#/events/' + b.getAttribute('data-open-set')); });
+    });
+    var newSet = root.querySelector('[data-new-set]');
+    if (newSet) newSet.addEventListener('click', function () {
+      Forms.eventForm(null, { kind: 'directive' });
+    });
+
     U.els('[data-open-add]', root).forEach(function (b) {
       b.addEventListener('click', function () { addOpen = true; focusNext = true; App.render(); });
     });

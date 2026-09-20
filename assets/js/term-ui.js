@@ -385,7 +385,8 @@
     var unfinished = [], unfiled = [], unvouched = [];
 
     evs.forEach(function (e) {
-      if (e.status === 'Archived') return;
+      // Archived, or called off: neither owes anybody anything.
+      if (Store.isShelved(e)) return;
       var r = Store.report(e.id);
       var done = e.status === 'Completed';
       var pending = Store.tasks({ eventId: e.id }).filter(Store.isPending).length;

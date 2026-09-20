@@ -33,45 +33,57 @@
 
   /* ---------- event ---------- */
 
+  /* One form for an activity and for a directive that holds tasks. They are the
+     same record and the same questions, minus the three an instruction has no
+     answers for: where it is held, its feedback form, and the accomplishment
+     report that follows from both. */
   function eventForm(eventId, opts) {
     opts = opts || {};
     var ev = eventId ? Store.event(eventId) : null;
     var isNew = !ev;
+    var kind = ev ? (ev.kind || 'event') : (opts.kind === 'directive' ? 'directive' : 'event');
+    var dir = kind === 'directive';
+    var noun = dir ? 'directive' : 'event';
     var e = ev || {
-      title: '', description: '', dateStart: U.today(), dateEnd: '', venue: '',
-      headId: '', status: 'Upcoming', feedbackRequired: true, feedbackLink: '',
+      title: '', description: '', dateStart: dir ? '' : U.today(), dateEnd: '', venue: '',
+      headId: '', status: 'Upcoming', feedbackRequired: !dir, feedbackLink: '',
       unitId: opts.unitId || (global.Auth ? Auth.myUnitId() : Store.nationalUnitId())
     };
 
 
     var body =
       field({
-        name: 'title', label: 'Event title', required: true,
-        control: '<input type="text" id="f-title" data-autofocus maxlength="120" value="' + U.esc(e.title) + '" placeholder="e.g. Foundation Week 2026">'
+        name: 'title', label: dir ? 'Directive' : 'Event title', required: true,
+        control: '<input type="text" id="f-title" data-autofocus maxlength="120" value="' + U.esc(e.title) +
+          '" placeholder="' + (dir ? 'e.g. Prepare the General Assembly' : 'e.g. Foundation Week 2026') + '">'
       }) +
       field({
-        name: 'description', label: 'Short description',
-        control: '<textarea id="f-description" maxlength="400" placeholder="What is this event or program about?">' + U.esc(e.description) + '</textarea>'
+        name: 'description', label: dir ? 'What it is for' : 'Short description',
+        control: '<textarea id="f-description" maxlength="400" placeholder="' +
+          (dir ? 'What the council wants done, and why.' : 'What is this event or program about?') +
+          '">' + U.esc(e.description) + '</textarea>'
       }) +
       '<div class="field-row">' +
       field({
-        name: 'dateStart', label: 'Event date', required: true,
-        control: '<input type="date" id="f-dateStart" value="' + U.esc(e.dateStart) + '">'
+        name: 'dateStart', label: dir ? 'Due by' : 'Event date', required: !dir,
+        control: '<input type="date" id="f-dateStart" value="' + U.esc(e.dateStart) + '">',
+        hint: dir ? 'Optional. A standing instruction may have no date at all.' : ''
       }) +
       field({
-        name: 'dateEnd', label: 'End date',
+        name: 'dateEnd', label: dir ? 'Until' : 'End date',
         control: '<input type="date" id="f-dateEnd" value="' + U.esc(e.dateEnd) + '">',
-        hint: 'Leave blank for a one-day event.'
+        hint: dir ? 'Optional.' : 'Leave blank for a one-day event.'
       }) +
       '</div>' +
-      field({
+      (dir ? '' : field({
         name: 'venue', label: 'Venue',
         control: '<input type="text" id="f-venue" maxlength="120" value="' + U.esc(e.venue) + '" placeholder="e.g. FCU Gymnasium">'
-      }) +
+      })) +
       /* Every activity is evaluated. The field sits here rather than in the
          report wizard because the form has to exist before the activity runs —
-         asking for it afterwards is asking too late to be any use. */
-      field({
+         asking for it afterwards is asking too late to be any use. Nobody
+         evaluates a directive, so it is not asked for one. */
+      (dir ? '' : field({
         name: 'feedbackLink', label: 'Feedback form',
         control: '<input type="text" id="f-feedback" maxlength="300" value="' +
           U.esc(e.feedbackLink || '') + '" placeholder="https://forms.gle/…">',
@@ -79,23 +91,29 @@
           ? 'Not required for this activity. The requirement can be put back from the activity itself.'
           : 'Required by standard. Make a Google Form and paste its link. You can add it later, ' +
             'but the activity cannot be marked completed without one.'
-      }) +
+      })) +
       '<div class="field-row">' +
       field({
-        name: 'headId', label: 'Event head',
+        name: 'headId', label: dir ? 'Who is answerable' : 'Event head',
         control: '<select id="f-headId">' + UI.peopleOptions(e.headId, true, e.id).replace('>Unassigned<', '>Not set yet<') + '</select>'
       }) +
       field({
         name: 'status', label: 'Status',
-        control: '<select id="f-status">' + UI.selectOptions(Store.EVENT_STATUSES, e.status) + '</select>'
+        /* Cancelled is not offered here. Calling an activity off asks for a
+           reason and whether it will be held later, which a dropdown cannot —
+           it has a button of its own on the activity. */
+        control: '<select id="f-status">' + UI.selectOptions(
+          Store.EVENT_STATUSES.filter(function (x) { return x !== 'Cancelled' || e.status === 'Cancelled'; }),
+          e.status) + '</select>'
       }) +
       '</div>';
 
     UI.modal({
-      title: isNew ? 'Create event' : 'Edit event',
+      title: (isNew ? 'New ' : 'Edit ') + noun,
       body: body,
       footer: '<button type="button" class="btn" data-close>Cancel</button>' +
-        '<button type="button" class="btn btn-primary" data-save>' + (isNew ? 'Create event' : 'Save changes') + '</button>',
+        '<button type="button" class="btn btn-primary" data-save>' +
+        (isNew ? 'Create ' + noun : 'Save changes') + '</button>',
       onMount: function (root, close) {
         function submit() {
           clearErrors(root);
@@ -104,38 +122,41 @@
             description: root.querySelector('#f-description').value,
             dateStart: root.querySelector('#f-dateStart').value,
             dateEnd: root.querySelector('#f-dateEnd').value,
-            venue: root.querySelector('#f-venue').value,
+            venue: dir ? '' : root.querySelector('#f-venue').value,
             headId: root.querySelector('#f-headId').value,
-            status: root.querySelector('#f-status').value
+            status: root.querySelector('#f-status').value,
+            kind: kind
           };
           /* There is no "whose event" to choose. You are signed in to one
              unit's tracker, so an event you create there is that unit's — the
              question only ever had one answer. */
           if (isNew) data.unitId = e.unitId;
 
-          data.feedbackLink = root.querySelector('#f-feedback').value.trim();
+          data.feedbackLink = dir ? '' : root.querySelector('#f-feedback').value.trim();
           if (data.feedbackLink &&
               !/^https:\/\/(docs\.google\.com\/forms\/|forms\.gle\/)/.test(data.feedbackLink)) {
             return showError(root, 'feedbackLink',
               'That needs to be a Google Forms link \u2014 forms.gle or docs.google.com/forms.');
           }
 
-          if (!data.title) return showError(root, 'title', 'Give the event a title.');
-          if (!data.dateStart) return showError(root, 'dateStart', 'Pick the event date.');
+          if (!data.title) {
+            return showError(root, 'title', dir ? 'Say what the directive is.' : 'Give the event a title.');
+          }
+          if (!dir && !data.dateStart) return showError(root, 'dateStart', 'Pick the event date.');
           if (data.dateEnd && data.dateEnd < data.dateStart) {
             return showError(root, 'dateEnd', 'The end date cannot be before the start date.');
           }
           if (isNew) {
             var created = Store.addEvent(data);
             close();
-            UI.toast('Event created.');
-            // Straight into the new event, ready for its first task.
+            UI.toast(dir ? 'Directive created.' : 'Event created.');
+            // Straight into it, ready for its first task.
             global.ViewEventDetail.openAddTaskOnLoad();
             App.go('#/events/' + created.id);
           } else {
             Store.updateEvent(eventId, data);
             close();
-            UI.toast('Event saved.');
+            UI.toast(dir ? 'Directive saved.' : 'Event saved.');
           }
         }
         root.querySelector('[data-save]').addEventListener('click', submit);
@@ -160,6 +181,7 @@
        directive quietly filed it under whichever activity came first — moving
        it into that unit, and out of sight of the people it was meant for. */
     var directive = (t.kind || 'event') === 'directive';
+    var inDirective = Store.isDirectiveSet(ev);
 
     var body =
       field({
@@ -197,11 +219,16 @@
       }) +
       '<div class="field-row">' +
       (directive ? '' : field({
-        name: 'eventId', label: 'Event', required: true,
+        name: 'eventId', label: inDirective ? 'Directive' : 'Event', required: true,
+        /* A task under a directive that holds tasks belongs to that directive,
+           not to an activity. Offering it the list of activities would move it
+           into the first one on the list the moment anything was saved. */
         control: '<select id="f-eventId">' + UI.selectOptions(
-          Store.events().map(function (e) { return { value: e.id, label: e.title }; }), t.eventId
+          Store.events({ kind: inDirective ? 'directive' : 'event' })
+            .map(function (e2) { return { value: e2.id, label: e2.title }; }), t.eventId
         ) + '</select>',
-        hint: 'Every task belongs to an event.'
+        hint: inDirective ? 'Every task belongs to a directive or an activity.'
+                          : 'Every task belongs to an event.'
       })) + '</div>' +
       '<p class="tiny muted" style="margin:2px 0 0">Last updated ' + U.esc(U.fmtStamp(t.updatedAt)) +
       (t.completedAt ? ' · Completed ' + U.esc(U.fmtStamp(t.completedAt)) : '') + '</p>';
@@ -268,6 +295,7 @@
     if (!t) return;
     var ev = Store.event(t.eventId);
     var directive = (t.kind || 'event') === 'directive';
+    var inDirective = Store.isDirectiveSet(ev);
     var mine = !global.Auth || !Auth.signedIn() || UI.taskStatusEditable(t);
 
     function row(label, value) {
@@ -277,7 +305,7 @@
 
     var body =
       row('Task', '<strong>' + U.esc(t.title) + '</strong>') +
-      row(directive ? 'Directive' : 'Activity',
+      row(directive || inDirective ? 'Directive' : 'Activity',
         directive ? 'Council business, not part of an activity'
           : U.esc(ev ? ev.title : 'An activity you cannot open')) +
       '<div class="field-row">' +
@@ -1189,6 +1217,108 @@
             close();
             UI.toast('Recorded. No feedback form is required for this activity.');
           } catch (err) { showError(root, 'reason', err.message); }
+        });
+      }
+    });
+  }
+
+  /* ---------- calling an activity off ----------
+
+     Deleting it loses the record; archiving it says nothing about why. A
+     council that calls off its Foundation Week wants both things kept: that it
+     was planned, and that it was called off — and, most of the time, whether it
+     is coming back. */
+  function cancelEventForm(eventId) {
+    var e = Store.event(eventId);
+    if (!e) return;
+    var pending = Store.tasks({ eventId: e.id }).filter(Store.isPending).length;
+
+    UI.modal({
+      title: 'Cancel ' + e.title + '?',
+      body:
+        '<p class="small" style="margin-top:0">It stays on the record with everything it holds ' +
+        '&mdash; its tasks, its letters, its place in the year&rsquo;s report &mdash; and stops ' +
+        'appearing in anybody&rsquo;s work.' +
+        (pending ? ' The <strong>' + U.plural(pending, 'task') + '</strong> still open under it ' +
+          'will drop out of My tasks.' : '') + '</p>' +
+        field({
+          name: 'reason', label: 'Why is it called off', required: true,
+          control: '<input type="text" id="c-why" data-autofocus maxlength="140" ' +
+            'placeholder="e.g. Typhoon warning — classes suspended.">',
+          hint: 'One line. It is shown on the activity and printed in the end-of-term record.'
+        }) +
+        '<div class="field"><label class="checkbox"><input type="checkbox" id="c-again" checked>' +
+        '<span>It will be held on another date<span class="hint">Leave this ticked if the ' +
+        'council means to reschedule it, even if the new date is not settled yet.</span></span></label></div>' +
+        '<div class="field" id="c-when-wrap"><label for="c-when">New date, if you have one</label>' +
+        '<input type="date" id="c-when" value="' + U.esc(e.rescheduleDate || '') + '">' +
+        '<div class="hint">Optional. The activity stays cancelled either way until you ' +
+        'reschedule it.</div></div>',
+      footer: '<button type="button" class="btn" data-close>Keep it</button>' +
+        '<button type="button" class="btn btn-danger" data-go>Cancel the activity</button>',
+      onMount: function (root, close) {
+        var again = root.querySelector('#c-again');
+        var wrap = root.querySelector('#c-when-wrap');
+        var sync = function () { wrap.hidden = !again.checked; };
+        again.addEventListener('change', sync);
+        sync();
+
+        root.querySelector('[data-go]').addEventListener('click', function () {
+          clearErrors(root);
+          try {
+            Store.cancelEvent(e.id, {
+              reason: root.querySelector('#c-why').value,
+              rescheduleWanted: again.checked,
+              rescheduleDate: again.checked ? root.querySelector('#c-when').value : '',
+              by: (global.Auth && Auth.current()) ? Auth.current().name : ''
+            });
+            close();
+            UI.toast(e.title + ' is cancelled.');
+          } catch (err) { showError(root, 'reason', err.message); }
+        });
+      }
+    });
+  }
+
+  /* Holding it after all: new dates, and everything it was carrying comes back
+     with it. */
+  function rescheduleEventForm(eventId) {
+    var e = Store.event(eventId);
+    if (!e) return;
+    var suggested = e.rescheduleDate || '';
+
+    UI.modal({
+      title: 'Reschedule ' + e.title,
+      body:
+        '<p class="small" style="margin-top:0">Its tasks, letters and volunteers come back with ' +
+        'it, and it counts as work in hand again.</p>' +
+        '<div class="field-row">' +
+        field({
+          name: 'dateStart', label: 'New start date', required: true,
+          control: '<input type="date" id="r-start" data-autofocus value="' + U.esc(suggested) + '">'
+        }) +
+        field({
+          name: 'dateEnd', label: 'Ends',
+          control: '<input type="date" id="r-end" value="">',
+          hint: 'Leave empty for a single day.'
+        }) +
+        '</div>' +
+        (e.cancelReason
+          ? '<p class="small muted">It was called off because: &ldquo;' + U.esc(e.cancelReason) +
+            '&rdquo;. That note is cleared when it goes back on.</p>'
+          : ''),
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-go>Put it back on</button>',
+      onMount: function (root, close) {
+        root.querySelector('[data-go]').addEventListener('click', function () {
+          clearErrors(root);
+          var start = root.querySelector('#r-start').value;
+          if (!start) return showError(root, 'dateStart', 'Pick the new date.');
+          try {
+            Store.reinstateEvent(e.id, { dateStart: start, dateEnd: root.querySelector('#r-end').value });
+            close();
+            UI.toast(e.title + ' is back on for ' + U.fmtDate(start) + '.');
+          } catch (err) { showError(root, 'dateEnd', err.message); }
         });
       }
     });
@@ -2643,7 +2773,9 @@
     askIfInternal: askIfInternal,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,
     readPeopleList: readPeopleList, parseCSV: parseCSV,
-    eventForm: eventForm, taskForm: taskForm, taskView: taskView, personForm: personForm,
+    eventForm: eventForm, cancelEventForm: cancelEventForm,
+    rescheduleEventForm: rescheduleEventForm,
+    taskForm: taskForm, taskView: taskView, personForm: personForm,
     rosterList: rosterList, unitPeopleForm: unitPeopleForm,
     importPeopleForm: importPeopleForm,
     field: field, showError: showError, clearErrors: clearErrors

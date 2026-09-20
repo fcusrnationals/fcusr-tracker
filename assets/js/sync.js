@@ -697,7 +697,8 @@
     var local = {
       unit: Store.units().length,
       person: Store.people().length,
-      event: Store.events().length,
+      // Activities and directive sets: both are rows in the same table.
+      event: Store.events({ kind: 'any' }).length,
       task: Store.tasks().length,
       report: Store.reports().length,
       letter: Store.letters().length,

@@ -9,7 +9,7 @@
      unit is what you came here for — a national opening this tab wants the
      national activities, not nine colleges' worth to scroll through. "All units"
      is still one tap away for the times when the Republic is the question. */
-  var state = { archivedOpen: false, unitId: '', picked: false };
+  var state = { archivedOpen: false, cancelledOpen: false, unitId: '', picked: false };
 
   /* The National officers work across the whole Republic, so they get a unit
      picker here and a unit badge on each row. Everyone else only ever sees one
@@ -46,7 +46,11 @@
     if (picked) all = all.filter(function (e) { return e.unitId === picked; });
 
     var archived = all.filter(function (e) { return e.status === 'Archived'; });
-    var live = all.filter(function (e) { return e.status !== 'Archived'; });
+    /* Called off, and out of the way. It is not archived — nobody filed it away,
+       the council decided not to hold it — so it gets a fold of its own where it
+       can still be read and put back on. */
+    var cancelled = all.filter(function (e) { return e.status === 'Cancelled'; });
+    var live = all.filter(function (e) { return !Store.isShelved(e); });
 
     var units = republic ? Store.units({ activeOnly: true, governed: true }) : [];
     var html =
@@ -90,6 +94,22 @@
       }).join('') + '</div>';
     }
 
+    if (cancelled.length) {
+      html += '<div class="section" style="margin-top:22px">' +
+        '<div class="group" data-collapsed="' + !state.cancelledOpen + '" data-group="cancelled">' +
+        '<button type="button" class="group-head" data-toggle-cancelled aria-expanded="' + state.cancelledOpen + '">' +
+          UI.icon('chevronDown', 'caret') +
+          '<span class="group-title">Cancelled</span>' +
+          '<span class="group-meta">' + cancelled.length +
+          (cancelled.filter(function (e) { return e.rescheduleWanted; }).length
+            ? ' · ' + cancelled.filter(function (e) { return e.rescheduleWanted; }).length + ' to be rescheduled'
+            : '') + '</span></button>' +
+        '<div class="group-body"><div class="list">' + cancelled.map(function (e) {
+          return row(e, republic && !picked);
+        }).join('') + '</div></div>' +
+        '</div></div>';
+    }
+
     if (archived.length) {
       html += '<div class="section" style="margin-top:22px">' +
         '<div class="group" data-collapsed="' + !state.archivedOpen + '" data-group="archived">' +
@@ -121,14 +141,23 @@
         (e.venue ? '<span class="sep">·</span>' + U.esc(e.venue) : '') +
         '<span class="sep">·</span>' + s.done + ' of ' + s.total + ' done</span></span>' +
       '<span class="er-chips">' +
-        (s.overdue ? '<span class="chip st-overdue"><span class="dot"></span>' + s.overdue + ' overdue</span>' : '') +
+        /* A cancelled activity is not late and nobody is holding work on it;
+           counting either would put a red chip on a row that asks nothing. */
+        (s.overdue && !Store.isShelved(e)
+          ? '<span class="chip st-overdue"><span class="dot"></span>' + s.overdue + ' overdue</span>' : '') +
         /* Work inside this event that nobody has taken. Without it the only way
            to find out was to open every activity in turn, which is how a task
            sits unclaimed until the week it was due. */
-        (s.unassigned ? '<span class="chip st-overdue"><span class="dot"></span>' +
+        (s.unassigned && !Store.isShelved(e) ? '<span class="chip st-overdue"><span class="dot"></span>' +
           s.unassigned + ' unassigned</span>' : '') +
-        '<span class="chip ' + (e.status === 'Ongoing' ? 'st-in-progress' : e.status === 'Completed' ? 'st-done' : 'chip-plain') + '">' +
+        '<span class="chip ' + (e.status === 'Ongoing' ? 'st-in-progress'
+          : e.status === 'Completed' ? 'st-done'
+          : e.status === 'Cancelled' ? 'st-not-started' : 'chip-plain') + '">' +
           U.esc(e.status) + '</span>' +
+        (Store.isCancelled(e) && e.rescheduleWanted
+          ? '<span class="chip chip-plain">' +
+            (e.rescheduleDate ? U.esc(U.fmtDateShort(e.rescheduleDate)) : 'to be rescheduled') + '</span>'
+          : '') +
       '</span></button>';
   }
 
@@ -153,6 +182,14 @@
     });
     U.els('[data-open-event]', root).forEach(function (b) {
       b.addEventListener('click', function () { App.go('#/events/' + b.getAttribute('data-open-event')); });
+    });
+
+    var canc = root.querySelector('[data-toggle-cancelled]');
+    if (canc) canc.addEventListener('click', function () {
+      state.cancelledOpen = !state.cancelledOpen;
+      var g = root.querySelector('[data-group="cancelled"]');
+      g.setAttribute('data-collapsed', String(!state.cancelledOpen));
+      canc.setAttribute('aria-expanded', String(state.cancelledOpen));
     });
 
     var arch = root.querySelector('[data-toggle-archived]');

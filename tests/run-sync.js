@@ -1999,6 +1999,51 @@ function makeDevice(server, name) {
       K.S.task(dir.id).kind === 'directive');
   }
 
+  /* -------- a cancelled activity, and a directive that holds tasks -------- */
+  console.log('\n--- calling an activity off, and directives with tasks, reach the other phone ---');
+  {
+    const sD = makeServer();
+    const P = makeDevice(sD, 'President');
+    const G = makeDevice(sD, 'Governor');
+    const nat = P.S.nationalUnitId();
+
+    const ev = P.S.addEvent({ title: 'Founders Day', unitId: nat, dateStart: '2026-11-01' });
+    const per = P.S.addPerson({ name: 'Cruz, Ben', unitId: nat, position: 'Senator' });
+    P.S.addTask({ kind: 'event', eventId: ev.id, title: 'Book the hall', assigneeId: per.id, dueDate: '2026-10-25' });
+    const dir = P.S.addEvent({ kind: 'directive', title: 'Prepare the General Assembly', unitId: nat });
+    P.S.addTask({ kind: 'event', eventId: dir.id, title: 'Draft the programme', assigneeId: per.id, dueDate: '2026-10-20' });
+
+    for (let i = 0; i < 2; i++) for (const d of [P, G]) await d.Sync.now();
+    check('the directive reaches the other phone as a directive',
+      G.S.isDirectiveSet(G.S.event(dir.id)) === true);
+    check('and is not among its activities',
+      !G.S.events().some((e) => e.id === dir.id) &&
+      G.S.events({ kind: 'directive' }).some((e) => e.id === dir.id));
+    check('with its task under it', G.S.tasks({ eventId: dir.id }).length === 1);
+    check('and no report owed for it',
+      !G.S.unitCompliance(nat).outstanding.some((e) => e.id === dir.id));
+
+    P.S.cancelEvent(ev.id, { reason: 'Typhoon warning.', rescheduleWanted: true,
+      rescheduleDate: '2026-12-01', by: 'President' });
+    for (let i = 0; i < 2; i++) for (const d of [P, G]) await d.Sync.now();
+    const there = G.S.event(ev.id);
+    check('a cancellation reaches the other phone', there.status === 'Cancelled', there.status);
+    check('with the reason and the new date', /Typhoon/.test(there.cancelReason) &&
+      there.rescheduleWanted && there.rescheduleDate === '2026-12-01');
+    check('and its work is off that phone\u2019s lists too',
+      !G.S.tasks({ assigneeId: per.id, excludeArchived: true }).some((t) => t.title === 'Book the hall'));
+
+    G.S.reinstateEvent(ev.id, { dateStart: '2026-12-01' });
+    for (let i = 0; i < 2; i++) for (const d of [G, P]) await d.Sync.now();
+    const back = P.S.event(ev.id);
+    check('putting it back on reaches the first phone', back.status === 'Upcoming' && !back.cancelReason,
+      back.status + ' ' + back.cancelReason);
+    check('and the work comes back with it',
+      P.S.tasks({ assigneeId: per.id, excludeArchived: true }).some((t) => t.title === 'Book the hall'));
+    check('both phones stayed quiet', !P.errors.length && !G.errors.length,
+      P.errors.concat(G.errors).slice(0, 2).join(' | '));
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

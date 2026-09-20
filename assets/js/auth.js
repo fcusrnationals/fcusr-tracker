@@ -22,7 +22,8 @@
     if (!profile) return [];
     return (profile.eventIds || []).filter(function (id) {
       var e = Store.event(id);
-      return e && e.status !== 'Completed' && e.status !== 'Archived';
+      // Finished, archived, or called off: either way there is nothing to help with.
+      return e && e.status !== 'Completed' && !Store.isShelved(e);
     });
   }
 

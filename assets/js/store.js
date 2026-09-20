@@ -10,7 +10,11 @@
 
   var STATUSES = ['Not Started', 'In Progress', 'For Review', 'Done', 'On hold'];
   var PRIORITIES = ['High', 'Medium', 'Low'];
-  var EVENT_STATUSES = ['Upcoming', 'Ongoing', 'Completed', 'Archived'];
+  /* Cancelled sits with the finished ones rather than the running ones: an
+     activity called off is over, and what is left of it is a record. It keeps
+     its tasks, its letters and its place in the year's archive; what it stops
+     doing is asking anybody for work. */
+  var EVENT_STATUSES = ['Upcoming', 'Ongoing', 'Completed', 'Cancelled', 'Archived'];
 
   /* ---------- units ----------
      The Republic is one National government plus its provinces (the colleges and
@@ -363,6 +367,17 @@
       // Which unit's activity this is. Checked against the roster in normalize(),
       // so a backup naming a unit that no longer exists cannot orphan an event.
       unitId: typeof e.unitId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(e.unitId) ? e.unitId : '',
+      /* An activity, or a directive that holds several tasks.
+
+         A directive used to be a single task and nothing more, which was enough
+         for "chase the adviser about the memo" and not enough for "prepare the
+         general assembly", where one instruction is six errands with six
+         different people on them. A directive with tasks is the same shape as
+         an activity — a title, a unit, a list of work — minus the one thing
+         that makes an activity an activity: nobody files an accomplishment
+         report on a directive. Sharing the record means it also shares syncing,
+         separation and every screen that draws a list of tasks. */
+      kind: oneOf(e.kind, ['event', 'directive'], 'event'),
       title: title,
       description: str(e.description, LIMITS.text),
       dateStart: start,
@@ -370,6 +385,15 @@
       venue: str(e.venue, LIMITS.title),
       headId: typeof e.headId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(e.headId) ? e.headId : '',
       status: oneOf(e.status, EVENT_STATUSES, 'Upcoming'),
+
+      /* Why it was called off, and whether the council means to hold it later.
+         A cancellation with no reason is a gap somebody has to ask about at the
+         end of the term, so the reason is asked for when it is still fresh. */
+      cancelReason: str(e.cancelReason, LIMITS.reason),
+      cancelledBy: str(e.cancelledBy, LIMITS.name),
+      cancelledAt: e.cancelledAt ? stamp(e.cancelledAt) : '',
+      rescheduleWanted: !!e.rescheduleWanted,
+      rescheduleDate: dateOnly(e.rescheduleDate),
 
       /* Every activity gathers feedback. That is the standing rule, so it is the
          default rather than something to remember to switch on — an activity
@@ -1585,7 +1609,7 @@
      are left out, the same way they are everywhere else. */
   function unitStats(unitId) {
     var evs = state.events.filter(function (e) {
-      return e.unitId === unitId && e.status !== 'Archived';
+      return e.unitId === unitId && !isShelved(e) && !isDirectiveSet(e);
     });
     var ids = {};
     evs.forEach(function (e) { ids[e.id] = true; });
@@ -1601,11 +1625,29 @@
 
   /* ---------- events ---------- */
 
+  /* Off the working lists: archived, or called off. Neither is deleted and both
+     keep everything they hold; they simply stop counting as work in hand. */
+  function isShelved(e) {
+    return !!e && (e.status === 'Archived' || e.status === 'Cancelled');
+  }
+
+  function isCancelled(e) { return !!e && e.status === 'Cancelled'; }
+
+  // A directive that holds tasks, as opposed to an activity.
+  function isDirectiveSet(e) { return !!e && (e.kind || 'event') === 'directive'; }
+
+  /* Activities by default. A directive set lives in the same list and would
+     otherwise turn up on the Events tab, in the Overview's counts and in what a
+     unit owes the term — so it is asked for by name or not at all. */
   function events(opts) {
     opts = opts || {};
     var list = state.events.slice();
+    if (opts.kind !== 'any') {
+      var want = opts.kind === 'directive' ? 'directive' : 'event';
+      list = list.filter(function (e) { return (e.kind || 'event') === want; });
+    }
     if (opts.unitId) list = list.filter(function (e) { return e.unitId === opts.unitId; });
-    if (opts.excludeArchived) list = list.filter(function (e) { return e.status !== 'Archived'; });
+    if (opts.excludeArchived) list = list.filter(function (e) { return !isShelved(e); });
     if (opts.activeOnly) {
       list = list.filter(function (e) { return e.status === 'Upcoming' || e.status === 'Ongoing'; });
     }
@@ -1614,6 +1656,29 @@
       if (ad !== bd) return ad < bd ? -1 : 1;
       return a.title.localeCompare(b.title);
     });
+  }
+
+  /* The directives that hold tasks, newest business first. */
+  function directiveSets(opts) {
+    opts = opts || {};
+    var list = events({ kind: 'directive', unitId: opts.unitId });
+    if (opts.excludeArchived) list = list.filter(function (e) { return !isShelved(e); });
+    return list;
+  }
+
+  /* Every piece of directive work there is: the single ones, and the tasks
+     inside directives that hold several. The end-of-term record asks for this,
+     and so does anybody wondering what the council still owes itself. */
+  function directiveWork(opts) {
+    opts = opts || {};
+    var sets = {};
+    directiveSets().forEach(function (d) { sets[d.id] = d; });
+    return state.tasks.filter(function (t) {
+      if ((t.kind || 'event') === 'directive') return true;
+      return !!sets[t.eventId];
+    }).map(function (t) {
+      return { task: t, setTitle: sets[t.eventId] ? sets[t.eventId].title : '' };
+    }).filter(function (r) { return !opts.pendingOnly || isPending(r.task); });
   }
 
   function event(id) {
@@ -1634,8 +1699,10 @@
   function addEvent(data) {
     if (!String(data.title || '').trim()) throw new Error('An activity needs a title.');
     checkEventDates(dateOnly(data.dateStart), dateOnly(data.dateEnd));
+    var directive = data.kind === 'directive';
     var e = {
       id: U.uid('evt'),
+      kind: directive ? 'directive' : 'event',
       // Unstated means the council's own: National work.
       unitId: unit(data.unitId) ? data.unitId : nationalUnitId(),
       title: (data.title || '').trim(),
@@ -1645,7 +1712,8 @@
       venue: (data.venue || '').trim(),
       headId: data.headId || '',
       status: EVENT_STATUSES.indexOf(data.status) >= 0 ? data.status : 'Upcoming',
-      feedbackRequired: data.feedbackRequired !== false,
+      // Nobody evaluates a directive, so it is never asked for a feedback form.
+      feedbackRequired: !directive && data.feedbackRequired !== false,
       feedbackLink: data.feedbackLink || '',
       createdAt: nowISO(),
       updatedAt: nowISO()
@@ -1678,10 +1746,69 @@
     return e;
   }
 
+  /* Calling an activity off.
+
+     Not the same as deleting it and not the same as archiving it. The council
+     decided to hold it and then decided not to, and both decisions are part of
+     the year's record — so the activity stays exactly where it is, with its
+     tasks and its letters, and stops appearing in anybody's work. The reason is
+     required because "cancelled" with nothing beside it is a question somebody
+     has to chase at the end of the term. */
+  function cancelEvent(id, opts) {
+    opts = opts || {};
+    var e = event(id);
+    if (!e) return null;
+    var reason = String(opts.reason || '').trim();
+    if (!reason) throw new Error('Say why it was called off. One line is enough.');
+    if (e.status === 'Cancelled') throw new Error('That activity is already cancelled.');
+
+    var on = dateOnly(opts.rescheduleDate);
+    if (on && on < U.today()) throw new Error('A new date has to be in the future.');
+
+    e.status = 'Cancelled';
+    e.cancelReason = str(reason, LIMITS.reason);
+    e.cancelledBy = str(opts.by, LIMITS.name);
+    e.cancelledAt = nowISO();
+    e.rescheduleWanted = !!opts.rescheduleWanted;
+    e.rescheduleDate = e.rescheduleWanted ? on : '';
+    e.updatedAt = bumpStamp(e.updatedAt);
+    commit();
+    return e;
+  }
+
+  /* Holding it after all. The new dates go on the activity, the cancellation is
+     cleared, and everything it was carrying comes back with it — that is the
+     whole reason a cancelled activity is kept rather than deleted. */
+  function reinstateEvent(id, data) {
+    data = data || {};
+    var e = event(id);
+    if (!e) return null;
+    if (e.status !== 'Cancelled') throw new Error('That activity is not cancelled.');
+
+    var start = 'dateStart' in data ? dateOnly(data.dateStart) : e.dateStart;
+    var end = 'dateEnd' in data ? dateOnly(data.dateEnd) : e.dateEnd;
+    checkEventDates(start, end);
+
+    e.dateStart = start;
+    e.dateEnd = end;
+    e.status = start && start <= U.today() && (!end || end >= U.today()) ? 'Ongoing' : 'Upcoming';
+    e.cancelReason = '';
+    e.cancelledBy = '';
+    e.cancelledAt = '';
+    e.rescheduleWanted = false;
+    e.rescheduleDate = '';
+    e.updatedAt = bumpStamp(e.updatedAt);
+    commit();
+    return e;
+  }
+
   /* Whether this activity still owes a feedback form. Derived, never stored, so
      it cannot drift from the link and the waiver. */
   function needsFeedback(e) {
     if (!e) return false;
+    // An activity that never happened has nobody to ask for feedback, and a
+    // directive is not an activity at all.
+    if (isCancelled(e) || isDirectiveSet(e)) return false;
     return e.feedbackRequired !== false && !e.feedbackLink;
   }
 
@@ -1781,8 +1908,8 @@
       list = list.filter(function (t) {
         if ((t.kind || 'event') === 'directive') return true;
         var e = event(t.eventId);
-        // Not here is not archived: it may be an activity this person cannot open.
-        return !e || e.status !== 'Archived';
+        // Not here is not shelved: it may be an activity this person cannot open.
+        return !e || !isShelved(e);
       });
     }
     return list;
@@ -2835,7 +2962,13 @@
      finished AND its accomplishment report has been filed — the Drive link is
      what counts as filed, because the file itself never lives here. */
   function unitCompliance(unitId) {
-    var evs = state.events.filter(function (e) { return e.unitId === unitId; });
+    /* An activity that was called off is not owed a report. It is kept in the
+       year's record as a thing the council decided not to hold, and asking a
+       college to file an accomplishment report for it would be asking them to
+       write up an afternoon that never happened. */
+    var evs = state.events.filter(function (e) {
+      return e.unitId === unitId && !isCancelled(e) && !isDirectiveSet(e);
+    });
     var outstanding = evs.filter(function (e) {
       var r = report(e.id);
       var finished = e.status === 'Completed' || e.status === 'Archived';
@@ -2906,15 +3039,23 @@
      entirely, its activities deleted and nothing kept to say they happened. */
   function buildArchive() {
     return units().filter(function (u) {
-      return state.events.some(function (e) { return e.unitId === u.id; });
+      return state.events.some(function (e) {
+        return e.unitId === u.id && !isDirectiveSet(e);
+      });
     }).map(function (u) {
       var c = unitCompliance(u.id);
       return {
         unitId: u.id, unitName: u.name, unitCode: u.code, complied: c.complies,
-        events: state.events.filter(function (e) { return e.unitId === u.id; }).map(function (e) {
+        events: state.events.filter(function (e) {
+          return e.unitId === u.id && !isDirectiveSet(e);
+        }).map(function (e) {
           var r = report(e.id);
           return {
             title: e.title, dateStart: e.dateStart, dateEnd: e.dateEnd,
+            /* An activity the council called off is part of the year too, and
+               the record has to say which it was — otherwise it reads as one
+               that was simply never filed. */
+            cancelled: isCancelled(e), cancelReason: e.cancelReason || '',
             driveLink: r ? r.driveLink : '', driveOwned: !!(r && r.driveOwned)
           };
         })
@@ -3581,6 +3722,9 @@
     reconcileDirectory: reconcileDirectory,
     duplicatePeopleCount: duplicatePeopleCount, mergeDuplicatePeople: mergeDuplicatePeople,
     events: events, event: event, addEvent: addEvent, updateEvent: updateEvent, deleteEvent: deleteEvent,
+    cancelEvent: cancelEvent, reinstateEvent: reinstateEvent,
+    isShelved: isShelved, isCancelled: isCancelled, isDirectiveSet: isDirectiveSet,
+    directiveSets: directiveSets, directiveWork: directiveWork,
     needsFeedback: needsFeedback, setFeedbackLink: setFeedbackLink,
     waiveFeedback: waiveFeedback, restoreFeedback: restoreFeedback,
     tasks: tasks, task: task, addTask: addTask, updateTask: updateTask,

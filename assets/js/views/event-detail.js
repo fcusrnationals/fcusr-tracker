@@ -33,15 +33,23 @@
     var s = Store.stats(all);
     if (!state.draft) state.draft = blankDraft(e);
 
-    var meta = [U.fmtRange(e.dateStart, e.dateEnd)];
+    /* A directive that holds tasks is the same screen as an activity, minus the
+       parts that only an activity has: a venue, a feedback form, an
+       accomplishment report, volunteers. */
+    var dir = Store.isDirectiveSet(e);
+    var meta = [];
+    if (e.dateStart || e.dateEnd) meta.push(U.fmtRange(e.dateStart, e.dateEnd));
+    else if (dir) meta.push('No date set');
     if (e.venue) meta.push(e.venue);
     if (e.headId) meta.push(Store.personName(e.headId));
-    meta.push(U.countdown(e.dateStart, e.dateEnd));
+    if (e.dateStart || e.dateEnd) meta.push(U.countdown(e.dateStart, e.dateEnd));
 
     var mine = canEdit(e);
     var owner = Store.unit(e.unitId);
 
-    var html = '<a class="breadcrumb" href="#/events">' + UI.icon('back') + 'All events</a>';
+    var html = dir
+      ? '<a class="breadcrumb" href="#/directives">' + UI.icon('back') + 'All directives</a>'
+      : '<a class="breadcrumb" href="#/events">' + UI.icon('back') + 'All events</a>';
 
     html += '<div class="detail-head">' +
       '<div class="page-head" style="margin-bottom:6px">' +
@@ -71,12 +79,13 @@
         : '') +
       '</div>';
 
+    html += cancelledBanner(e, mine);
     html += feedbackBanner(e, mine);
     html += reportBanner(e, s);
 
     var letterCount = Store.letters({ eventId: e.id }).length;
     var volCount = Store.volunteersFor(e.id).length;
-    var showVols = !!(global.Auth && Auth.canEnrolVolunteers()) && mine;
+    var showVols = !!(global.Auth && Auth.canEnrolVolunteers()) && mine && !dir;
     var showLetters = !(global.Auth && Auth.isVolunteer());
     if (state.tab === 'volunteers' && !showVols) state.tab = 'tasks';
     if (state.tab === 'letters' && !showLetters) state.tab = 'tasks';
@@ -110,8 +119,10 @@
 
     if (!all.length) {
       return html + UI.empty(
-        mine ? 'No tasks under this event yet — add the first one.' : 'No tasks under this event yet.',
-        'Every task belongs to an event, and this one is empty.');
+        mine ? 'No tasks under this ' + (dir ? 'directive' : 'event') + ' yet — add the first one.'
+             : 'No tasks under this ' + (dir ? 'directive' : 'event') + ' yet.',
+        dir ? 'A directive can carry as many tasks as it takes, each with its own person and date.'
+            : 'Every task belongs to an event, and this one is empty.');
     }
 
     var sorted = all.slice().sort(Store.byUrgency);
@@ -148,11 +159,38 @@
     return html;
   }
 
+  /* An activity the council called off. Said at the top, with the reason and
+     whether it is coming back, because everything below it — the tasks, the
+     letters, the volunteers — reads differently once this is known. */
+  function cancelledBanner(e, mine) {
+    if (!Store.isCancelled(e)) return '';
+    var when = e.cancelledAt ? U.fmtDateShort(String(e.cancelledAt).slice(0, 10)) : '';
+    return '<div class="fb-banner is-waived">' + UI.icon('alert') +
+      '<div><div class="fb-title">This activity was cancelled' +
+      (when ? ' on ' + U.esc(when) : '') +
+      (e.cancelledBy ? ' by ' + U.esc(e.cancelledBy) : '') + '.</div>' +
+      '<div class="fb-sub">' +
+      (e.cancelReason ? '&ldquo;' + U.esc(e.cancelReason) + '&rdquo;' : 'No reason was recorded.') +
+      '<br>' +
+      (e.rescheduleWanted
+        ? (e.rescheduleDate
+            ? 'To be held again on <strong>' + U.esc(U.fmtDate(e.rescheduleDate)) + '</strong>.'
+            : 'To be held again on a date not yet settled.')
+        : 'Not being rescheduled.') +
+      ' Its tasks are off everybody&rsquo;s list, and no accomplishment report is owed for it.' +
+      '</div>' +
+      (mine ? '<div class="fb-actions">' +
+        '<button type="button" class="btn btn-sm btn-primary" data-reschedule>Put it back on</button>' +
+        '</div>' : '') +
+      '</div></div>';
+  }
+
   /* Every activity is evaluated. The form has to exist before the activity
      runs, so this sits at the top of the screen from the day it is created —
      not tucked inside the report wizard, which is opened afterwards. */
   function feedbackBanner(e, mine) {
-    if (e.status === 'Archived') return '';
+    // Archived, called off, or a directive: none of the three is evaluated.
+    if (e.status === 'Archived' || Store.isCancelled(e) || Store.isDirectiveSet(e)) return '';
 
     if (e.feedbackRequired === false) {
       return '<div class="fb-banner is-waived">' + UI.icon('alert') +
@@ -189,6 +227,8 @@
   /* Once the tasks are finished the activity is not finished — the report is the
      last piece. This is where that hand-off happens. */
   function reportBanner(e, s) {
+    // Nothing was held, or nothing was an activity: either way, no report.
+    if (Store.isCancelled(e) || Store.isDirectiveSet(e)) return '';
     var tasksDone = s.total > 0 && s.pending === 0;
     var confirmed = e.status === 'Completed';
     if (!tasksDone && !confirmed) return '';
@@ -409,33 +449,51 @@
       });
     });
 
+    var again = root.querySelector('[data-reschedule]');
+    if (again) again.addEventListener('click', function () { Forms.rescheduleEventForm(e.id); });
+
     var exportBtn = root.querySelector('[data-export]');
     if (exportBtn) exportBtn.addEventListener('click', function () { Report.openExportDialog(e.id); });
 
     var more = root.querySelector('[data-more]');
     if (more) more.addEventListener('click', function () {
+      var isDir = Store.isDirectiveSet(e);
+      var noun = isDir ? 'directive' : 'event';
       var items =
-        '<button type="button" data-set="edit">' + UI.icon('edit') + 'Edit event</button>' +
+        '<button type="button" data-set="edit">' + UI.icon('edit') + 'Edit ' + noun + '</button>' +
+        (isDir ? ''
+          : Store.isCancelled(e)
+            ? '<button type="button" data-set="reschedule">' + UI.icon('calendar') + 'Put it back on</button>'
+            : '<button type="button" data-set="cancel">' + UI.icon('close') + 'Cancel this activity</button>') +
         (e.status === 'Archived'
           ? '<button type="button" data-set="unarchive">' + UI.icon('archive') + 'Restore from archive</button>'
-          : '<button type="button" data-set="archive">' + UI.icon('archive') + 'Archive event</button>') +
+          : '<button type="button" data-set="archive">' + UI.icon('archive') + 'Archive ' + noun + '</button>') +
         '<div class="sep"></div>' +
-        '<button type="button" class="danger" data-set="delete">' + UI.icon('trash') + 'Delete event</button>';
+        '<button type="button" class="danger" data-set="delete">' + UI.icon('trash') +
+        'Delete ' + noun + '</button>';
       UI.openMenu(more, items, function (action) {
         if (action === 'edit') return Forms.eventForm(e.id);
-        if (action === 'archive') { Store.updateEvent(e.id, { status: 'Archived' }); return UI.toast('Event archived.'); }
-        if (action === 'unarchive') { Store.updateEvent(e.id, { status: 'Upcoming' }); return UI.toast('Event restored.'); }
+        if (action === 'cancel') return Forms.cancelEventForm(e.id);
+        if (action === 'reschedule') return Forms.rescheduleEventForm(e.id);
+        if (action === 'archive') {
+          Store.updateEvent(e.id, { status: 'Archived' });
+          return UI.toast((isDir ? 'Directive' : 'Event') + ' archived.');
+        }
+        if (action === 'unarchive') {
+          Store.updateEvent(e.id, { status: 'Upcoming' });
+          return UI.toast((isDir ? 'Directive' : 'Event') + ' restored.');
+        }
         if (action === 'delete') {
           UI.confirm({
-            title: 'Delete this event?',
+            title: 'Delete this ' + noun + '?',
             message: '“' + e.title + '” and its ' + U.plural(Store.tasks({ eventId: e.id }).length, 'task') + ' will be removed.',
             detail: 'This cannot be undone. Archiving keeps the record instead.',
             confirmLabel: 'Delete event'
           }).then(function (ok) {
             if (!ok) return;
             Store.deleteEvent(e.id);
-            UI.toast('Event deleted.');
-            App.go('#/events');
+            UI.toast((isDir ? 'Directive' : 'Event') + ' deleted.');
+            App.go(isDir ? '#/directives' : '#/events');
           });
         }
       });

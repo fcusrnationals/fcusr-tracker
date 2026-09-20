@@ -321,10 +321,69 @@ check('group by person', $$('.group').length > 1);
 check('group headers carry counts', /\d+ of \d+ done/.test(text()));
 click($('[data-group-by="flat"]'));
 click($('[data-more]'));
-check('⋯ menu opens with 3 actions', $$('.menu button').length === 3);
+check('⋯ menu opens with every action an activity has', $$('.menu button').length === 4);
 click($$('.menu button').find((b) => b.getAttribute('data-set') === 'archive'));
 check('archive works', S.event(created.id).status === 'Archived');
 S.updateEvent(created.id, { status: 'Upcoming' });
+
+/* ---------------- calling an activity off ----------------
+   Deleting it loses the record and archiving it says nothing about why. A
+   council that calls off its Foundation Week wants the record kept, the work
+   off everybody's list, and to be asked whether it is coming back. */
+console.log('\n--- cancelling an activity, and putting it back on ---');
+{
+  const who = S.people()[0];
+  S.addTask({ kind: 'event', eventId: created.id, title: 'BOOK THE HALL',
+    assigneeId: who.id, dueDate: window.U.addDays(window.U.today(), 3) });
+  const onMyList = () => S.tasks({ assigneeId: who.id, excludeArchived: true })
+    .some((t) => t.title === 'BOOK THE HALL');
+  check('its task is on somebody\u2019s list to begin with', onMyList());
+  const owedBefore = S.unitCompliance(S.event(created.id).unitId).outstanding.length;
+
+  goto('#/events/' + created.id);
+  click($('[data-more]'));
+  click($$('.menu button').find((b) => b.getAttribute('data-set') === 'cancel'));
+  check('the cancel dialog asks why', !!$('#c-why') && !!$('#c-again'));
+  click($('[data-go]'));
+  check('and refuses to do it without a reason', S.event(created.id).status !== 'Cancelled' &&
+    /Say why/.test($('.modal-backdrop').textContent));
+  setValue($('#c-why'), 'Typhoon warning — classes suspended.');
+  setValue($('#c-when'), window.U.addDays(window.U.today(), 30));
+  click($('[data-go]'));
+  const ev = S.event(created.id);
+  check('cancelling records the reason', ev.status === 'Cancelled' &&
+    /Typhoon warning/.test(ev.cancelReason), ev.status + ' ' + ev.cancelReason);
+  check('and that it is to be held again, and when',
+    ev.rescheduleWanted && ev.rescheduleDate === window.U.addDays(window.U.today(), 30));
+  check('its tasks come off everybody\u2019s list', !onMyList());
+  check('but the tasks are still there, under the activity',
+    S.tasks({ eventId: created.id }).some((t) => t.title === 'BOOK THE HALL'));
+  check('and nothing is owed for it at the end of the term',
+    !S.unitCompliance(ev.unitId).outstanding.some((x) => x.id === created.id) &&
+    owedBefore > 0, 'it is still on the list of what the unit owes');
+  check('no accomplishment report is asked for', !S.needsFeedback(ev));
+
+  goto('#/events/' + created.id);
+  check('the activity says it was cancelled, and why',
+    /was cancelled/i.test(text()) && /Typhoon warning/.test(text()));
+  check('and that it is coming back', /held again/i.test(text()));
+
+  goto('#/events');
+  check('the events list keeps it in a fold of its own', !!$('[data-group="cancelled"]'));
+  check('closed, with a count', $('[data-group="cancelled"]').getAttribute('data-collapsed') === 'true' &&
+    /to be rescheduled/.test($('[data-toggle-cancelled]').textContent));
+
+  goto('#/events/' + created.id);
+  click($('[data-reschedule]'));
+  setValue($('#r-start'), window.U.addDays(window.U.today(), 21));
+  click($('[data-go]'));
+  const back = S.event(created.id);
+  check('putting it back on clears the cancellation',
+    back.status === 'Upcoming' && !back.cancelReason && !back.rescheduleWanted, back.status);
+  check('with the new date', back.dateStart === window.U.addDays(window.U.today(), 21));
+  check('and its work comes back with it', onMyList());
+  S.deleteTask(S.tasks({ eventId: created.id }).find((t) => t.title === 'BOOK THE HALL').id);
+}
 
 console.log('\n--- my tasks ---');
 S.setLastPerson('');
@@ -885,6 +944,79 @@ console.log('\n--- adding somebody hands over a password ---');
   check('the door asks for a username', /<label for="gate-email">Username<\/label>/.test(door));
   check('the forgotten-password answer offers no email',
     !/sendReset|recover/.test(door));
+}
+
+/* ---------------- a directive that holds tasks ----------------
+   A single instruction is one task. "Prepare the General Assembly" is six
+   errands with six people on them, and it used to have to be six directives. */
+console.log('\n--- a directive with tasks of its own ---');
+{
+  // Nothing of an earlier dialog left open, or the fields below belong to it.
+  $$('.modal-backdrop').forEach((m) => m.remove());
+  const dialog = () => $$('.modal-backdrop').slice(-1)[0];
+  const inDialog = (sel) => dialog().querySelector(sel);
+
+  goto('#/directives');
+  check('the directives screen offers one with tasks', !!$('[data-new-set]'));
+  click($('[data-new-set]'));
+  check('the form asks for a directive, not an event', /New directive/.test(dialog().textContent),
+    dialog().textContent.replace(/\s+/g, ' ').slice(0, 120));
+  check('and does not ask where it is held or for a feedback form',
+    !inDialog('#f-venue') && !inDialog('#f-feedback'));
+  setValue(inDialog('#f-title'), 'Prepare the General Assembly');
+  click(inDialog('[data-save]'));
+
+  const set = S.directiveSets().find((d) => d.title === 'Prepare the General Assembly');
+  check('it is created', !!set && S.isDirectiveSet(set));
+  check('with no date required', !!set && !set.dateStart);
+  check('and no feedback form asked of it', !!set && !S.needsFeedback(set));
+  check('the app opens it, ready for the first task', window.location.hash === '#/events/' + set.id);
+
+  check('it does not show up among the activities',
+    !S.events().some((e) => e.id === set.id) && S.events({ kind: 'directive' }).some((e) => e.id === set.id));
+  goto('#/events');
+  check('nor on the Events tab', !text().includes('Prepare the General Assembly'));
+
+  const owedBefore = S.unitCompliance(set.unitId).outstanding.length;
+  S.addTask({ kind: 'event', eventId: set.id, title: 'DRAFT THE PROGRAMME',
+    assigneeId: S.people()[0].id, dueDate: window.U.addDays(window.U.today(), 2) });
+  S.addTask({ kind: 'event', eventId: set.id, title: 'BOOK THE VENUE',
+    assigneeId: S.people()[1].id, dueDate: window.U.addDays(window.U.today(), 4) });
+  check('it carries several tasks, each with its own person',
+    S.tasks({ eventId: set.id }).length === 2);
+  check('and the council still owes no report for it',
+    S.unitCompliance(set.unitId).outstanding.length === owedBefore,
+    'a directive was counted as an activity to file');
+
+  goto('#/events/' + set.id);
+  check('its own screen says where it came from', /All directives/.test(text()));
+  check('and shows its tasks', /DRAFT THE PROGRAMME/.test(text()) && /BOOK THE VENUE/.test(text()));
+  check('with no accomplishment report or feedback banner anywhere',
+    !/accomplishment report/i.test(text()) && !/feedback form/i.test(text()),
+    (text().match(/[^.]*(accomplishment report|feedback form)[^.]*/i) || [''])[0].slice(0, 100));
+  click($('[data-more]'));
+  const labels = $$('.menu button').map((b) => b.textContent.trim());
+  check('and the menu speaks of a directive', labels.some((l) => /Edit directive/.test(l)) &&
+    !labels.some((l) => /Cancel this activity/.test(l)), labels.join(' | '));
+  click($('[data-more]'));
+
+  goto('#/directives');
+  check('the directives screen lists it with its progress',
+    /Prepare the General Assembly/.test(text()) && /0 of 2 done/.test(text()));
+  check('and the single directives keep their own place', /Single directives|No directives yet/.test(text()) ||
+    !S.tasks({ kind: 'directive' }).length);
+
+  /* Editing a task inside a directive must not file it under an activity —
+     the bug that moved directives into whichever event came first. */
+  const t = S.tasks({ eventId: set.id })[0];
+  window.Forms.taskForm(t.id);
+  const opts = [...inDialog('#f-eventId').options].map((o) => o.text);
+  check('a task in a directive is only offered directives to live under',
+    opts.includes('Prepare the General Assembly') && !opts.includes('General Assembly 2026'), opts.join(', '));
+  click(inDialog('[data-save]'));
+  check('and saving leaves it where it was', S.task(t.id).eventId === set.id);
+
+  S.deleteEvent(set.id);
 }
 
 /* ---------------- a name becomes a username ---------------- */

@@ -295,7 +295,9 @@
             out.innerHTML = '<p class="small muted">Type at least two letters.</p>';
             return;
           }
-          var events = Store.events().filter(function (e) {
+          // Directives that hold tasks are searched for too: to somebody looking
+          // for a title, the difference between the two is not the point.
+          var events = Store.events({ kind: 'any' }).filter(function (e) {
             return e.title.toLowerCase().indexOf(q) >= 0 || e.description.toLowerCase().indexOf(q) >= 0;
           }).slice(0, 6);
           var tasks = Store.tasks().filter(function (t) {
