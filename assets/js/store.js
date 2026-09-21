@@ -194,7 +194,7 @@
       /* Where syncing got to. `pulled` is the server clock of the newest change
          this device has taken in; asking for anything newer than that is the
          whole of the pull. */
-      sync: { pulled: '', pushed: '', at: '', unitMap: {}, officeMap: {} },
+      sync: { pulled: '', pulledDeletions: '', pushed: '', at: '', unitMap: {}, officeMap: {} },
       positions: DEFAULT_POSITIONS.slice(),
       committees: DEFAULT_COMMITTEES.slice(),
       org: JSON.parse(JSON.stringify(DEFAULT_ORG)),
@@ -290,11 +290,59 @@
     return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t) ? t : '';
   }
 
+  /* ---------- fields this version has never heard of ----------
+
+     Every clean function above builds a fresh object out of the fields it
+     knows, which is what makes a record from a backup, a hostile file or a
+     future version safe to hold. It also silently threw away anything it did
+     not recognise, and that is what broke syncing every time a feature landed.
+
+     A phone still running last week's build pulls an activity carrying a
+     volunteer code, cleans it, keeps everything except the code — and then
+     offers the record back on its next full round and writes the code out of
+     the council's database for everybody. Nobody sees an error. Both phones
+     say Synced. One of them is simply missing a field, for good.
+
+     So an unknown field is carried rather than dropped. It is never trusted:
+     it cannot overwrite anything this version validates, because it is only
+     written where the clean object has no opinion. It is capped, because this
+     all lives in five megabytes of localStorage and a field somebody invents
+     should not be able to fill it.
+
+     The server does the same thing from the other side (sync3.sql merges a
+     stored body with an arriving one), so an old phone cannot strip a field
+     even if it is running a build from before this line was written. */
+  var EXTRA_KEYS = 40;
+  var EXTRA_CHARS = 20000;
+
+  function keepExtras(raw, clean) {
+    if (!raw || typeof raw !== 'object' || !clean) return clean;
+    var kept = 0;
+    var keys = Object.keys(raw);
+    for (var i = 0; i < keys.length && kept < EXTRA_KEYS; i++) {
+      var k = keys[i];
+      if (Object.prototype.hasOwnProperty.call(clean, k)) continue;
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(k)) continue;
+      var v = raw[k];
+      if (v === null || v === undefined || typeof v === 'function') continue;
+      if (typeof v === 'object') {
+        var size = 0;
+        try { size = JSON.stringify(v).length; } catch (e) { continue; }
+        if (!size || size > EXTRA_CHARS) continue;
+      } else if (typeof v === 'string' && v.length > EXTRA_CHARS) {
+        continue;
+      }
+      clean[k] = v;
+      kept++;
+    }
+    return clean;
+  }
+
   function cleanPerson(p) {
     if (!p || typeof p !== 'object') return null;
     var name = str(p.name, LIMITS.name);
     if (!name) return null;
-    return {
+    return keepExtras(p, {
       id: id(p.id, 'per'),
       name: name,
       position: str(p.position, LIMITS.role),
@@ -318,14 +366,14 @@
       sample: !!p.sample,
       createdAt: stamp(p.createdAt),
       updatedAt: stamp(p.updatedAt)
-    };
+    });
   }
 
   function cleanUnit(u) {
     if (!u || typeof u !== 'object') return null;
     var name = str(u.name, LIMITS.org);
     if (!name) return null;
-    return {
+    return keepExtras(u, {
       id: id(u.id, 'unt'),
       kind: oneOf(u.kind, UNIT_KINDS, 'province'),
       // A code is printed on reports and used nowhere as a key, so it is simply
@@ -344,7 +392,7 @@
       active: u.active !== false,
       createdAt: stamp(u.createdAt),
       updatedAt: stamp(u.updatedAt)
-    };
+    });
   }
 
   /* A feedback form is a Google Form, which comes in two shapes: the long
@@ -362,7 +410,7 @@
     if (!title) return null;
     var start = dateOnly(e.dateStart);
     var end = dateOnly(e.dateEnd);
-    return {
+    return keepExtras(e, {
       id: id(e.id, 'evt'),
       // Which unit's activity this is. Checked against the roster in normalize(),
       // so a backup naming a unit that no longer exists cannot orphan an event.
@@ -417,7 +465,7 @@
       sample: !!e.sample,
       createdAt: stamp(e.createdAt),
       updatedAt: stamp(e.updatedAt)
-    };
+    });
   }
 
   // Statuses that have been renamed since. Without this, older saved data and
@@ -431,7 +479,7 @@
     var raw = STATUS_ALIASES[t.status] || t.status;
     var status = oneOf(raw, STATUSES, 'Not Started');
     var kind = oneOf(t.kind, ['event', 'directive'], 'event');
-    return {
+    return keepExtras(t, {
       id: id(t.id, 'tsk'),
       kind: kind,
       unitId: id(t.unitId),
@@ -449,7 +497,7 @@
       sample: !!t.sample,
       createdAt: stamp(t.createdAt),
       updatedAt: stamp(t.updatedAt)
-    };
+    });
   }
 
   function assetIds(v) {
@@ -469,7 +517,7 @@
   function cleanReport(r) {
     if (!r || typeof r !== 'object') return null;
     var minutesMode = oneOf(r.minutes && r.minutes.mode, ['tasks', 'upload', 'skip'], 'tasks');
-    return {
+    return keepExtras(r, {
       id: id(r.id, 'rep'),
       eventId: typeof r.eventId === 'string' ? r.eventId : '',
       description: str(r.description, 4000),
@@ -521,7 +569,7 @@
       status: oneOf(r.status, ['draft', 'filed'], 'draft'),
       createdAt: stamp(r.createdAt),
       updatedAt: stamp(r.updatedAt)
-    };
+    });
   }
 
   /* ---------- one identity per record, everywhere ----------
@@ -646,6 +694,12 @@
     // Deleted here since: the server has not heard yet, and will on the push.
     var gone = state.deleted[kind] && state.deleted[kind][clean.id];
     if (gone && !newer(clean.updatedAt, gone)) return 'skipped';
+    /* Edited somewhere else AFTER it was deleted here, so it comes back — and
+       the tombstone has to go with it. Holding both at once is a device that
+       quietly contradicts itself: the record is on screen, and the next full
+       round offers the tombstone and the DELETE that goes with it, so the
+       revival is undone an hour later and nobody can see why. */
+    if (gone) delete state.deleted[kind][clean.id];
 
     var list = state[c.list];
     for (var i = 0; i < list.length; i++) {
@@ -743,6 +797,12 @@
            rehearsal, not the council's work, and it has no business on a server
            everybody shares. */
         if (r.sample) return false;
+        /* Deleted here, and somehow still in the list. It should not happen and
+           it did: a record revived by a remote edit used to keep its tombstone,
+           and a full round then offered the record and its deletion in the same
+           breath. Whichever the server applied last was luck. A record this
+           device says is gone is never offered back. */
+        if (state.deleted[kind] && state.deleted[kind][r.id]) return false;
         return U.isUuid(r.id) && (!since || newer(r.updatedAt, since));
       });
     });
@@ -790,7 +850,7 @@
   function resetSyncMarks(opts) {
     opts = opts || {};
     if (opts.push !== false) state.sync.pushed = '';
-    if (opts.pull !== false) state.sync.pulled = '';
+    if (opts.pull !== false) { state.sync.pulled = ''; state.sync.pulledDeletions = ''; }
     save();
     return state.sync;
   }
@@ -876,7 +936,21 @@
   function tombstone(kind, rid) {
     if (!rid) return;
     if (!state.deleted[kind]) state.deleted[kind] = {};
-    state.deleted[kind][rid] = nowISO();
+    /* Always later than the thing it buries.
+
+       A record and the tombstone that buries it are written in the same
+       instant, and a phone's clock has only millisecond resolution. A record
+       whose stamp had been nudged a tick forward — which bumpStamp does
+       whenever two edits land in one millisecond, and a save followed by a
+       sync is exactly that — was therefore NEWER than its own tombstone. The
+       next round read that as "edited somewhere else after it was deleted",
+       and brought it back.
+
+       It cost a deleted activity's report: gone from the screen, still on the
+       server, back on the next phone to sync. */
+    var c = COLLECTIONS[kind];
+    var rec = c && state[c.list] && state[c.list].filter(function (r) { return r.id === rid; })[0];
+    state.deleted[kind][rid] = rec ? bumpStamp(rec.updatedAt) : nowISO();
   }
 
   function deletions() { return state.deleted; }
@@ -980,6 +1054,12 @@
     s.deleted = cleanDeleted(data.deleted);
     s.sync = {
       pulled: data.sync && typeof data.sync.pulled === 'string' ? stamp(data.sync.pulled) : '',
+      /* Tombstones are timed by whoever deleted the thing, on their own watch;
+         records are timed by the server on its own. Two clocks, so two marks —
+         they were one, and a single phone with a fast watch could push the
+         shared mark into the future and quietly stop the whole device
+         receiving anything at all. */
+      pulledDeletions: data.sync && typeof data.sync.pulledDeletions === 'string' ? stamp(data.sync.pulledDeletions) : '',
       pushed: data.sync && typeof data.sync.pushed === 'string' ? stamp(data.sync.pushed) : '',
       at: data.sync && typeof data.sync.at === 'string' ? stamp(data.sync.at) : '',
       unitMap: cleanIdMap(data.sync && data.sync.unitMap),
@@ -2304,7 +2384,7 @@
     var name = str(o.name, LIMITS.org);
     if (!name) return null;
     var days = Number(o.turnaroundDays);
-    return {
+    return keepExtras(o, {
       id: id(o.id, 'off'),
       code: str(o.code, 16).toUpperCase().replace(/[^A-Z0-9-]/g, ''),
       /* Whose desk this is. Empty means the Republic's, which every unit routes
@@ -2318,7 +2398,7 @@
       active: o.active !== false,
       createdAt: stamp(o.createdAt),
       updatedAt: stamp(o.updatedAt)
-    };
+    });
   }
 
   /* A signatory is an office wherever there is one, because an office outlives
@@ -2350,7 +2430,7 @@
     if (!l || typeof l !== 'object') return null;
     var subject = str(l.subject, LIMITS.title);
     if (!subject) return null;
-    return {
+    return keepExtras(l, {
       id: id(l.id, 'ltr'),
       unitId: typeof l.unitId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(l.unitId) ? l.unitId : '',
       /* Blank means council business that belongs to no activity, exactly the
@@ -2372,7 +2452,7 @@
       sample: !!l.sample,
       createdAt: stamp(l.createdAt),
       updatedAt: stamp(l.updatedAt)
-    };
+    });
   }
 
   /* ---------- offices ---------- */

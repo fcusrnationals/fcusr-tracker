@@ -148,6 +148,10 @@ window.fetch = function (url, opts) {
   }
   if (u.indexOf('/auth/v1/logout') === 0) return reply(204);
   if (u.indexOf('/auth/v1/user') === 0) {
+    /* A phone in a lift. Not an answer — and the app must be able to tell it
+       apart from "this account no longer exists", because one of them means
+       carry on and the other means sign out. */
+    if (SB.whoamiFails) return Promise.reject(new TypeError('Failed to fetch'));
     if (!who) return reply(401, { message: 'invalid claim: missing sub claim' });
     if (opts.method === 'PUT') {
       const email = Object.keys(SB.users).find((e) => SB.users[e].id === who);
@@ -1553,6 +1557,46 @@ const FILES = [
       Object.keys(SB.users).filter((e) => /leaver/.test(e)).join(', '));
     check('the directory holds no duplicates at all', Store.duplicatePeopleCount() === 0,
       Store.duplicatePeopleCount() + ' duplicates');
+  }
+
+  /* ---------------- removed while they are holding the phone ----------------
+     Removing somebody deletes their login, their profile and their enrolment,
+     and every other device learns it from the tombstone. The device THEY are
+     holding learnt nothing: the app had already read who they were at sign-in
+     and kept it, and its hourly re-read could not tell "this account no longer
+     exists" from "the wifi is down" — so both answers meant "nothing changed".
+
+     They carried on working. Every screen, every record, the council's whole
+     directory, for as long as the tab stayed open. */
+  console.log('\n--- somebody removed while they are signed in is signed out ---');
+  {
+    await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+    window.document.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+    check('they are signed in to begin with', Auth.signedIn());
+
+    // The wifi drops. That is not an answer, and must not throw anybody out.
+    const realWhoami = SB.whoamiFails;
+    SB.whoamiFails = true;
+    await Auth.refresh();
+    check('a connection that failed does not sign anybody out', Auth.signedIn(),
+      'thrown out of the app by a dropped signal');
+    SB.whoamiFails = realWhoami;
+
+    // Now an executive on another phone removes them for real.
+    const who = Auth.current().email;
+    const kept = {};
+    Object.keys(SB.profiles).forEach((k) => {
+      if (SB.profiles[k].email === who) { kept[k] = SB.profiles[k]; delete SB.profiles[k]; }
+    });
+
+    await Auth.refresh();
+    await new Promise((r) => setTimeout(r, 80));
+    check('but an account that is actually gone is signed out at once',
+      !Auth.signedIn(), 'still inside the app with the council\u2019s data on screen');
+
+    // The President is needed again below; this was a removal, not a purge.
+    Object.keys(kept).forEach((k) => { SB.profiles[k] = kept[k]; });
+    window.document.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
   }
 
   /* ---------------- a delete too big for one address ----------------

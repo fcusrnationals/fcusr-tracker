@@ -254,17 +254,44 @@
      the volunteer screens until they thought to close the tab and come back —
      and nothing on screen suggested they should. Returns true when something
      that decides what they can see actually changed. */
+  /* Out, and told why.
+
+     `force`, because an account that has been removed can no longer write, so
+     it can never finish the "your work has not reached the server yet" round
+     that an ordinary sign-out waits for — it would be held inside the app by
+     the very thing meant to remove it. */
+  function gone(message) {
+    if (global.UI && UI.toast) UI.toast(message, 'error');
+    signOut({ force: true });
+    return true;
+  }
+
   function refresh() {
     if (isOffline() || !me) return Promise.resolve(false);
     var was = me.access + '|' + me.unitId + '|' + (me.isHead ? 'head' : '') +
       '|' + (me.eventIds || []).join(',');
     return Backend.whoami().then(function (profile) {
-      if (!profile) return false;
+      /* Nothing behind the token, and this person was signed in a moment ago —
+         so their account has been removed while they were holding the phone.
+
+         That used to read as "nothing changed". They carried on working: every
+         screen, every record, the council's whole directory, for as long as
+         the tab stayed open. Removing somebody has to mean removing them from
+         the device they are holding, not only from the database. */
+      if (!profile) return gone('That account has been removed. Ask a national ' +
+        'executive to add you again.');
       adopt(profile);
       var now = me.access + '|' + me.unitId + '|' + (me.isHead ? 'head' : '') +
         '|' + (me.eventIds || []).join(',');
       return now !== was;
-    }).catch(function () { return false; });
+    }).catch(function (err) {
+      /* Only an answer from the server counts. A connection that failed is not
+         an answer and must never sign anybody out — a council works in
+         corridors and lifts, and being thrown out of the app every time the
+         signal drops would be worse than the fault this is fixing. */
+      if (err && err.gone) return gone(err.message);
+      return false;
+    });
   }
 
   function signIn(email, password) {

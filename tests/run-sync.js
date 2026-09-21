@@ -41,7 +41,7 @@ const COLUMNS = {
   reports:   ['id', 'event_id', 'drive_link', 'drive_owned', 'status', 'body', 'updated_at'],
   letters:   ['id', 'unit_id', 'subject', 'status', 'stops', 'internal', 'body', 'updated_at'],
   offices:   ['id', 'code', 'name', 'active', 'body', 'updated_at'],
-  deletions: ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by'],
+  deletions: ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by', 'synced_at'],
   term:      ['id', 'end_date', 'body', 'updated_at'],
   units:     ['id', 'name', 'code', 'kind', 'tracker_name', 'active', 'body', 'updated_at'],
   council:   ['id', 'body', 'updated_at']
@@ -80,6 +80,18 @@ function seedServerUnits(tables, now) {
     };
   });
 }
+
+/* Every value the database will accept, per column. Taken from schema.sql and
+   sync3.sql, and they must match what store.js can produce. */
+const CHECKS = {
+  events:  { status: ['Upcoming', 'Ongoing', 'Completed', 'Cancelled', 'Archived'] },
+  tasks:   { status: ['Not Started', 'In Progress', 'For Review', 'Done', 'On hold'],
+             priority: ['High', 'Medium', 'Low'] },
+  reports: { status: ['draft', 'filed'] },
+  letters: { status: ['Routing', 'Approved', 'Declined', 'Withdrawn'] },
+  units:   { kind: ['national', 'province', 'comelec', 'judiciary', 'branch'] },
+  deletions: { entity: ['event', 'task', 'report', 'letter', 'person', 'office', 'unit'] }
+};
 
 function makeServer() {
   const tables = { people: {}, events: {}, tasks: {}, reports: {}, letters: {},
@@ -184,6 +196,30 @@ function makeServer() {
         }
       }
 
+      /* The check constraints the real schema carries, and the reason this
+         whole suite existed while a cancelled activity could not sync.
+
+         The app learnt a new status. The database's list was written before
+         that and did not have it, so every cancelled activity was refused —
+         one row, set aside, the round still green — and the officer who
+         cancelled it was the only person in the Republic who could see it.
+         This stand-in accepted any string at all, so the suite proved
+         cancelling worked while it had never once worked in the field.
+
+         These lists are the app's own vocabulary. If a future version learns a
+         word that is not here, this fails on the spot rather than on a phone. */
+      for (const r of rows) {
+        const limits = CHECKS[table] || {};
+        for (const col of Object.keys(limits)) {
+          if (r[col] === undefined || r[col] === null) continue;
+          if (limits[col].indexOf(r[col]) >= 0) continue;
+          const e = new Error('new row for relation "' + table + '" violates check ' +
+            'constraint "' + table + '_' + col + '_check"');
+          e.status = 400;
+          return Promise.reject(e);
+        }
+      }
+
       /* The unique indexes the real schema carries. Without them this stand-in
          accepts two offices sharing a code, or two reports for one activity,
          and the suite happily proves a collision cannot happen while Postgres
@@ -204,15 +240,58 @@ function makeServer() {
       }
 
       rows.forEach((r) => {
-        // The server stamps its own clock on arrival, exactly as a database does.
         const key = table === 'deletions' ? r.entity + ':' + r.entity_id : r.id;
         /* A deep copy, because a real server does not share memory with the
            client. Storing the row by reference let a later edit on the device
            appear to have been uploaded when nothing had been sent — the test
            agreeing with the code because they were the same object. */
         const stamped = JSON.parse(JSON.stringify(r));
-        if (table === 'deletions') stamped.deleted_at = now();
-        else stamped.updated_at = now();
+        const held = tables[table][key];
+
+        if (table === 'deletions') {
+          /* PostgREST stores what it is SENT. This used to overwrite
+             deleted_at with the server's own clock, which is generous and
+             wrong: the column is written by whichever phone did the deleting,
+             on its own watch, and being kind about that here is exactly why a
+             phone with next March's date could freeze every other device in
+             the council while this suite stayed green.
+
+             What the real server does now (sync3.sql): keep the earliest
+             account of when it happened, never let it be in the future, and
+             stamp a separate arrival time that the pull actually pages by. */
+          const wall = now();
+          let at = stamped.deleted_at || wall;
+          if (String(at) > String(wall)) at = wall;
+          if (held && held.deleted_at && String(held.deleted_at) < String(at)) at = held.deleted_at;
+          stamped.deleted_at = at;
+          stamped.synced_at = wall;
+          tables[table][key] = stamped;
+          return;
+        }
+
+        /* A row with a tombstone against it is not re-created. A device that
+           has not yet heard about a deletion offers the record back on its
+           hourly full round, and the server used to take it. */
+        const kind = { people: 'person', events: 'event', tasks: 'task', reports: 'report',
+                       letters: 'letter', offices: 'office', units: 'unit' }[table];
+        if (kind && !held && tables.deletions[kind + ':' + r.id]) return;
+
+        if (held) {
+          const oldStamp = (held.body && held.body.updatedAt) || '';
+          const newStamp = (stamped.body && stamped.body.updatedAt) || '';
+          /* Not newer, so it has nothing to say. Skipped — not refused — and
+             updated_at is left alone, so an hourly full round from fifty
+             phones does not make every other phone re-download everything. */
+          if (oldStamp && newStamp && String(newStamp) <= String(oldStamp)) return;
+          /* Fields the sender has never heard of are kept. An old build cleans
+             a record through a clean() that predates a feature, drops the
+             field it does not know, and writes the record back without it. */
+          if (held.body && typeof held.body === 'object' &&
+              stamped.body && typeof stamped.body === 'object') {
+            stamped.body = Object.assign({}, held.body, stamped.body);
+          }
+        }
+        stamped.updated_at = now();
         tables[table][key] = stamped;
       });
       return Promise.resolve([]);
@@ -497,8 +576,13 @@ function makeDevice(server, name) {
   {
     const asked = server.requests.filter((r) => r.op === 'changed' && r.table === 'deletions');
     check('the deletions pull happened', asked.length > 0);
-    check('and asked on deleted_at, which is the column it has',
-      asked.every((r) => r.key === 'deleted_at'),
+    /* `synced_at`, not `deleted_at`. `deleted_at` is written by whichever
+       phone did the deleting, on its own watch, and ordering a table by a
+       column fifty different watches wrote is how a tombstone from a slow
+       phone lands behind the mark and is never seen at all. The server stamps
+       an arrival time now (sync3.sql) and that is what the pull pages by. */
+    check('and asked on synced_at, the arrival time the server stamps',
+      asked.every((r) => r.key === 'synced_at'),
       JSON.stringify(asked.slice(-1)));
     check('while everything else is asked on updated_at',
       server.requests.filter((r) => r.op === 'changed' && r.table !== 'deletions')
@@ -806,6 +890,30 @@ function makeDevice(server, name) {
     check('a refused table shows as refused', lt.there === null, JSON.stringify(lt));
     check('and says what the server said', /permission denied/.test(bad.error || ''), bad.error);
     D.w.Backend.changed = real;
+
+    /* Counting was not enough, and this is the case it missed: the same number
+       on both sides, and a different set of records making it up. Both phones
+       said nine activities. They were different nines, and "What is where"
+       reported agreement. */
+    const mine = D.S.addEvent({ title: 'Only on this phone', unitId: D.S.nationalUnitId() });
+    const theirs = D.w.U.isUuid(mine.id) ? mine.id.slice(0, -1) + (mine.id.slice(-1) === 'a' ? 'b' : 'a') : 'x';
+    delete s6.tables.events[Object.keys(s6.tables.events)[0]];
+    s6.tables.events[theirs] = {
+      id: theirs, unit_id: D.S.nationalUnitId(), title: 'Only on the server', status: 'Upcoming',
+      body: { id: theirs, title: 'Only on the server', updatedAt: '2026-09-01T00:00:00.000Z' },
+      updated_at: '2026-09-01T00:00:00.000Z'
+    };
+
+    const split = await D.Sync.diagnose();
+    const evRow = split.rows.filter((r) => r.kind === 'event')[0];
+    check('the same count on both sides is not taken for agreement',
+      evRow.onlyHere.length > 0 && evRow.onlyThere.length > 0,
+      JSON.stringify({ here: evRow.here, there: evRow.there,
+                       onlyHere: evRow.onlyHere, onlyThere: evRow.onlyThere }));
+    check('and it names what is on this phone alone',
+      evRow.onlyHere.indexOf('Only on this phone') >= 0, JSON.stringify(evRow.onlyHere));
+    check('and what is on the server alone',
+      evRow.onlyThere.indexOf('Only on the server') >= 0, JSON.stringify(evRow.onlyThere));
   }
 
   /* ---------------- an empty device asks for everything ----------------
@@ -1173,7 +1281,9 @@ function makeDevice(server, name) {
       delete sD.tables.tasks[id];
       sD.tables.deletions['task:' + id] = {
         entity: 'task', entity_id: id, unit_id: unit,
-        deleted_at: sD.now(), deleted_by: 'President'
+        // Both clocks, as the real table carries them: when the person deleted
+        // it, and when it reached the server. The pull pages by the second.
+        deleted_at: sD.now(), synced_at: sD.now(), deleted_by: 'President'
       };
     });
 
@@ -1348,13 +1458,24 @@ function makeDevice(server, name) {
     /* Nor is it offering the same record back one at a time for ever. Finding
        out which row a refusal was about costs one request per row; doing that
        every hour, for the life of a term, on a phone that already knows the
-       answer, is not a cost anybody should pay twice. */
-    const before = sR.requests.length;
-    await Gov.Sync.now({ full: true });
-    const singles = sR.requests.slice(before)
-      .filter((r) => r.op === 'upsert' && r.table === 'events' && r.n === 1).length;
-    check('and it does not go back to asking one row at a time', singles <= 1,
-      JSON.stringify(sR.requests.slice(before).filter((r) => r.op === 'upsert')));
+       answer, is not a cost anybody should pay twice.
+
+       It does try a few more times first, and that is deliberate. A refusal is
+       not always permanent — a directive whose unit had not arrived yet, a
+       person enrolled a minute later, an office being renamed — and a version
+       that gave up on the first refusal left real work sitting on a phone for
+       as long as the tab stayed open. So: three goes, then let it be. */
+    let asks = 0;
+    for (let round = 0; round < 6; round++) {
+      const before = sR.requests.length;
+      await Gov.Sync.now({ full: true });
+      // One request is the ordinary batch. More than one means it was refused
+      // again and went back to finding out which row by asking about each.
+      asks = sR.requests.slice(before)
+        .filter((r) => r.op === 'upsert' && r.table === 'events').length;
+    }
+    check('and it stops asking one row at a time once it is clearly refused',
+      asks <= 1, asks + ' offers of events on the sixth full round');
   }
 
   /* ---------------- pictures a deletion leaves behind ----------------
@@ -1447,10 +1568,13 @@ function makeDevice(server, name) {
 
     /* And it is not asking about the same tombstone one row at a time for ever.
        Finding out which row a refusal was about costs a request per row. */
-    const before = sT.requests.length;
-    await G3.Sync.now({ full: true });
-    const singles = sT.requests.slice(before)
-      .filter((r) => r.op === 'upsert' && r.table === 'deletions').length;
+    let singles = 0;
+    for (let round = 0; round < 6; round++) {
+      const before = sT.requests.length;
+      await G3.Sync.now({ full: true });
+      singles = sT.requests.slice(before)
+        .filter((r) => r.op === 'upsert' && r.table === 'deletions').length;
+    }
     check('and it stops offering the refused tombstone', singles === 0,
       singles + ' further offers of a tombstone already refused');
   }
@@ -1645,12 +1769,15 @@ function makeDevice(server, name) {
       st.last && st.last.refused);
 
     // And it is not re-offered every round for the rest of the term.
-    const before = sBad.requests.length;
-    await D5.Sync.now({ full: true });
-    const offered = sBad.requests.slice(before)
-      .filter((r) => r.op === 'upsert' && r.table === 'events').length;
+    let offered = 0;
+    for (let round = 0; round < 6; round++) {
+      const before = sBad.requests.length;
+      await D5.Sync.now({ full: true });
+      offered = sBad.requests.slice(before)
+        .filter((r) => r.op === 'upsert' && r.table === 'events').length;
+    }
     check('and it is not offered again for ever', offered <= 1,
-      offered + ' attempts on a later full round');
+      offered + ' attempts on the sixth full round');
 
     sBad.upsert = realUpsert;
   }
@@ -2042,6 +2169,225 @@ function makeDevice(server, name) {
       P.S.tasks({ assigneeId: per.id, excludeArchived: true }).some((t) => t.title === 'Book the hall'));
     check('both phones stayed quiet', !P.errors.length && !G.errors.length,
       P.errors.concat(G.errors).slice(0, 2).join(' | '));
+  }
+
+  /* ================================================================
+     WHAT THE COUNCIL ACTUALLY REPORTED
+
+     "It shows Synced, and the other device also says Synced, and they have
+     different data."
+
+     That is not one bug. It is four, and what they have in common is that all
+     four are silent — a round that finishes without throwing, on both phones,
+     with different work on each. Each one below is reproduced first and then
+     shown to be closed. */
+
+  console.log('\n--- a phone with the wrong date cannot freeze everybody else ---');
+  {
+    const sW = makeServer();
+    const P5 = makeDevice(sW, 'President');
+    const W = makeDevice(sW, 'Wrong Clock');
+    const unit = P5.S.nationalUnitId();
+
+    // Both phones start level.
+    const first = P5.S.addEvent({ title: 'Before the trouble', unitId: unit });
+    await P5.Sync.now();
+    await W.Sync.now();
+    check('both phones start level', !!W.S.event(first.id));
+
+    /* A phone whose date is set six months ahead — an ordinary thing on a
+       student's handset — deletes one thing. The tombstone it writes is dated
+       six months from now, and EVERY phone that reads it used to take that as
+       its high-water mark. From then on each of them asked the server for
+       everything newer than next March, got nothing, and said Synced. */
+    const realDate = W.w.Date;
+    const skew = 1000 * 60 * 60 * 24 * 180;
+    class Ahead extends realDate {
+      constructor(...a) { super(...(a.length ? a : [realDate.now() + skew])); }
+      static now() { return realDate.now() + skew; }
+    }
+    W.w.Date = Ahead;
+    const doomed = W.S.addEvent({ title: 'Called off', unitId: unit });
+    W.S.deleteEvent(doomed.id);
+    await W.Sync.now();
+    W.w.Date = realDate;
+
+    check('the tombstone reached the server', Object.keys(sW.tables.deletions).length > 0);
+
+    // The President reads it, and then somebody does ordinary work.
+    await P5.Sync.now();
+    const mark = P5.S.syncState();
+    check('the President’s records mark is not six months in the future',
+      !mark.pulled || Date.parse(mark.pulled) < realDate.now() + 1000 * 60 * 60,
+      mark.pulled);
+
+    const after = P5.S.addEvent({ title: 'Ordinary work afterwards', unitId: unit });
+    await P5.Sync.now();
+    await W.Sync.now();
+    check('and the other phone still receives what happens next',
+      !!W.S.event(after.id),
+      'the wrong clock froze the council: ' + JSON.stringify(W.S.syncState()));
+  }
+
+  console.log('\n--- an old build cannot delete a field it has never heard of ---');
+  {
+    const sO = makeServer();
+    const New = makeDevice(sO, 'Up to date');
+    const Old = makeDevice(sO, 'Last week’s build');
+    const unit = New.S.nationalUnitId();
+
+    const ev = New.S.addEvent({ title: 'Nurses Week', unitId: unit });
+    New.S.makeVolunteerCode(ev.id);
+    const code = New.S.event(ev.id).volunteerCode;
+    check('the activity has a volunteer code', !!code, code);
+    await New.Sync.now();
+
+    /* A phone still running the build from before volunteer codes existed. Its
+       cleanEvent has never heard of the field, so it drops it — and then
+       offers the record back on its next full round and writes the code out of
+       the council's database for everybody. */
+    await Old.Sync.now();
+    check('the old build received the activity', !!Old.S.event(ev.id));
+
+    /* It edits the title, knowing nothing about codes — and its cleanEvent,
+       written before the field existed, drops it on the way through. That is
+       simulated here by deleting the field, which is exactly what a clean
+       function that has never heard of it does. */
+    Old.S.updateEvent(ev.id, { title: 'Nurses Week 2026' });
+    delete Old.S.event(ev.id).volunteerCode;
+    await Old.Sync.now();
+    await New.Sync.now();
+
+    check('the old build’s edit landed', New.S.event(ev.id).title === 'Nurses Week 2026',
+      New.S.event(ev.id).title);
+    check('and the volunteer code survived it',
+      New.S.event(ev.id).volunteerCode === code,
+      'the code was deleted for the whole council by a phone that had not been reopened');
+  }
+
+  console.log('\n--- a phone that has fallen behind cannot undo everybody else ---');
+  {
+    const sS = makeServer();
+    const Fresh = makeDevice(sS, 'Fresh');
+    const Stale = makeDevice(sS, 'Stale');
+    const unit = Fresh.S.nationalUnitId();
+
+    const ev = Fresh.S.addEvent({ title: 'General Assembly', unitId: unit });
+    await Fresh.Sync.now();
+    await Stale.Sync.now();
+    check('both phones have it', !!Stale.S.event(ev.id));
+
+    // The venue is settled on one phone.
+    Fresh.S.updateEvent(ev.id, { venue: 'Gymnasium' });
+    await Fresh.Sync.now();
+
+    /* The other has not heard, and does what every device does once an hour:
+       offers everything it holds. Its copy is older. The server used to take
+       it, and the two phones then took turns undoing each other for ever, both
+       reporting success. */
+    await Stale.Sync.now({ full: true });
+    check('the stale copy did not overwrite the settled one',
+      sS.tables.events[ev.id].body.venue === 'Gymnasium',
+      'the server now holds: ' + JSON.stringify(sS.tables.events[ev.id].body.venue));
+
+    await Stale.Sync.now();
+    check('and the phone that was behind caught up instead',
+      Stale.S.event(ev.id).venue === 'Gymnasium', Stale.S.event(ev.id).venue);
+  }
+
+  console.log('\n--- the header stops saying Synced when it is not true ---');
+  {
+    const sV = makeServer();
+    const Gov2 = makeDevice(sV, 'Governor');
+    const unit = Gov2.S.nationalUnitId();
+
+    const mine = Gov2.S.addEvent({ title: 'Our own work', unitId: unit });
+    await Gov2.Sync.now();
+    let st = Gov2.Sync.status();
+    check('a phone that is level reports no drift',
+      !st.drift || st.drift.total === 0, JSON.stringify(st.drift));
+
+    // Now the server will not take one of their records, whatever they do.
+    const blocked = Gov2.S.addEvent({ title: 'Refused for ever', unitId: unit });
+    sV.refuseWrite = (table, row) => table === 'events' && row.id === blocked.id;
+    await Gov2.Sync.now({ full: true });
+
+    st = Gov2.Sync.status();
+    check('a record that cannot be sent is counted, not hidden',
+      st.drift && st.drift.total === 1, JSON.stringify(st.drift));
+    check('and it is named, so somebody can go and look at it',
+      st.drift.examples.some((x) => x.name === 'Refused for ever'),
+      JSON.stringify(st.drift.examples));
+    check('while the work that did go is not counted against it',
+      !st.drift.examples.some((x) => x.name === 'Our own work'));
+
+    sV.refuseWrite = null;
+    await Gov2.Sync.reconcile();
+    st = Gov2.Sync.status();
+    check('and "Send everything again" clears it once the server relents',
+      st.drift && st.drift.total === 0, JSON.stringify(st.drift));
+  }
+
+  console.log('\n--- a database that has not had the migration yet still works ---');
+  {
+    /* The council runs the app before they run the SQL, which is the ordinary
+       order of things. The pull asks for the arrival column first and the
+       server says there is no such column — which is a 400, not an empty list.
+       That must not take the round down, and it must not stop deletions
+       travelling; it drops back to the old column and carries on. */
+    const sM = makeServer();
+    sM.tables.deletions = {};
+    const OldDb = { ...COLUMNS };
+    COLUMNS.deletions = ['entity', 'entity_id', 'unit_id', 'deleted_at', 'deleted_by'];
+
+    const M1 = makeDevice(sM, 'M1');
+    const M2 = makeDevice(sM, 'M2');
+    const unit = M1.S.nationalUnitId();
+
+    const ev = M1.S.addEvent({ title: 'Before the migration', unitId: unit });
+    await M1.Sync.now();
+    await M2.Sync.now();
+    check('both phones have it', !!M2.S.event(ev.id));
+
+    M1.S.deleteEvent(ev.id);
+    const st = await M1.Sync.now();
+    check('the round does not fault on the missing column', !st.error, st.error);
+
+    const st2 = await M2.Sync.now();
+    check('nor on the other phone', !st2.error, st2.error);
+    check('and the deletion still travels', !M2.S.event(ev.id),
+      'deletions stopped working on a database without the migration');
+
+    const asked = sM.requests.filter((r) => r.op === 'changed' && r.table === 'deletions');
+    check('it tried the arrival column first', asked.some((r) => r.key === 'synced_at'));
+    check('and fell back to the one this database has',
+      asked.some((r) => r.key === 'deleted_at'));
+
+    COLUMNS.deletions = OldDb.deletions;
+  }
+
+  console.log('\n--- a deleted record does not walk back in ---');
+  {
+    const sZ = makeServer();
+    const One = makeDevice(sZ, 'One');
+    const Two = makeDevice(sZ, 'Two');
+    const unit = One.S.nationalUnitId();
+
+    const ev = One.S.addEvent({ title: 'Cancelled outright', unitId: unit });
+    await One.Sync.now();
+    await Two.Sync.now();
+    check('both phones hold it', !!Two.S.event(ev.id));
+
+    One.S.deleteEvent(ev.id);
+    await One.Sync.now();
+    check('it is off the server', !sZ.tables.events[ev.id]);
+
+    // The second phone has not heard, and offers everything it holds.
+    await Two.Sync.now({ full: true });
+    check('a phone that had not heard cannot put it back',
+      !sZ.tables.events[ev.id],
+      'it was re-created by a device that was simply out of date');
+    check('and that phone lets go of it too', !Two.S.event(ev.id));
   }
 
   console.log('\n--- no console errors ---');

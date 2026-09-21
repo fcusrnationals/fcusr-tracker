@@ -2396,6 +2396,17 @@
                 if (!ok) return;
                 b.disabled = true;
                 Backend.removeMember(email).then(function () {
+                  /* And off this device's own directory at once.
+
+                     The server deletes the entry and records the deletion, so
+                     every other phone learns it on the next round — but the
+                     phone that pressed the button learnt it the same way, from
+                     a round that might be twenty seconds away. So the person
+                     who had just removed somebody could go straight to the
+                     directory and find them still listed, which reads as the
+                     button not having worked. */
+                  var here = Store.personByEmail(U.loginToEmail(email));
+                  if (here) Store.deletePerson(here.id);
                   UI.toast(name + ' removed. Add them again any time.');
                   load();
                 }).catch(function (err) {

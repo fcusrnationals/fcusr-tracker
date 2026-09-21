@@ -757,11 +757,21 @@
        a number is the only part anybody can check against what they expected. */
     var l = st.last;
     var moved = l ? (l.added + l.updated + l.removed + l.sent) : 0;
+
+    /* Work this device is holding that the server has never been shown. This is
+       the state the pill could not see and the council could: a round finishes,
+       nothing throws, the word says Synced, and one phone has an activity on it
+       that nobody else in the Republic can find. It is measured now, at the end
+       of every round that asked for everything, so the header can say it. */
+    var behind = (st.drift && st.drift.total) || 0;
+
     var word = st.running ? 'Syncing'
       : st.error ? 'Not synced'
+      : behind ? 'Out of step · ' + behind
       : moved ? 'Synced · ' + moved
       : st.at ? 'Synced' : 'Waiting';
-    var tone = st.running ? ' is-working' : st.error ? ' is-stuck' : st.at ? ' is-ok' : '';
+    var tone = st.running ? ' is-working' : st.error ? ' is-stuck'
+      : behind ? ' is-behind' : st.at ? ' is-ok' : '';
 
     el.hidden = false;
     el.className = 'sync-state' + tone;
@@ -770,6 +780,8 @@
     el.setAttribute('title', st.error
       ? 'Not synced — ' + st.error + '. Tap for details.'
       : st.running ? 'Sending and receiving changes…'
+      : behind ? U.plural(behind, 'record') + ' on this device ' + (behind === 1 ? 'is' : 'are') +
+                 ' not on the council\u2019s server. Tap to see which.'
       : moved ? ((l.added + l.updated) + ' came in, ' + l.sent + ' went out. Tap for details.')
       : st.at ? 'Everything on this device is on the council\u2019s server'
       : 'Waiting to sync');
@@ -783,9 +795,39 @@
     var st = Sync.status();
     var l = st.last;
 
+    var behind = (st.drift && st.drift.total) || 0;
+
+    /* What is actually stranded, named. "Out of sync" is not something anybody
+       can act on; "General Assembly, and 2 tasks, are on this phone and nowhere
+       else" is — somebody can open it, look at it, and know what they are about
+       to lose if they wipe the browser. */
+    var strandedCard = behind
+      ? '<div class="card" style="background:var(--st-forreview-bg);border-color:var(--st-forreview-bd)">' +
+        '<div class="strong" style="margin-bottom:3px">' +
+        U.plural(behind, 'record') + ' ' + (behind === 1 ? 'is' : 'are') +
+        ' on this device and not on the server</div>' +
+        '<div class="small">' +
+        st.drift.kinds.map(function (k) {
+          return U.esc(U.plural(k.n, k.noun, k.noun === 'activity' ? 'activities' : ''));
+        }).join(', ') + '. Nothing is lost \u2014 it is all saved here. Press ' +
+        '<strong>Send everything again</strong> below and it goes up.</div>' +
+        (st.drift.examples.length
+          ? '<ul class="small" style="margin:8px 0 0;padding-left:18px">' +
+            st.drift.examples.map(function (x) {
+              return '<li>' + U.esc(x.name) + ' <span class="muted">(' + U.esc(x.noun) + ')</span></li>';
+            }).join('') + '</ul>'
+          : '') +
+        '<div class="tiny muted" style="margin-top:8px">If it stays after that, it is ' +
+        'work this account is not allowed to change \u2014 another unit\u2019s \u2014 and an ' +
+        'executive needs to move it.</div>' +
+        '</div>'
+      : '';
+
     UI.modal({
-      title: st.error ? 'This device is not synced' : st.running ? 'Syncing' : 'Synced',
-      body:
+      title: st.error ? 'This device is not synced'
+        : st.running ? 'Syncing'
+        : behind ? 'This device is out of step' : 'Synced',
+      body: strandedCard +
         (st.error
           ? '<div class="card" style="background:var(--st-overdue-bg);border-color:var(--st-overdue-bd)">' +
             '<div class="strong" style="margin-bottom:3px">The server could not be reached</div>' +
@@ -826,7 +868,10 @@
         var again = root.querySelector('[data-resend]');
         if (again) again.addEventListener('click', function () {
           Store.resetSyncMarks();
-          Sync.now({ loud: true }).then(function (out) {
+          /* A full round, and one that forgets every row it had set aside. A
+             device that is out of step is exactly the device whose set-aside
+             list is wrong. */
+          Sync.reconcile({ loud: true }).then(function (out) {
             render();
             var l2 = out.last;
             if (!out.error) {

@@ -31,7 +31,7 @@
     { kind: 'office', table: 'offices' }
   ];
 
-  var state = { running: false, at: '', error: '', last: null };
+  var state = { running: false, at: '', error: '', last: null, deletionColumn: 'synced_at', drift: null };
   var listeners = [];
   var timer = null;
   var pendingPush = null;
@@ -45,6 +45,10 @@
       at: state.at || Store.syncState().at,
       error: state.error,
       last: state.last,
+      /* Work this device holds that the server has never been shown. Measured,
+         not guessed, and the reason the header can stop saying Synced when it
+         is not true. */
+      drift: state.drift,
       able: able()
     };
   }
@@ -178,9 +182,57 @@
 
   /* ---------- the pull ---------- */
 
-  function pull(since) {
+  /* How far back to re-ask, every time.
+
+     A mark says "everything up to here is dealt with". That is only true if
+     every row stamped before it was visible when it was taken — and in Postgres
+     it need not be. `updated_at` is stamped with now(), which is the moment the
+     transaction STARTED, while the row only appears once it has COMMITTED. A
+     write that starts at 10:00:04 and commits at 10:00:07 is stamped :04 and is
+     invisible at :05, so a device pulling at :05 takes a mark of :05 and asks
+     for "newer than :05" ever after. That row is never offered to it again.
+
+     Nobody sees an error. The phone says Synced, truthfully by its own
+     bookkeeping, and is missing one activity for the rest of the term.
+
+     So every round re-asks the last couple of minutes. Applying a record twice
+     costs nothing — last-write-wins is the same answer every time — and two
+     minutes of a small council's changes is a few kilobytes. */
+  var OVERLAP_MS = 2 * 60 * 1000;
+
+  function backOff(mark) {
+    if (!mark) return '';
+    var t = Date.parse(mark);
+    if (!t) return mark;
+    return new Date(t - OVERLAP_MS).toISOString();
+  }
+
+  /* A mark is never allowed past the server's own clock.
+
+     The records mark is read off `updated_at`, which the server stamps, so it
+     cannot run ahead on its own. The deletions mark is read off `deleted_at`,
+     which the phone that did the deleting stamps — and a phone with a wrong
+     date writes a tombstone dated next March. Every device that pulls it used
+     to take that as its high-water mark, and from then on asked the server for
+     everything newer than next March. Which is nothing. For months.
+
+     One officer with a wrong clock silently froze every other phone in the
+     council, and all of them said Synced. */
+  function noLaterThan(mark, ceiling) {
+    if (!mark) return '';
+    if (!ceiling) return mark;
+    return mark > ceiling ? ceiling : mark;
+  }
+
+  function pull(since, delSince, ceiling) {
     var counts = { added: 0, updated: 0, removed: 0 };
+    /* Ask from a little before the mark; keep the mark itself as the floor, so
+       the overlap re-reads the recent past without ever walking the high-water
+       mark backwards a couple of minutes on every quiet round. */
+    var askFrom = backOff(since);
+    var askDelFrom = backOff(delSince);
     var high = since || '';
+    var delHigh = delSince || '';
 
     var PAGE = 500;
 
@@ -194,11 +246,21 @@
        the next ask is strictly newer than the last one seen.
 
        Bounded, because a loop that trusts a server to stop is not a loop. */
+    /* What the server actually offered, on a round that asked for everything.
+
+       This is the whole of the honesty check and it costs nothing: the rows are
+       already in hand. Afterwards, anything this device holds that the server
+       never offered is work that exists on one phone and nowhere else — which
+       is the failure people describe as "it says Synced and the other phone is
+       different", and the thing a green pill has never once been able to see. */
+    var seen = since ? null : { unit: {}, person: {}, event: {}, task: {}, report: {}, letter: {}, office: {} };
+
     function page(t, from, guard) {
       return Backend.changed(t.table, from, PAGE).then(function (rows) {
         rows = rows || [];
         var last = from;
         rows.forEach(function (row) {
+          if (seen && row.id) seen[t.kind][row.id] = 1;
           var what = Store.applyRemote(t.kind, fromRow(t.kind, row));
           if (what === 'added') counts.added++;
           else if (what === 'updated') counts.updated++;
@@ -214,7 +276,7 @@
 
     var chain = Promise.resolve();
     TABLES.forEach(function (t) {
-      chain = chain.then(function () { return page(t, since, 40); });
+      chain = chain.then(function () { return page(t, askFrom, 40); });
     });
 
     // Deletions last: applying them after the records means a row deleted and
@@ -232,24 +294,47 @@
 
        What a council saw was deleted work quietly back on one person's phone,
        for good, and nowhere else. */
+    /* Which column orders the tombstones.
+
+       `deleted_at` is the deleting phone's own watch, and ordering a table by a
+       column fifty different watches wrote is how a tombstone from a slow phone
+       lands BEHIND the mark and is never seen. sync3.sql adds `synced_at`,
+       stamped by the server like every other arrival, and that is what this
+       pages on. A council that has not run it yet falls back to the old column,
+       which is the behaviour they have now rather than a new failure. */
+    var delColumn = state.deletionColumn || 'synced_at';
+
     function deletionPage(from, guard) {
-      // `deleted_at`, not `updated_at`: a tombstone has no other clock, and
-      // asking for a column a table does not have is a refusal, not an empty list.
-      return Backend.changed('deletions', from, PAGE, 'deleted_at').then(function (rows) {
+      return Backend.changed('deletions', from, PAGE, delColumn).then(function (rows) {
         rows = rows || [];
         var last = from;
         rows.forEach(function (row) {
           if (Store.applyRemoteDeletion(row.entity, row.entity_id, row.deleted_at)) counts.removed++;
-          if (row.deleted_at && row.deleted_at > high) high = row.deleted_at;
-          if (row.deleted_at) last = row.deleted_at;
+          /* The mark moves on the column that was ORDERED by, which is not
+             always the one the tombstone is dated by. Mixing them is what put
+             one phone's wrong date into everybody's high-water mark. */
+          var at = row[delColumn];
+          if (at && at > delHigh) delHigh = at;
+          if (at) last = at;
         });
         if (rows.length < PAGE || last === from || guard <= 0) return null;
         return deletionPage(last, guard - 1);
+      }).catch(function (err) {
+        /* No `synced_at` on this database yet. Say so once, drop back to the
+           old column, and carry on — the whole round must not fail because one
+           migration is outstanding. */
+        if (delColumn === 'synced_at' && err && (err.status === 400 || err.status === 404)) {
+          state.deletionColumn = 'deleted_at';
+          delColumn = 'deleted_at';
+          delHigh = '';
+          return deletionPage('', 40);
+        }
+        throw err;
       });
     }
 
     chain = chain.then(function () {
-      return deletionPage(since, 40).catch(function (err) {
+      return deletionPage(askDelFrom, 40).catch(function (err) {
         /* Only a server that has never had the table gets a free pass — a
            council that has not run the sync migration yet. Anything else is a
            real fault, and swallowing it is how a deletion that never propagates
@@ -259,7 +344,25 @@
       });
     });
 
-    return chain.then(function () { return { counts: counts, high: high }; });
+    return chain.then(function () {
+      return {
+        counts: counts,
+        // Neither mark may be later than the server's own clock, whatever a
+        // phone with a wrong date wrote into a row.
+        /* The records mark is NOT clamped. `updated_at` is stamped by the
+           server on arrival, so it cannot run away on its own — and a row
+           written while this round was in flight legitimately carries a stamp
+           later than the moment the round started. Clamping that would make
+           the next round re-read from the start of the overlap every time,
+           which on a first sync of a whole term is the whole term, every
+           twenty seconds. */
+        high: high,
+        // The deletions mark IS clamped, because a phone writes it.
+        delHigh: noLaterThan(delHigh, ceiling),
+        column: delColumn,
+        seen: seen
+      };
+    });
   }
 
   /* ---------- the push ---------- */
@@ -279,6 +382,9 @@
      change the moment somebody enrols them differently, and a refusal recorded
      for ever would outlive the reason for it. */
   var unwritable = {};
+  /* How many refusals a row gets before it is left alone. */
+  var GIVE_UP_AFTER = 3;
+  function givenUpOn(key) { return (unwritable[key] || 0) >= GIVE_UP_AFTER; }
 
   /* `keyOf` because not every table is keyed by `id`. Deletions are keyed by the
      pair (entity, entity_id) and have no id column at all, so sending one would
@@ -298,10 +404,14 @@
     return !!err && err.status >= 400 && err.status < 500;
   }
 
-  function offer(table, rows, keyOf) {
+  function offer(table, rows, keyOf, took) {
     var name = keyOf || function (r) { return table + ':' + r.id; };
+    var accept = function (r) { if (took && r.id) took[r.id] = 1; };
     if (!rows.length) return Promise.resolve(0);
-    return Backend.upsert(table, rows).then(function () { return rows.length; })
+    return Backend.upsert(table, rows).then(function () {
+      rows.forEach(accept);
+      return rows.length;
+    })
       .catch(function (err) {
         if (!permanent(err)) throw err;
         /* Something in here is not this device's to write, and the answer does
@@ -311,10 +421,11 @@
         var c = Promise.resolve();
         rows.forEach(function (row) {
           c = c.then(function () {
-            return Backend.upsert(table, [row]).then(function () { taken += 1; })
+            return Backend.upsert(table, [row]).then(function () { taken += 1; accept(row); })
               .catch(function (e) {
                 if (permanent(e)) {
-                  unwritable[name(row)] = 1;
+                  var key = name(row);
+                  unwritable[key] = (unwritable[key] || 0) + 1;
                   refused += 1;
                   /* Said once, where somebody can see it. A row set aside for a
                      reason that is not permission is a fault in the record
@@ -336,7 +447,7 @@
 
   var refused = 0;
 
-  function push(since) {
+  function push(since, placed) {
     var out = Store.outbound(since);
     var sent = 0;
     refused = 0;
@@ -344,7 +455,7 @@
 
     TABLES.forEach(function (t) {
       var rows = (out.records[t.kind] || [])
-        .filter(function (r) { return !unwritable[t.table + ':' + r.id]; })
+        .filter(function (r) { return !givenUpOn(t.table + ':' + r.id); })
         .map(function (r) { return toRow(t.kind, r); });
       if (!rows.length) return;
       // In batches, because one letter with forty photos' worth of body is not
@@ -352,7 +463,13 @@
       for (var i = 0; i < rows.length; i += 50) {
         (function (slice) {
           chain = chain.then(function () {
-            return offer(t.table, slice).then(function (n) { sent += n; });
+            /* What the server took is remembered, because a record created and
+               sent in THIS round was never offered back by the pull — the pull
+               runs first — and counting it as stranded would put an amber
+               warning on the header of every phone that had just done some
+               work. */
+            return offer(t.table, slice, null, placed && placed[t.kind])
+              .then(function (n) { sent += n; });
           });
         })(rows.slice(i, i + 50));
       }
@@ -374,7 +491,7 @@
     if (out.deletions.length) {
       chain = chain.then(function () {
         var rows = out.deletions
-          .filter(function (d) { return !unwritable['deletions:' + d.kind + ':' + d.id]; })
+          .filter(function (d) { return !givenUpOn('deletions:' + d.kind + ':' + d.id); })
           .map(function (d) {
             return {
               entity: d.kind, entity_id: d.id, deleted_at: d.at,
@@ -398,7 +515,7 @@
       }).then(function () {
         var byTable = {};
         out.deletions.forEach(function (d) {
-          if (unwritable['deletions:' + d.kind + ':' + d.id]) return;
+          if (givenUpOn('deletions:' + d.kind + ':' + d.id)) return;
           var t = TABLES.filter(function (x) { return x.kind === d.kind; })[0];
           if (!t) return;
           (byTable[t.table] = byTable[t.table] || []).push(d.id);
@@ -425,6 +542,63 @@
   /* ISO strings compare as text, which is the whole reason the app stamps them
      that way. The store has its own copy of this; the two must not disagree. */
   function newer(a, b) { return String(a || '') > String(b || ''); }
+
+  /* ---------- is this phone actually in step? ----------
+
+     "Synced" has meant "the last round did not throw". That is not the same
+     question, and the difference is the whole complaint: two phones, both
+     green, holding different work. A round can finish cleanly having sent
+     nothing, because everything it tried to send was refused; or having
+     received nothing, because its mark was sitting in the future.
+
+     So after a round that asked for EVERYTHING — which is every round when the
+     app opens, and one an hour after that — the rows the server offered are
+     compared against the rows this device holds. Anything here that was never
+     offered is on one phone and nowhere else. It is counted, per kind, and the
+     first few are named, because "3 tasks" is something somebody can go and
+     look at and "out of sync" is not.
+
+     Nothing is fetched for this. The rows were already in hand. */
+  var LIST = {
+    unit:   function () { return Store.units(); },
+    person: function () { return Store.people(); },
+    event:  function () { return Store.events({ kind: 'any' }); },
+    task:   function () { return Store.tasks(); },
+    report: function () { return Store.reports(); },
+    letter: function () { return Store.letters(); },
+    office: function () { return Store.offices(); }
+  };
+
+  var NOUN = {
+    unit: 'unit', person: 'person', event: 'activity', task: 'task',
+    report: 'report', letter: 'letter', office: 'office'
+  };
+
+  function measureDrift(seen, placed) {
+    if (!seen) return null;
+    var out = { total: 0, kinds: [], examples: [] };
+    Object.keys(LIST).forEach(function (kind) {
+      var rows;
+      try { rows = LIST[kind]() || []; } catch (e) { return; }
+      var only = rows.filter(function (r) {
+        if (!r || r.sample) return false;
+        if (!U.isUuid(r.id)) return false;
+        if (seen[kind][r.id]) return false;
+        // Sent in this same round, so the server has it — the pull simply ran
+        // before the push and could not have offered it back.
+        if (placed && placed[kind] && placed[kind][r.id]) return false;
+        return true;
+      });
+      if (!only.length) return;
+      out.total += only.length;
+      out.kinds.push({ kind: kind, noun: NOUN[kind] || kind, n: only.length });
+      only.slice(0, 3).forEach(function (r) {
+        out.examples.push({ kind: kind, noun: NOUN[kind] || kind,
+                            name: r.title || r.name || r.subject || r.id });
+      });
+    });
+    return out;
+  }
 
   /* ---------- the council's own details ----------
      What is printed at the top of every report, the Republic's letter template,
@@ -494,15 +668,24 @@
     notify();
 
     var mark = Store.syncState();
-    /* Two marks, because there are two clocks and they must never be compared.
+    /* Three marks, because three different clocks write them and comparing any
+       two of them is a fault that shows up as "both phones say Synced".
 
        `pulled` is on the server's clock: the newest arrival this device has
        taken in. `pushed` is on this device's: the moment of the last successful
        send. Asking the server for "rows changed since <a phone's watch>" is how
        a device with a fast clock quietly stops receiving; filtering local edits
        by "newer than <a server stamp>" is how a device stops sending. Both were
-       one field once, and both faults were in it. */
+       one field once, and both faults were in it.
+
+       `pulledDeletions` is the third, and it is on a phone's clock — whichever
+       phone did the deleting wrote it. It shared the records mark until a
+       council found out what that costs: one officer's handset with the wrong
+       date wrote a tombstone dated next March, every phone that read it took
+       that as its high-water mark, and every phone in the Republic quietly
+       stopped receiving anything at all. All of them said Synced. */
     var since = mark.pulled || '';
+    var delSince = mark.pulledDeletions || '';
     var pushedSince = mark.pushed || '';
 
     /* Every so often, forget both marks and reconcile properly.
@@ -525,7 +708,23 @@
     var full = opts.full || rounds === 0 || (rounds % FULL_EVERY) === 0;
     rounds++;
 
-    if (full) { since = ''; pushedSince = ''; }
+    if (full) {
+      since = ''; delSince = ''; pushedSince = '';
+      /* The set-aside list is NOT cleared here, and the count in it is why.
+
+         A refusal can be temporary: a directive whose unit had not arrived
+         yet, a person enrolled a minute later, an office being renamed. Giving
+         up on the first refusal left real work sitting on a phone for as long
+         as the tab stayed open. Retrying it every round is the opposite
+         mistake: a row the server will never accept then costs a request of
+         its own, one at a time, for ever.
+
+         So the list counts refusals instead of remembering a flag, a full
+         round offers anything under the limit once more, and after three the
+         row is left alone and counted where the person can see it. Pressing
+         "Send everything again" clears the slate outright, because somebody
+         asking for that is telling us the reason may have changed. */
+    }
     var startedAt = '';
     var deviceStart = Store.now();
 
@@ -552,7 +751,7 @@
         Store.offices().some(function (o) { return !U.isUuid(o.id); });
       return needsCodes ? reconcileUnits().then(reconcileOffices) : Promise.resolve({});
     }).then(function () {
-      return pull(since);
+      return pull(since, delSince, startedAt);
     }).then(function (res) {
       return pullTerm().then(function (tookTerm) {
         if (tookTerm) res.counts.updated++;
@@ -562,7 +761,10 @@
         return res;
       });
     }).then(function (res) {
-      return push(pushedSince).then(function (sent) {
+      var placed = full
+        ? { unit: {}, person: {}, event: {}, task: {}, report: {}, letter: {}, office: {} }
+        : null;
+      return push(pushedSince, placed).then(function (sent) {
         return pushTerm(pushedSince).then(function (n) {
           return pushCouncil(pushedSince).then(function (m) { return sent + n + m; });
         });
@@ -580,6 +782,11 @@
            does not mind in the least. */
         Store.markSynced({
           pulled: res.high || startedAt,
+          /* Tombstones keep their own mark. They are ordered by a different
+             column, written by a different clock, and a single mark for both
+             meant one wrong watch could stop a device receiving records at
+             all. */
+          pulledDeletions: res.delHigh || (res.column === 'synced_at' ? startedAt : ''),
           pushed: new Date(Date.parse(deviceStart) - 1).toISOString(),
           at: startedAt
         });
@@ -593,9 +800,15 @@
           });
         }
 
+        /* Measured AFTER the push, not before: everything this device was
+           holding back has just had its chance to go. What is left over is
+           what the server would not take, or never heard about. */
+        if (full) state.drift = measureDrift(res.seen, placed);
+
         state.last = {
           added: res.counts.added, updated: res.counts.updated,
           removed: res.counts.removed, sent: sent, at: startedAt, full: full,
+          drift: state.drift,
           /* Records this phone holds that the server will not take from it.
              Not an error — it is usually correct, an officer holding sight of a
              National activity they may not edit — but it is not nothing either,
@@ -718,16 +931,55 @@
     TABLES.forEach(function (t) {
       chain = chain.then(function () {
         return Backend.changed(t.table, null, 1000).then(function (server) {
+          server = server || [];
+
+          /* Counting was not enough, and the council found out how: nine here
+             and nine there, and different nines. Two phones agreed on the
+             number of activities and disagreed about which. So the ids are
+             compared, and where an id is on both sides the stamp is compared
+             too — which is the only way "they both say Synced and they are
+             different" ever becomes a sentence anybody can act on. */
+          var theirs = {};
+          server.forEach(function (r) {
+            theirs[r.id] = (r.body && r.body.updatedAt) || r.updated_at || '';
+          });
+
+          var mine = (LIST[t.kind] ? LIST[t.kind]() : []).filter(function (r) {
+            return r && !r.sample && U.isUuid(r.id);
+          });
+          var seenHere = {};
+          var onlyHere = [];
+          var differ = [];
+          mine.forEach(function (r) {
+            seenHere[r.id] = 1;
+            if (!Object.prototype.hasOwnProperty.call(theirs, r.id)) {
+              onlyHere.push(r.title || r.name || r.subject || r.id);
+              return;
+            }
+            if (theirs[r.id] !== (r.updatedAt || '')) {
+              differ.push(r.title || r.name || r.subject || r.id);
+            }
+          });
+          var onlyThere = server.filter(function (r) { return !seenHere[r.id]; })
+            .map(function (r) {
+              return (r.body && (r.body.title || r.body.name || r.body.subject)) || r.id;
+            });
+
           rows.push({
             kind: t.kind,
             table: t.table,
+            noun: NOUN[t.kind] || t.kind,
             here: local[t.kind] || 0,
-            there: (server || []).length
+            there: server.length,
+            onlyHere: onlyHere,
+            onlyThere: onlyThere,
+            differ: differ
           });
         }).catch(function (err) {
           trouble = trouble || (t.table + ': ' + (err && err.message ? err.message : 'refused'));
-          rows.push({ kind: t.kind, table: t.table, here: local[t.kind] || 0,
-                      real: null, there: null });
+          rows.push({ kind: t.kind, table: t.table, noun: NOUN[t.kind] || t.kind,
+                      here: local[t.kind] || 0, there: null,
+                      onlyHere: [], onlyThere: [], differ: [] });
         });
       });
     });
@@ -745,6 +997,12 @@
 
   global.Sync = {
     now: now, start: start, status: status, subscribe: subscribe, diagnose: diagnose,
-    able: able, toRow: toRow, fromRow: fromRow
+    able: able, toRow: toRow, fromRow: fromRow,
+    // A full round on demand: what "Send everything again" and the drift
+    // warning both reach for.
+    reconcile: function (opts) {
+      unwritable = {};
+      return now({ full: true, loud: !!(opts && opts.loud) });
+    }
   };
 })(window);

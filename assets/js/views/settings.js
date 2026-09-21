@@ -338,17 +338,37 @@
       'council\u2019s server holds. They should match, except where this device is still ' +
       'running its own rehearsal \u2014 that is never uploaded.</p>';
 
+    /* Names, not just numbers. Nine here and nine there can be different
+       nines, and the council watched exactly that: both phones agreed on how
+       many activities there were and disagreed about which. */
+    var few = function (list) {
+      return list.slice(0, 3).map(U.esc).join(', ') +
+        (list.length > 3 ? ' and ' + (list.length - 3) + ' more' : '');
+    };
+
     body += '<div class="list">' + d.rows.map(function (r) {
-      var same = r.there !== null && r.here === r.there;
-      var missing = r.there !== null && r.there > r.here;
-      var unsent = r.there !== null && r.here > r.there;
+      var refused = r.there === null;
+      var out = (r.onlyHere || []).length;
+      var inn = (r.onlyThere || []).length;
+      var diff = (r.differ || []).length;
+      var agreed = !refused && !out && !inn && !diff;
+
+      var note = '';
+      if (out) note += '<div class="tiny" style="margin-top:3px">Only on this device: ' +
+        few(r.onlyHere) + '</div>';
+      if (inn) note += '<div class="tiny" style="margin-top:3px">Only on the server: ' +
+        few(r.onlyThere) + '</div>';
+      if (diff) note += '<div class="tiny" style="margin-top:3px">Different on each: ' +
+        few(r.differ) + '</div>';
+
       return '<div class="task"><span class="task-main" style="cursor:default">' +
         '<span class="task-title">' + U.esc(r.table) +
-          (r.there === null ? ' <span class="chip st-overdue"><span class="dot"></span>refused</span>'
-           : same ? ' <span class="chip st-done"><span class="dot"></span>agreed</span>'
-           : missing ? ' <span class="chip st-overdue"><span class="dot"></span>not here yet</span>'
-           : unsent ? ' <span class="chip st-on-hold"><span class="dot"></span>not sent</span>' : '') +
-        '</span>' +
+          (refused ? ' <span class="chip st-overdue"><span class="dot"></span>refused</span>'
+           : agreed ? ' <span class="chip st-done"><span class="dot"></span>agreed</span>'
+           : diff ? ' <span class="chip st-overdue"><span class="dot"></span>different</span>'
+           : out ? ' <span class="chip st-on-hold"><span class="dot"></span>not sent</span>'
+           : ' <span class="chip st-overdue"><span class="dot"></span>not here yet</span>') +
+        '</span>' + note +
         '<span class="task-meta">here ' + r.here +
           '<span class="sep">·</span>server ' +
           (r.there === null ? '—' : r.there) + '</span>' +
@@ -364,6 +384,8 @@
       '<strong>not sent</strong> means this device is holding work the server has not got \u2014 ' +
       'press <em>Send everything again</em>. <strong>not here yet</strong> means the server has ' +
       'work this device has not taken in \u2014 press <em>Sync now</em>. ' +
+      '<strong>different</strong> means both sides hold the record and disagree about it, ' +
+      'which <em>Send everything again</em> settles in favour of whichever was edited last. ' +
       '<strong>refused</strong> means the server would not answer, and the message above says why.</p>';
 
     UI.modal({
@@ -376,7 +398,9 @@
         var f = root.querySelector('[data-fix]');
         if (f) f.addEventListener('click', function () {
           Store.resetSyncMarks();
-          Sync.now({ loud: true }).then(function () { App.render(); });
+          // reconcile, not now: it also forgets every row set aside as refused,
+          // which is exactly what somebody pressing this is asking for.
+          Sync.reconcile({ loud: true }).then(function () { App.render(); });
         });
       }
     });
@@ -699,7 +723,7 @@
         Store.resetSyncMarks();
         rs.disabled = true;
         rs.textContent = 'Sending\u2026';
-        Sync.now({ loud: true }).then(function (st) {
+        Sync.reconcile({ loud: true }).then(function (st) {
           App.render();
           if (!st.error) {
             var l = st.last;

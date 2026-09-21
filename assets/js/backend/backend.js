@@ -402,11 +402,18 @@
           encodeURIComponent(u.id) + '&limit=1');
       }).then(function (rows) {
         var p = rows && rows[0];
+        /* No profile behind a token the server just accepted. It means one of
+           two opposite things and the caller knows which: somebody who has
+           made a login and has not been enrolled yet (signIn says so plainly),
+           or somebody who WAS enrolled and has been removed (refresh signs
+           them out). Null for both; the two callers read it differently. */
         if (!p) return null;
         p.unit_name = p.units ? p.units.name : '';
         p.unit_kind = p.units ? p.units.kind : '';
         if (p.active === false) {
-          throw new Error('That account has been removed. Ask a national executive to add you again.');
+          var off = new Error('That account has been removed. Ask a national executive to add you again.');
+          off.gone = true;
+          throw off;
         }
         // A volunteer's reach is the activities they were taken on for, so those
         // come back with the profile rather than being asked for separately.

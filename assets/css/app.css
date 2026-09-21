@@ -262,6 +262,13 @@ a { color: var(--gold-700); }
 .sync-state.is-ok, .sync-state.is-working { min-width: 92px; justify-content: center; }
 /* The only state worth interrupting anyone for, so it is the only loud one. */
 .sync-state.is-stuck { color: var(--st-overdue-fg); border-color: var(--st-overdue-bd); background: var(--st-overdue-bg); }
+/* In step with the server, behind it, or unable to reach it — three different
+   things that were all one green dot. "Behind" is the one that was invisible:
+   a round that finished without error while work sat on this phone and nowhere
+   else. Amber rather than red, because nothing is lost; not green, because it
+   is not fine. */
+.sync-state.is-behind { color: var(--st-forreview-fg); border-color: var(--st-forreview-bd); background: var(--st-forreview-bg); }
+.sync-state.is-behind, .sync-state.is-stuck { min-width: 92px; justify-content: center; }
 
 @keyframes sync-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .2; } }
 @media (prefers-reduced-motion: reduce) {
