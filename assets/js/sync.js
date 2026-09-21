@@ -255,28 +255,35 @@
        different", and the thing a green pill has never once been able to see. */
     var seen = since ? null : { unit: {}, person: {}, event: {}, task: {}, report: {}, letter: {}, office: {} };
 
-    function page(t, from, guard) {
-      return Backend.changed(t.table, from, PAGE).then(function (rows) {
+    /* Each page continues from the last (stamp, id) actually seen, so a page
+       edge falling inside a group of rows that share one stamp — which is
+       every batch a phone sends — no longer leaves the rest of the group
+       behind for ever. See Backend.changed. */
+    function page(t, from, after, guard) {
+      return Backend.changed(t.table, from, PAGE, null, after).then(function (rows) {
         rows = rows || [];
         var last = from;
+        var lastId = after;
         rows.forEach(function (row) {
           if (seen && row.id) seen[t.kind][row.id] = 1;
           var what = Store.applyRemote(t.kind, fromRow(t.kind, row));
           if (what === 'added') counts.added++;
           else if (what === 'updated') counts.updated++;
           if (row.updated_at && row.updated_at > high) high = row.updated_at;
-          if (row.updated_at) last = row.updated_at;
+          if (row.updated_at) { last = row.updated_at; lastId = row.id; }
         });
-        // A short page is the end of the table; an unmoved mark means the rest
-        // share one timestamp and asking again would fetch the same rows for ever.
-        if (rows.length < PAGE || last === from || guard <= 0) return null;
-        return page(t, last, guard - 1);
+        // A short page is the end of the table. An unmoved position means a
+        // server that ignored the continuation, and asking again would fetch
+        // the same rows for ever.
+        if (rows.length < PAGE || guard <= 0) return null;
+        if (last === from && lastId === after) return null;
+        return page(t, last, lastId, guard - 1);
       });
     }
 
     var chain = Promise.resolve();
     TABLES.forEach(function (t) {
-      chain = chain.then(function () { return page(t, askFrom, 40); });
+      chain = chain.then(function () { return page(t, askFrom, '', 40); });
     });
 
     // Deletions last: applying them after the records means a row deleted and
@@ -304,10 +311,11 @@
        which is the behaviour they have now rather than a new failure. */
     var delColumn = state.deletionColumn || 'synced_at';
 
-    function deletionPage(from, guard) {
-      return Backend.changed('deletions', from, PAGE, delColumn).then(function (rows) {
+    function deletionPage(from, after, guard) {
+      return Backend.changed('deletions', from, PAGE, delColumn, after).then(function (rows) {
         rows = rows || [];
         var last = from;
+        var lastId = after;
         rows.forEach(function (row) {
           if (Store.applyRemoteDeletion(row.entity, row.entity_id, row.deleted_at)) counts.removed++;
           /* The mark moves on the column that was ORDERED by, which is not
@@ -315,10 +323,11 @@
              one phone's wrong date into everybody's high-water mark. */
           var at = row[delColumn];
           if (at && at > delHigh) delHigh = at;
-          if (at) last = at;
+          if (at) { last = at; lastId = row.entity_id; }
         });
-        if (rows.length < PAGE || last === from || guard <= 0) return null;
-        return deletionPage(last, guard - 1);
+        if (rows.length < PAGE || guard <= 0) return null;
+        if (last === from && lastId === after) return null;
+        return deletionPage(last, lastId, guard - 1);
       }).catch(function (err) {
         /* No `synced_at` on this database yet. Say so once, drop back to the
            old column, and carry on — the whole round must not fail because one
@@ -327,14 +336,14 @@
           state.deletionColumn = 'deleted_at';
           delColumn = 'deleted_at';
           delHigh = '';
-          return deletionPage('', 40);
+          return deletionPage('', '', 40);
         }
         throw err;
       });
     }
 
     chain = chain.then(function () {
-      return deletionPage(askDelFrom, 40).catch(function (err) {
+      return deletionPage(askDelFrom, '', 40).catch(function (err) {
         /* Only a server that has never had the table gets a free pass — a
            council that has not run the sync migration yet. Anything else is a
            real fault, and swallowing it is how a deletion that never propagates

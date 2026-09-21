@@ -112,8 +112,18 @@ begin
   /* Not newer, so it has nothing to tell us. Skipped rather than refused: the
      device offering it is behaving correctly and a refusal would fail its whole
      round. Skipping also leaves updated_at alone, which stops fifty phones
-     making every other phone re-download the whole database once an hour. */
-  if old_stamp <> '' and new_stamp <> '' and new_stamp <= old_stamp then
+     making every other phone re-download the whole database once an hour.
+
+     Only for what a PHONE sends. A request from the app runs as `anon` or
+     `authenticated`; the database's own functions — switching somebody to a
+     username, a volunteer rejoining with a code — run as their owner, and
+     they stamp the record with the server's clock. If a phone with a fast
+     watch had touched that record last, its stamp is in the future, and the
+     server's own change would lose to it and vanish without a word. The
+     database is the authority on what it does itself; it is not asked to
+     out-date a phone's watch to be allowed to do it. */
+  if current_user in ('anon', 'authenticated')
+     and old_stamp <> '' and new_stamp <> '' and new_stamp <= old_stamp then
     return null;
   end if;
 

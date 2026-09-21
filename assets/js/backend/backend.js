@@ -440,10 +440,31 @@
        The column is named by the caller because not every table calls it the
        same thing: a deletion has a `deleted_at` and no `updated_at` at all, and
        asking for one it does not have is a 400 rather than an empty list. */
-    changed: function (table, since, limit, column) {
+    /* Continued from a (stamp, id) pair, not a stamp alone.
+
+       Postgres stamps every row of one request with the same time — a phone
+       sends fifty tasks at once, and all fifty share it. A page of 500 that
+       ends in the middle of such a group used to ask next for "newer than the
+       last stamp", and the rest of the group is not newer. Those rows were
+       never asked for again: not the next round, not the next full round,
+       which draws the page edge in exactly the same place. A new phone joining
+       a council with more than 500 of anything could be missing a batch's
+       worth of it for good, and say Synced.
+
+       So the order has a tiebreak — the id — and the next page starts after
+       the last (stamp, id) actually seen. That is exact: nothing is skipped
+       and nothing is asked for twice. */
+    changed: function (table, since, limit, column, afterId) {
       var col = column || 'updated_at';
-      var q = '/rest/v1/' + table + '?select=*&order=' + col + '.asc&limit=' + (limit || 500);
-      if (since) q += '&' + col + '=gt.' + encodeURIComponent(since);
+      var idCol = table === 'deletions' ? 'entity_id' : 'id';
+      var q = '/rest/v1/' + table + '?select=*&order=' + col + '.asc,' + idCol + '.asc' +
+        '&limit=' + (limit || 500);
+      if (since && afterId) {
+        q += '&or=' + encodeURIComponent('(' + col + '.gt."' + since + '",and(' +
+          col + '.eq."' + since + '",' + idCol + '.gt."' + afterId + '"))');
+      } else if (since) {
+        q += '&' + col + '=gt.' + encodeURIComponent(since);
+      }
       return sbFetch(q);
     },
 
@@ -719,9 +740,9 @@
       var d = driver();
       return d.removeMember ? d.removeMember(email) : d.withdraw(email);
     },
-    changed: function (t, since, limit, column) {
+    changed: function (t, since, limit, column, afterId) {
       var d = driver();
-      return d.changed ? d.changed(t, since, limit, column) : Promise.resolve([]);
+      return d.changed ? d.changed(t, since, limit, column, afterId) : Promise.resolve([]);
     },
     upsert: function (t, rows) {
       var d = driver();

@@ -122,9 +122,10 @@ function makeServer() {
        400 while these tests passed: a deleted task came back on every other
        phone, for ever, and nothing anywhere said so. A stand-in that is kinder
        than the real thing is worse than no stand-in at all. */
-    changed(table, since, limit, column) {
+    changed(table, since, limit, column, afterId) {
       const key = column || 'updated_at';
-      this.requests.push({ op: 'changed', table, since, key });
+      const idKey = table === 'deletions' ? 'entity_id' : 'id';
+      this.requests.push({ op: 'changed', table, since, key, afterId });
       const cols = COLUMNS[table] || [];
       if (cols.indexOf(key) < 0) {
         const e = new Error('column ' + table + '.' + key + ' does not exist');
@@ -136,10 +137,19 @@ function makeServer() {
          server applies — and every consequence of a page ending early — was
          never once exercised here. A stand-in more generous than the real thing
          hides exactly the faults it exists to catch. */
+      /* Ordered by the stamp and then the id, and continued from a (stamp, id)
+         pair when one is given — `or=(col.gt.X,and(col.eq.X,id.gt.Y))`, which
+         is what the client sends once a page comes back full. */
       return Promise.resolve(Object.keys(tables[table] || {})
         .map((k) => tables[table][k])
-        .filter((r) => !since || String(r[key]) > String(since))
-        .sort((a, b) => String(a[key]).localeCompare(String(b[key])))
+        .filter((r) => {
+          if (!since) return true;
+          const a = String(r[key]), b = String(since);
+          if (afterId) return a > b || (a === b && String(r[idKey]) > String(afterId));
+          return a > b;
+        })
+        .sort((a, b) => String(a[key]).localeCompare(String(b[key])) ||
+                        String(a[idKey]).localeCompare(String(b[idKey])))
         .slice(0, limit || 500));
     },
     upsert(table, rows) {
@@ -239,6 +249,14 @@ function makeServer() {
         }
       }
 
+      /* One stamp for the whole request. now() in Postgres is the moment the
+         transaction started, so every row in one upsert of fifty shares it.
+         This stand-in used to hand each row its own, strictly increasing — so
+         a page of 500 could never end in the middle of a group sharing one
+         stamp, and the rows that fell past that edge were never tested. They
+         were being lost in the field: the next page asks for "newer than" the
+         last stamp seen, and the rest of the group is not newer. */
+      const wall = now();
       rows.forEach((r) => {
         const key = table === 'deletions' ? r.entity + ':' + r.entity_id : r.id;
         /* A deep copy, because a real server does not share memory with the
@@ -259,7 +277,6 @@ function makeServer() {
              What the real server does now (sync3.sql): keep the earliest
              account of when it happened, never let it be in the future, and
              stamp a separate arrival time that the pull actually pages by. */
-          const wall = now();
           let at = stamped.deleted_at || wall;
           if (String(at) > String(wall)) at = wall;
           if (held && held.deleted_at && String(held.deleted_at) < String(at)) at = held.deleted_at;
@@ -291,7 +308,7 @@ function makeServer() {
             stamped.body = Object.assign({}, held.body, stamped.body);
           }
         }
-        stamped.updated_at = now();
+        stamped.updated_at = wall;
         tables[table][key] = stamped;
       });
       return Promise.resolve([]);
@@ -339,7 +356,7 @@ function makeDevice(server, name) {
     myUnitId: () => w.Store.nationalUnitId()
   };
   w.Backend = {
-    changed: (t, s2, l, c) => server.changed(t, s2, l, c),
+    changed: (t, s2, l, c, after) => server.changed(t, s2, l, c, after),
     upsert: (t, r) => server.upsert(t, r),
     remove: (t, i) => server.remove(t, i),
     serverNow: () => server.serverNow(),
@@ -2326,6 +2343,90 @@ function makeDevice(server, name) {
     st = Gov2.Sync.status();
     check('and "Send everything again" clears it once the server relents',
       st.drift && st.drift.total === 0, JSON.stringify(st.drift));
+  }
+
+  console.log('\n--- a page that ends inside a batch does not lose the rest of it ---');
+  {
+    /* A phone sends its work fifty rows at a time, and Postgres stamps all
+       fifty with one time. The pull reads 500 rows a page and asks for the next
+       page as "newer than the last stamp I saw" — so when row 500 sits in the
+       middle of a batch, the rest of that batch is not newer, and it is never
+       asked for. Not this round, not the next full round (which draws the page
+       edge in exactly the same place), not ever. A new phone joining the
+       council simply never receives those tasks, and says Synced. */
+    const sT2 = makeServer();
+    const Maker = makeDevice(sT2, 'Maker');
+    const unit = Maker.S.nationalUnitId();
+    const ev = Maker.S.addEvent({ title: 'A big term', unitId: unit });
+    await Maker.Sync.now();
+
+    /* Built directly, so the page edge lands where the field would put it and
+       not wherever this run happens to: a first request of 30, then requests
+       of 50. Row 500 is the 20th row of the eleventh batch, so 30 rows share
+       its stamp and sit past the edge. */
+    const base = Date.now() + 60000;
+    let n = 0;
+    const batch = (size, b) => {
+      const stamp = new Date(base + b).toISOString();
+      for (let i = 0; i < size; i++, n++) {
+        const id = require('crypto').randomUUID();
+        sT2.tables.tasks[id] = {
+          id, event_id: ev.id, title: 'Task ' + n, status: 'Not Started',
+          body: { id, eventId: ev.id, title: 'Task ' + n, status: 'Not Started', priority: 'Medium',
+                  createdAt: stamp, updatedAt: stamp },
+          updated_at: stamp
+        };
+      }
+    };
+    batch(30, 0);
+    for (let b = 1; b <= 21; b++) batch(50, b);
+    const onServer = Object.keys(sT2.tables.tasks).length;
+    check('the server holds every task', onServer === 1080, onServer + ' on the server');
+
+    const Fresh = makeDevice(sT2, 'New phone');
+    await Fresh.Sync.now();
+    const got = Fresh.S.tasks().length;
+    check('a new phone receives all of them, not all but a page edge’s worth',
+      got === 1080, got + ' of 1080 arrived');
+    await Fresh.Sync.now({ full: true });
+    check('and a full round agrees', Fresh.S.tasks().length === 1080,
+      Fresh.S.tasks().length + ' after a full round');
+    const st = Fresh.Sync.status();
+    check('with nothing stranded either way', !st.drift || st.drift.total === 0,
+      JSON.stringify(st.drift));
+  }
+
+  console.log('\n--- every old tombstone arrives after the migration stamps them all at once ---');
+  {
+    /* When sync3.sql added `synced_at`, every tombstone already in the table
+       was given the same value — the moment the migration ran. That is the
+       state of the council's database now. Paged by "newer than the last
+       stamp", a phone would take the first 500 of them and never be offered
+       the rest: the next ask is for something newer than a stamp they all
+       share. */
+    const sG = makeServer();
+    const G = makeDevice(sG, 'Catching up');
+    const unit = G.S.nationalUnitId();
+    const ev = G.S.addEvent({ title: 'Many errands', unitId: unit });
+    const ids = [];
+    for (let i = 0; i < 1200; i++) {
+      ids.push(G.S.addTask({ kind: 'event', eventId: ev.id, title: 'Errand ' + i }).id);
+    }
+    await G.Sync.now();
+    check('the phone holds them all to begin with', ids.every((id) => !!G.S.task(id)));
+
+    const migratedAt = sG.now();
+    ids.forEach((id) => {
+      delete sG.tables.tasks[id];
+      sG.tables.deletions['task:' + id] = {
+        entity: 'task', entity_id: id, unit_id: unit,
+        deleted_at: '2026-08-01T00:00:00.000Z', synced_at: migratedAt, deleted_by: 'President'
+      };
+    });
+
+    await G.Sync.now({ full: true });
+    const left = ids.filter((id) => !!G.S.task(id)).length;
+    check('every one of them arrives, not the first 500', left === 0, left + ' still on the phone');
   }
 
   console.log('\n--- a database that has not had the migration yet still works ---');
