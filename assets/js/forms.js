@@ -63,7 +63,14 @@
     };
 
 
-    var body =
+    /* Most activities are one the council has held before. Offered at the top
+       of a new one, never forced: a blank form is still one click away. */
+    var body = (isNew && !dir && global.Templates
+        ? '<div class="hint-card" style="margin-bottom:16px">' + UI.icon('template') +
+          '<span>Holding a seminar, an assembly or a competition? ' +
+          '<button type="button" class="linkish" data-use-template>Start from a template</button> ' +
+          'and the usual tasks are suggested for you.</span></div>'
+        : '') +
       field({
         name: 'title', label: dir ? 'Directive' : 'Event title', required: true,
         control: '<input type="text" id="f-title" data-autofocus maxlength="120" value="' + U.esc(e.title) +
@@ -127,6 +134,8 @@
         '<button type="button" class="btn btn-primary" data-save>' +
         (isNew ? 'Create ' + noun : 'Save changes') + '</button>',
       onMount: function (root, close) {
+        var useTpl = root.querySelector('[data-use-template]');
+        if (useTpl) useTpl.addEventListener('click', function () { close(); Templates.pick(); });
         function submit() {
           clearErrors(root);
           var data = {
@@ -159,14 +168,17 @@
             return showError(root, 'dateEnd', 'The end date cannot be before the start date.');
           }
           if (isNew) {
-            var created = Store.addEvent(data);
+            var created;
+            try { created = Store.addEvent(data); }
+            catch (err) { return showError(root, 'dateStart', err.message); }
             close();
             UI.toast(dir ? 'Directive created.' : 'Event created.');
             // Straight into it, ready for its first task.
             global.ViewEventDetail.openAddTaskOnLoad();
             App.go('#/events/' + created.id);
           } else {
-            Store.updateEvent(eventId, data);
+            try { Store.updateEvent(eventId, data); }
+            catch (err2) { return showError(root, 'dateStart', err2.message); }
             close();
             UI.toast(dir ? 'Directive saved.' : 'Event saved.');
           }
@@ -250,6 +262,7 @@
       body: body,
       footer:
         '<button type="button" class="btn btn-danger left" data-delete>' + UI.icon('trash') + 'Delete</button>' +
+        '<button type="button" class="btn btn-ghost" data-history>' + UI.icon('history') + 'History</button>' +
         '<button type="button" class="btn" data-close>Cancel</button>' +
         '<button type="button" class="btn btn-primary" data-save>Save changes</button>',
       onMount: function (root, close) {
@@ -280,6 +293,9 @@
           UI.toast('Task saved.');
         });
 
+        root.querySelector('[data-history]').addEventListener('click', function () {
+          Workspace.history('task', taskId, t.title);
+        });
         root.querySelector('[data-delete]').addEventListener('click', function () {
           UI.confirm({
             title: 'Delete this task?',
@@ -343,9 +359,13 @@
     UI.modal({
       title: mine ? 'Your task' : 'Task',
       body: body,
-      footer: '<button type="button" class="btn" data-close>' + (mine ? 'Cancel' : 'Close') + '</button>' +
+      footer: '<button type="button" class="btn btn-ghost left" data-history>' + UI.icon('history') + 'History</button>' +
+        '<button type="button" class="btn" data-close>' + (mine ? 'Cancel' : 'Close') + '</button>' +
         (mine ? '<button type="button" class="btn btn-primary" data-save>Save</button>' : ''),
       onMount: function (root, close) {
+        root.querySelector('[data-history]').addEventListener('click', function () {
+          Workspace.history('task', taskId, t.title);
+        });
         var sel = root.querySelector('#f-status');
         if (!sel) return;
         var wrap = root.querySelector('#blocked-wrap');
@@ -1059,6 +1079,8 @@
   function letterSteps(l, opts) {
     opts = opts || {};
     if (!l || l.status !== 'Routing') return '';
+    // Nothing is recorded on a letter from an archived year.
+    if (Store.isLocked('letter', l)) return '';
     var s = Store.currentStop(l);
     if (!s) return '';
     var here = Store.stopName(s);
@@ -2874,6 +2896,7 @@
       footer: '<button type="button" class="btn" data-close>Cancel</button>' +
         '<button type="button" class="btn btn-primary" data-save>' + (isNew ? 'Add person' : 'Save changes') + '</button>',
       onMount: function (root, close) {
+        var dupWarned = '';
         function submit() {
           clearErrors(root);
           var data = {
@@ -2884,6 +2907,20 @@
           var uSel = root.querySelector('#f-unit');
           if (uSel) data.unitId = uSel.value;
           if (!data.name) return showError(root, 'name', 'Enter their name.');
+
+          /* The same name, written any way round, already in this unit. Asked
+             once rather than refused: two real people can share a name, and
+             only the person typing knows which this is. */
+          var key = U.nameKey(data.name);
+          var twin = Store.people({ unitId: data.unitId || (d.unitId || myUnit) }).filter(function (x) {
+            return x.id !== personId && U.nameKey(x.name) === key;
+          })[0];
+          if (twin && dupWarned !== key) {
+            dupWarned = key;
+            return showError(root, 'name', twin.name + ' is already in the directory for ' +
+              Store.unitName(twin.unitId) + '. If this is somebody else with the same name, press ' +
+              (isNew ? 'Add person' : 'Save changes') + ' again.');
+          }
 
           var accSel = root.querySelector('#f-access');
           data.access = accSel && accSel.value === 'volunteer' ? 'volunteer' : 'officer';

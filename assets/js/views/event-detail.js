@@ -17,6 +17,7 @@
   function openAddTaskOnLoad() { state.addOpen = true; state.draft = null; state.focusAfterRender = true; }
 
   function canEdit(e) {
+    if (Store.isLocked('event', e)) return false;
     if (!global.Auth || !Auth.signedIn()) return true;
     return Auth.canEditEvent(e.id);
   }
@@ -60,13 +61,14 @@
              accomplishment report the OSA asks for. Two buttons with one name is
              how somebody files the wrong thing. */
           '<button type="button" class="btn" data-export>' + UI.icon('pdf') + 'Task list (PDF)</button>' +
-          (mine
-            ? '<button type="button" class="icon-btn" data-more aria-label="Event options" aria-haspopup="menu">' +
-              UI.icon('more') + '</button>'
-            : '') +
+          /* Always there now: even somebody who may only read this activity can
+             see its history, and may copy it as a starting point of their own. */
+          '<button type="button" class="icon-btn" data-more aria-label="Event options" aria-haspopup="menu">' +
+            UI.icon('more') + '</button>' +
         '</div>' +
       '</div>' +
-      (mine ? '' :
+      (global.Workspace ? Workspace.lockedNote('event', e) : '') +
+      (mine || Store.isLocked('event', e) ? '' :
         '<div class="readonly-note">' + UI.icon('alert') +
         '<span>This is <strong>' + U.esc(owner ? owner.name : 'another unit') + '</strong>&rsquo;s activity. ' +
         'You can read everything here; only they can change it.</span></div>') +
@@ -81,7 +83,7 @@
 
     html += cancelledBanner(e, mine);
     html += feedbackBanner(e, mine);
-    html += reportBanner(e, s);
+    html += reportBanner(e, s, mine);
 
     var letterCount = Store.letters({ eventId: e.id }).length;
     var volCount = Store.volunteersFor(e.id).length;
@@ -226,7 +228,8 @@
 
   /* Once the tasks are finished the activity is not finished — the report is the
      last piece. This is where that hand-off happens. */
-  function reportBanner(e, s) {
+  function reportBanner(e, s, mine) {
+    var locked = Store.isLocked('event', e);
     // Nothing was held, or nothing was an activity: either way, no report.
     if (Store.isCancelled(e) || Store.isDirectiveSet(e)) return '';
     var tasksDone = s.total > 0 && s.pending === 0;
@@ -243,9 +246,9 @@
       return '<div class="report-banner">' +
         '<div class="rb-title">Every task is done.</div>' +
         '<div class="rb-sub">Confirm the activity is finished and the accomplishment report becomes the last step.</div>' +
-        '<div class="row" style="margin-top:12px">' +
+        (mine ? '<div class="row" style="margin-top:12px">' +
         '<button type="button" class="btn btn-primary" data-mark-complete>' + UI.icon('check') +
-        'Activity is completed</button></div></div>';
+        'Activity is completed</button></div>' : '') + '</div>';
     }
 
     // Overall progress: the tasks are 90% of the job, the report is the last 10%.
@@ -267,10 +270,11 @@
                              : 'Not started. This is the last thing left.')) +
           '</div>' +
         '</div>' +
-        '<button type="button" class="btn ' + (ready ? 'btn-go ' : '') +
+        // A closed year's report is a record: its link is below, and nothing is edited.
+        (locked ? '' : '<button type="button" class="btn ' + (ready ? 'btn-go ' : '') +
         'btn-primary" data-open-report>' + UI.icon('pdf') +
         (filed ? 'Open report' : ready ? 'Export it' : p.done ? 'Continue report' : 'Start report') +
-        '</button>' +
+        '</button>') +
       '</div>' +
       '<div class="progress-row" style="margin-top:12px">' +
         '<div class="progress' + (overall === 100 ? ' is-complete' : '') + '" role="progressbar" ' +
@@ -536,19 +540,33 @@
     if (more) more.addEventListener('click', function () {
       var isDir = Store.isDirectiveSet(e);
       var noun = isDir ? 'directive' : 'event';
+      var mine = canEdit(e);
+      var creates = !global.Auth || !Auth.signedIn() || Auth.canCreate();
       var items =
-        '<button type="button" data-set="edit">' + UI.icon('edit') + 'Edit ' + noun + '</button>' +
-        (isDir ? ''
-          : Store.isCancelled(e)
-            ? '<button type="button" data-set="reschedule">' + UI.icon('calendar') + 'Put it back on</button>'
-            : '<button type="button" data-set="cancel">' + UI.icon('close') + 'Cancel this activity</button>') +
-        (e.status === 'Archived'
-          ? '<button type="button" data-set="unarchive">' + UI.icon('archive') + 'Restore from archive</button>'
-          : '<button type="button" data-set="archive">' + UI.icon('archive') + 'Archive ' + noun + '</button>') +
-        '<div class="sep"></div>' +
-        '<button type="button" class="danger" data-set="delete">' + UI.icon('trash') +
-        'Delete ' + noun + '</button>';
+        (mine
+          ? '<button type="button" data-set="edit">' + UI.icon('edit') + 'Edit ' + noun + '</button>' +
+            (isDir ? ''
+              : Store.isCancelled(e)
+                ? '<button type="button" data-set="reschedule">' + UI.icon('calendar') + 'Put it back on</button>'
+                : '<button type="button" data-set="cancel">' + UI.icon('close') + 'Cancel this activity</button>') +
+            (e.status === 'Archived'
+              ? '<button type="button" data-set="unarchive">' + UI.icon('archive') + 'Restore from archive</button>'
+              : '<button type="button" data-set="archive">' + UI.icon('archive') + 'Archive ' + noun + '</button>')
+          : '') +
+        (creates
+          ? '<button type="button" data-set="duplicate">' + UI.icon('copy') + 'Duplicate ' + noun + '</button>' +
+            (isDir ? '' : '<button type="button" data-set="template">' + UI.icon('template') + 'Save as a template</button>')
+          : '') +
+        '<button type="button" data-set="history">' + UI.icon('history') + 'Activity history</button>' +
+        (mine
+          ? '<div class="sep"></div>' +
+            '<button type="button" class="danger" data-set="delete">' + UI.icon('trash') +
+            'Delete ' + noun + '</button>'
+          : '');
       UI.openMenu(more, items, function (action) {
+        if (action === 'history') return Workspace.history('event', e.id, e.title);
+        if (action === 'duplicate') return Templates.duplicateDialog(e.id);
+        if (action === 'template') return Templates.saveFromEvent(e.id);
         if (action === 'edit') return Forms.eventForm(e.id);
         if (action === 'cancel') return Forms.cancelEventForm(e.id);
         if (action === 'reschedule') return Forms.rescheduleEventForm(e.id);

@@ -141,13 +141,21 @@
     return me.access === 'officer' && unitId === myUnitId();
   }
 
+  /* An archived academic year is read-only for everybody, the President
+     included, until the President opens it for corrections. Asked here so
+     every screen that already asks "may I edit this" gets the answer free. */
+  function locked(kind, rec) {
+    return !!(Store.isLocked && Store.isLocked(kind, rec));
+  }
+
   function canEditEvent(eventId) {
     var e = Store.event(eventId);
-    return !!e && canEditUnit(e.unitId);
+    return !!e && canEditUnit(e.unitId) && !locked('event', e);
   }
 
   function canEditTask(t) {
     if (!me || !t) return false;
+    if (locked('task', t)) return false;
     if ((t.kind || 'event') === 'directive') return isNational();
     if (isVolunteer()) return canSee(t.eventId);
     return canEditEvent(t.eventId);
@@ -176,7 +184,59 @@
 
   /* Changing a task's status: whoever may edit it, and whoever holds it. */
   function canUpdateTask(t) {
-    return canEditTask(t) || isMyTask(t);
+    return canEditTask(t) || (isMyTask(t) && !locked('task', t));
+  }
+
+  /* A letter is its unit's to record, while its year is open. */
+  function canEditLetter(l) {
+    if (!l || locked('letter', l)) return false;
+    if (isOffline() || !me) return true;
+    return canEditUnit(l.unitId);
+  }
+
+  /* ---------- the workspace update ---------- */
+
+  /* The Bulletin Board is the FCUSR Nationals' voice. Any national officer may
+     post to it; nobody else, whatever their position says. Offline there is
+     one device and it is treated as national, as everywhere else. */
+  function canPublishBulletin() {
+    if (!me) return isOffline();
+    return isNational();
+  }
+
+  /* Closing an academic year, opening one for corrections, and saying when the
+     year starts: the President's, like the closing date. */
+  function canManageYears() {
+    if (!me) return isOffline();
+    if (isOffline()) return isNational();
+    return isPresident();
+  }
+
+  /* The term report reads the whole Republic, so it is the National officers'. */
+  function canExportTermReport() {
+    if (!me) return isOffline();
+    return isNational();
+  }
+
+  /* A unit's officers keep their unit's templates. Sharing one with every unit
+     is the National government's decision. */
+  function canEditTemplate(t) {
+    if (!t) return false;
+    if (!me) return isOffline();
+    if (isVolunteer()) return false;
+    if (t.shared && !isNational()) return false;
+    return me.access === 'officer' && (!t.unitId || t.unitId === myUnitId());
+  }
+
+  function canShareTemplates() {
+    if (!me) return isOffline();
+    return isNational();
+  }
+
+  /* Whether this person may start new work at all: an officer, not a helper. */
+  function canCreate() {
+    if (!me) return true;
+    return me.access === 'officer';
   }
 
   /* A letter follows the same rule as an event: it belongs to a unit, and the
@@ -500,6 +560,10 @@
     canEnrolVolunteers: canEnrolVolunteers, canSeeLetter: canSeeLetter,
     canEditUnit: canEditUnit, canEditEvent: canEditEvent, canEditTask: canEditTask,
     canUpdateTask: canUpdateTask, isMyTask: isMyTask, myPerson: myPerson,
+    canEditLetter: canEditLetter, canPublishBulletin: canPublishBulletin,
+    canManageYears: canManageYears, canExportTermReport: canExportTermReport,
+    canEditTemplate: canEditTemplate, canShareTemplates: canShareTemplates,
+    canCreate: canCreate,
     visibleEvents: visibleEvents, canSee: canSee, eventIdsFor: eventIdsFor,
     myUnitId: myUnitId,
     signIn: signIn, signUp: signUp, signOut: signOut, joinWithCode: joinWithCode,

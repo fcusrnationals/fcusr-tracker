@@ -462,7 +462,12 @@ const FILES = [
   'assets/js/auth.js', 'assets/js/term-ui.js', 'assets/js/term-pdf.js', 'assets/js/letter-slip.js', 'assets/js/roster-pdf.js', 'assets/js/views/signin.js', 'assets/js/views/dashboard.js', 'assets/js/views/mytasks.js',
   'assets/js/views/directives.js', 'assets/js/views/events.js', 'assets/js/views/event-detail.js',
   'assets/js/views/letters.js', 'assets/js/views/letter-detail.js',
-  'assets/js/views/settings.js', 'assets/js/forms.js', 'assets/js/app.js'
+  'assets/js/views/settings.js',
+  // The workspace update: loaded before forms.js and app.js, as in index.html.
+  'assets/js/workspace.js', 'assets/js/notify.js', 'assets/js/palette.js', 'assets/js/templates.js',
+  'assets/js/views/bulletin.js', 'assets/js/views/calendar.js', 'assets/js/views/people.js',
+  'assets/js/views/tools.js', 'assets/js/views/archive.js',
+  'assets/js/forms.js', 'assets/js/app.js'
 ];
 
 (async function main() {

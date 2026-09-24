@@ -209,6 +209,62 @@
   var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   function isUuid(v) { return typeof v === 'string' && UUID_RE.test(v); }
 
+  /* The same uuid for the same words, on every phone.
+
+     An acknowledgement is one person saying they have read one announcement.
+     Minted at random, the same person pressing the button on their phone and
+     again on the office laptop would be two records and counted twice. Derived
+     from the pair instead, both devices make the one id, and the second simply
+     arrives as the same record.
+
+     Four 32-bit FNV-1a passes with different seeds. Not cryptographic, and it
+     does not need to be: it only has to agree with itself. */
+  function hashUuid(text) {
+    var s = String(text || '');
+    var seeds = [0x811c9dc5, 0x01000193, 0x9e3779b9, 0x85ebca6b];
+    var hex = seeds.map(function (seed) {
+      var h = seed >>> 0;
+      for (var i = 0; i < s.length; i++) {
+        h ^= s.charCodeAt(i);
+        h = Math.imul(h, 16777619) >>> 0;
+      }
+      h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995) >>> 0; h ^= h >>> 15;
+      return (h >>> 0).toString(16);
+    }).map(function (x) { return ('00000000' + x).slice(-8); }).join('');
+    // Shaped as a version-5 uuid, so it reads as a derived one to anybody looking.
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-5' + hex.slice(13, 16) + '-' +
+      ((parseInt(hex.charAt(16), 16) & 0x3) | 0x8).toString(16) + hex.slice(17, 20) + '-' +
+      hex.slice(20, 32);
+  }
+
+  /* The Manila calendar day a moment fell on. A stamp is UTC, and slicing it
+     would put anything done after 4 PM here on the next day's date. */
+  function dayOf(isoTime) {
+    if (!isoTime) return '';
+    var d = new Date(isoTime);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(d);
+  }
+
+  // "3:45 PM" in Manila.
+  function fmtTime(isoTime) {
+    if (!isoTime) return '';
+    var d = new Date(isoTime);
+    if (isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: TZ, hour: 'numeric', minute: '2-digit', hour12: true
+    }).format(d);
+  }
+
+  // "Sep 2" this year, "Sep 2, 2025" otherwise — how a history line reads.
+  function fmtWhen(isoTime) {
+    var day = dayOf(isoTime);
+    if (!day) return '';
+    return day.slice(0, 4) === today().slice(0, 4) ? fmtDateTiny(day) : fmtDateShort(day);
+  }
+
   /* ---------- sign-in names ----------
 
      A login is a username the system makes from somebody's name. Supabase will
@@ -320,6 +376,7 @@
     addDays: addDays, endOfWeek: endOfWeek, startOfMonth: startOfMonth, isWithin: isWithin,
     fmtRange: fmtRange, countdown: countdown,
     esc: esc, plural: plural, initials: initials, pct: pct, slug: slug, uid: uid, isUuid: isUuid,
+    hashUuid: hashUuid, dayOf: dayOf, fmtTime: fmtTime, fmtWhen: fmtWhen,
     el: el, els: els, on: on, debounce: debounce
   };
 })(window);
