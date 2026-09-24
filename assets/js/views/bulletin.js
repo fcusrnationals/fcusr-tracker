@@ -16,6 +16,7 @@
   'use strict';
 
   var state = { previousOpen: false };
+  var PRIORITY_RANK = { Urgent: 0, Important: 1, Normal: 2 };
 
   function canPost() { return !global.Auth || Auth.canPublishBulletin(); }
   function profileId() { return global.Auth && Auth.signedIn() ? Auth.current().id : 'local'; }
@@ -79,9 +80,12 @@
     if (canPost()) {
       var st = Store.ackStatus(a.id);
       var pct = st.total ? Math.round(st.done.length / st.total * 100) : 0;
-      html += '<div class="bb-ack-count"><strong>' + st.done.length + ' of ' + st.total + '</strong> acknowledged' +
+      /* With nobody in the audience holding a sign-in yet (a rehearsal, or a
+         directory still being filled in) there is no "of", only a count. */
+      html += '<div class="bb-ack-count"><strong>' + (st.total ? st.done.length + ' of ' + st.total : st.count) +
+        '</strong> acknowledged' +
         '<button type="button" class="linkish" data-ack-who="' + U.esc(a.id) + '">See who</button></div>' +
-        '<div class="progress"><span style="width:' + pct + '%"></span></div>';
+        (st.total ? '<div class="progress"><span style="width:' + pct + '%"></span></div>' : '');
     }
     html += mine
       ? '<div class="bb-acked">' + UI.icon('check') + 'You confirmed you read this · ' + U.esc(U.fmtWhen(mine.at)) + '</div>'
@@ -95,21 +99,23 @@
     var st = Store.announcementState(a);
     var long = !opts.full && (a.message || '').length > 320;
     var locked = Store.isLocked('announcement', a);
-    return '<article class="bb-card prio-' + a.priority.toLowerCase() + (st !== 'active' ? ' is-' + st : '') + '" ' +
-      'id="ann-' + U.esc(a.id) + '">' +
-      '<div class="bb-top">' +
-        '<div class="bb-tags">' +
-          (a.pinned && st === 'active' ? '<span class="chip chip-plain">' + UI.icon('pin') + 'Pinned</span>' : '') +
-          (a.priority !== 'Normal' ? '<span class="chip bb-prio">' + U.esc(a.priority) + '</span>' : '') +
-          (st === 'draft' ? '<span class="chip st-not-started">Draft</span>' : '') +
-          (st === 'scheduled' ? '<span class="chip st-in-progress">Scheduled</span>' : '') +
-          (a.requireAck ? '<span class="chip chip-plain">Please confirm</span>' : '') +
-        '</div>' +
-        (canPost() && !locked
-          ? '<button type="button" class="icon-btn" data-ann-more="' + U.esc(a.id) + '" aria-label="Options for ' +
-            U.esc(a.title) + '" aria-haspopup="menu">' + UI.icon('more') + '</button>'
-          : '') +
-      '</div>' +
+    var tags = (a.pinned && st === 'active' ? '<span class="chip chip-plain">' + UI.icon('pin') + 'Pinned</span>' : '') +
+      (a.priority !== 'Normal' ? '<span class="chip bb-prio">' + U.esc(a.priority) + '</span>' : '') +
+      (st === 'draft' ? '<span class="chip st-not-started">Draft</span>' : '') +
+      (st === 'scheduled' ? '<span class="chip st-in-progress">Scheduled</span>' : '') +
+      (a.requireAck ? '<span class="chip chip-plain">Please confirm</span>' : '');
+    var more = canPost() && !locked
+      ? '<button type="button" class="icon-btn" data-ann-more="' + U.esc(a.id) + '" aria-label="Options for ' +
+        U.esc(a.title) + '" aria-haspopup="menu">' + UI.icon('more') + '</button>'
+      : '';
+    // A plain announcement has no tags; its menu then sits beside the title
+    // rather than above an empty row.
+    return '<article class="bb-card prio-' + a.priority.toLowerCase() + (st !== 'active' ? ' is-' + st : '') +
+      (!tags && more ? ' has-bare-menu' : '') + '" id="ann-' + U.esc(a.id) + '">' +
+      (tags || more
+        ? '<div class="bb-top' + (tags ? '' : ' is-bare') + '">' +
+          (tags ? '<div class="bb-tags">' + tags + '</div>' : '') + more + '</div>'
+        : '') +
       '<h2 class="bb-title">' + (opts.full ? U.esc(a.title)
         : '<a href="#/bulletin/' + U.esc(a.id) + '">' + U.esc(a.title) + '</a>') + '</h2>' +
       '<div class="bb-meta">' + U.esc(when(a)) + '<span class="sep">·</span>For ' + U.esc(audienceText(a)) +
@@ -135,7 +141,10 @@
     });
     var active = all.filter(function (a) { return Store.announcementState(a) === 'active'; });
     var pinned = active.filter(function (a) { return a.pinned; });
-    var current = active.filter(function (a) { return !a.pinned; });
+    // Urgent before Important before the rest; newest first within each.
+    var current = active.filter(function (a) { return !a.pinned; }).sort(function (x, y) {
+      return PRIORITY_RANK[x.priority] - PRIORITY_RANK[y.priority];
+    });
     var previous = all.filter(function (a) { return Store.announcementState(a) === 'expired'; });
     var archived = Workspace.viewingArchive();
 
@@ -307,6 +316,23 @@
           '<span class="rs">' + U.esc(Store.unitName(r.person.unitId)) +
           (done ? ' · ' + U.esc(U.fmtWhen(r.ack.at)) : '') + '</span></span></div>';
       }).join('') + '</div>';
+    }
+    if (!st.total) {
+      var got = Store.acks(aid);
+      UI.modal({
+        title: 'Who has read it',
+        body: '<p class="small" style="margin-top:0">Nobody in the audience has a sign-in yet, so there is no ' +
+          'list to count against. Confirmations so far:</p>' +
+          (got.length
+            ? '<div class="list">' + got.map(function (k) {
+                return '<div class="result-item" style="cursor:default">' + UI.icon('check') +
+                  '<span class="rt"><span class="strong">' + U.esc(k.name || k.email || 'Someone') + '</span>' +
+                  '<span class="rs">' + U.esc(U.fmtWhen(k.at)) + '</span></span></div>';
+              }).join('') + '</div>'
+            : '<p class="small muted">Nobody yet.</p>'),
+        footer: '<button type="button" class="btn btn-primary" data-close>Done</button>'
+      });
+      return;
     }
     UI.modal({
       title: 'Who has read it',

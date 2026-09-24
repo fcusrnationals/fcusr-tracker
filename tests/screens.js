@@ -23,7 +23,14 @@ const SCREENS = [
   ['events', '#/events'],
   ['letters', '#/letters'],
   ['detail', null],
-  ['settings', '#/settings']
+  ['settings', '#/settings'],
+  // The workspace, under More.
+  ['calendar', '#/calendar'],
+  ['bulletin', '#/bulletin'],
+  ['people', '#/people'],
+  ['tools', '#/tools'],
+  ['watermark', '#/tools/watermark'],
+  ['archive', '#/archive']
 ];
 
 (async () => {

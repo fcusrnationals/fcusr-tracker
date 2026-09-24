@@ -137,7 +137,7 @@
           }).join('') + '</select>'
         : '') +
       '<label class="sr-only" for="pp-kind">Officers or volunteers</label><select id="pp-kind">' +
-        UI.selectOptions([{ value: '', label: 'Officers and volunteers' }, { value: 'officer', label: 'Officers' },
+        UI.selectOptions([{ value: '', label: 'All roles' }, { value: 'officer', label: 'Officers' },
           { value: 'volunteer', label: 'Volunteers' }], state.kind) + '</select>' +
       '<label class="sr-only" for="pp-status">Account</label><select id="pp-status">' +
         UI.selectOptions(Object.keys(STATUS).filter(function (k) {

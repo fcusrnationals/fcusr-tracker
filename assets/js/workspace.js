@@ -320,8 +320,8 @@
     var tip = document.createElement('div');
     tip.className = 'intro-tip';
     tip.setAttribute('role', 'status');
-    tip.innerHTML = '<strong>New:</strong> Calendar, Bulletin Board, People, Tools and Archive ' +
-      'are under <strong>More</strong>.' +
+    tip.innerHTML = '<p><strong>New:</strong> Calendar, Bulletin Board, People, Tools and Archive ' +
+      'are under <strong>More</strong>.</p>' +
       '<button type="button" class="btn btn-sm" data-intro-ok>Got it</button>';
     document.body.appendChild(tip);
     var done = function () {

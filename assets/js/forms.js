@@ -1093,7 +1093,7 @@
 
     if (!s.receivedAt) {
       return btn('data-step-in', ' btn-primary', opts.compact ? 'Hand in at ' + here : 'Handed in today') +
-        btn('data-step-both', '', opts.compact ? 'Handed in &amp; signed' : 'Handed in and signed today') +
+        btn('data-step-both', '', opts.compact ? 'Handed in & signed' : 'Handed in and signed today') +
         (opts.compact ? '' : btn('data-step-more', ' btn-ghost', 'Another date…'));
     }
     return btn('data-step-ok', ' btn-primary', opts.compact ? here + ' signed it' : 'Signed and passed on') +

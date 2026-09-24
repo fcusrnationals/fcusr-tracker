@@ -983,6 +983,12 @@
       });
       if (lastPerson() === rid) setLastPerson('');
     }
+    /* The database drops an announcement's acknowledgements with it (on
+       delete cascade), which leaves no tombstone for them; this device does the
+       same from the announcement's own. */
+    if (kind === 'announcement') {
+      state.acks = state.acks.filter(function (k) { return k.announcementId !== rid; });
+    }
     if (!state.deleted[kind]) state.deleted[kind] = {};
     state.deleted[kind][rid] = at || nowISO();
     return found;
@@ -1456,7 +1462,10 @@
 
   function actorName() {
     var who = global.Auth && Auth.signedIn && Auth.signedIn() ? Auth.current() : null;
-    return who && who.name ? who.name : 'Someone';
+    if (who && who.name) return who.name;
+    // Offline, the person this device said it was is the best answer there is.
+    var me = person(lastPerson());
+    return me && me.name ? me.name : 'Someone';
   }
 
   /* One line on one record. The same sentence from the same person inside two
@@ -4241,9 +4250,10 @@
     var k = cleanAck({
       id: U.hashUuid(aid + '|' + profileId),
       announcementId: aid, profileId: profileId,
-      email: who ? who.email : '', name: who ? who.name : 'This device',
+      email: who ? who.email : '', name: who ? who.name : (person(lastPerson()) || { name: 'This device' }).name,
       at: nowISO(), createdAt: nowISO(), updatedAt: nowISO()
     });
+    if (!k) throw new Error('Sign in again, then confirm you have read it.');
     state.acks.push(k);
     commit();
     return k;

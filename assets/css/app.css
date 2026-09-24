@@ -646,6 +646,7 @@ a.section-note { display: inline-flex; align-items: center; min-height: 44px; pa
   transition: background .12s ease;
 }
 .event-row:hover { background: var(--gold-50); }
+a.event-row { text-decoration: none; }
 .event-row .er-main { flex: 1; min-width: 0; }
 /* These are spans inside a button, so they need to be told to be blocks —
    left inline they never wrap and drag the whole page wider than the screen. */
@@ -1690,6 +1691,7 @@ body.is-gated .tab-more { display: none !important; }
   background: var(--ink); color: #FFF; box-shadow: var(--sh-3);
   animation: modal-in .2s ease;
 }
+.intro-tip p { margin: 0; }
 .intro-tip .btn { background: #FFF; border-color: #FFF; color: var(--ink); }
 
 /* ---------- phones: the tab bar takes six, the plus floats ---------- */
@@ -1902,7 +1904,7 @@ body.is-gated .tab-more { display: none !important; }
 .wm-drop {
   display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative;
 }
-.wm-drop input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.wm-drop input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
 .wm-drop.is-big {
   flex-direction: column; gap: 6px; text-align: center; min-height: 320px; padding: 30px 20px;
   border: 1.5px dashed var(--gold-400); border-radius: var(--radius);
@@ -1954,7 +1956,7 @@ body.is-gated .tab-more { display: none !important; }
   position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer;
   padding: 8px 6px; border: 1px solid var(--line); border-radius: 10px; text-align: center; background: var(--surface);
 }
-.wm-lib-item input { position: absolute; opacity: 0; pointer-events: none; }
+.wm-lib-item input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
 .wm-lib-item.is-on { border-color: var(--gold-500); box-shadow: inset 0 0 0 1px var(--gold-500); background: var(--gold-50); }
 .wm-lib-item:focus-within { outline: 2px solid var(--gold-600); outline-offset: 1px; }
 .wli-img {
@@ -1973,9 +1975,11 @@ body.is-gated .tab-more { display: none !important; }
   position: relative; width: 44px; height: 36px; border-radius: 8px; cursor: pointer;
   display: grid; place-items: center; background: var(--bg); border: 1px solid var(--line);
 }
-.wm-pos-cell input { position: absolute; opacity: 0; pointer-events: none; }
+/* The radio fills its cell, so the whole cell is what is pressed and measured. */
+.wm-pos-cell input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
 .wm-pos-cell .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); }
 .wm-pos-cell.is-on { background: var(--gold-100); border-color: var(--gold-500); }
+@media (max-width: 700px) { .wm-pos { grid-template-columns: repeat(3, 52px); } .wm-pos-cell { width: 52px; height: 44px; } }
 .wm-pos-cell.is-on .dot { background: var(--gold-700); width: 12px; height: 12px; }
 .wm-pos-cell:focus-within { outline: 2px solid var(--gold-600); outline-offset: 1px; }
 .wm-slider label { display: flex; justify-content: space-between; gap: 8px; }
@@ -2005,6 +2009,9 @@ body.is-gated .tab-more { display: none !important; }
   .wm-steps li { padding-right: 9px; font-size: 11.5px; }
 }
 
+/* A long preset name should read in full where there is the room. */
+@media (min-width: 701px) { #wm-preset { font-size: 14px; } }
+
 /* ---------- Bulletin Board ---------- */
 .bb-list { display: flex; flex-direction: column; gap: 12px; }
 .bb-card {
@@ -2019,6 +2026,8 @@ body.is-gated .tab-more { display: none !important; }
 .bb-card.is-expired { opacity: .82; }
 .bb-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-height: 8px; }
 .bb-top .icon-btn { margin: -8px -10px 0 0; }
+.bb-top.is-bare { position: absolute; top: 14px; right: 16px; }
+.has-bare-menu .bb-title { padding-right: 34px; margin-top: 0; }
 .bb-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .bb-tags .chip .ico { width: 12px; height: 12px; flex-basis: 12px; }
 .bb-prio { color: var(--ink-2); background: var(--bg); border-color: var(--line); }

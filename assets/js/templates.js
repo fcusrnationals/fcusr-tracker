@@ -413,9 +413,11 @@
   /* ---------- duplicating ---------- */
 
   // "Teachers' Day 2026" becomes "Teachers' Day 2027".
-  function nextTitle(title) {
+  // Next year's edition gets next year in its name; any other copy is a copy.
+  function nextTitle(e) {
+    var title = e.title;
     var m = String(title).match(/\b(19|20)(\d{2})\b/);
-    if (!m) return title + ' (copy)';
+    if (!m || !e.dateStart || e.dateStart >= U.today()) return title + ' (copy)';
     var y = Number(m[0]);
     return title.replace(m[0], String(y + 1));
   }
@@ -443,7 +445,7 @@
       title: 'Duplicate ' + (dir ? 'directive' : 'event'),
       body:
         '<div class="field" data-field="title"><label for="du-title">New title</label>' +
-        '<input type="text" id="du-title" data-autofocus maxlength="120" value="' + U.esc(nextTitle(e.title)) + '">' +
+        '<input type="text" id="du-title" data-autofocus maxlength="120" value="' + U.esc(nextTitle(e)) + '">' +
         '<div class="error-text" hidden></div></div>' +
         '<div class="field" data-field="date"><label for="du-date">' + (dir ? 'Due by' : 'New date') + '</label>' +
         '<input type="date" id="du-date" value="' + U.esc(nextDate(e)) + '">' +
