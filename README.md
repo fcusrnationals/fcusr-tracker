@@ -52,6 +52,28 @@ Settings (gear icon, top right) holds the officer directory, positions and commi
 
 **One search, not several.** The magnifier in the header (or the `/` key, or `⌘K`) searches tasks, events and people at once.
 
+### The workspace (under **More**)
+
+Five main tabs stay across the top — Overview, My tasks, Directives, Letters,
+Events. Everything used less often sits under **More** instead of becoming a
+sixth, seventh and eighth tab:
+
+| Area | What it is for |
+|---|---|
+| **Calendar** | Month, Week and Agenda views of events, task deadlines, directives and letters. Nothing is typed in twice — every item is read from its own record. Also on Events as *List / Calendar*. |
+| **Bulletin Board** | Official announcements. Only FCUSR Nationals post (checked on the device and again by the database). Audience, priority, schedule, expiry, pin, a link, and an optional *I have read this* with a "87 of 103" count. Expired posts move to *Previous* by themselves. |
+| **People** | The directory: search and filter by unit, role and account status; a profile shows current work. No rankings. |
+| **Tools** | The **Watermark Studio** (runs here, on the device — photos are never uploaded) and download pages for the separate **FCUSR Event Management System** and **FCUSR Score Tracker** apps. |
+| **Archive** | Academic years. Closing a year deletes nothing: its records become read-only and leave the working screens. Any year can be viewed, the **Term report** (PDF + CSV) exported, and a closed year reopened for corrections. |
+
+The header adds a **bell** (things that need you, updates, announcements), the
+**+** for creating anything you are allowed to create, and search (`/` or
+`⌘K`), which also runs commands such as "create event" or "watermark".
+
+Events can start from a **template** (six built in; units keep their own, and
+the Nationals can share one with everyone) or be **duplicated** from the ⋯ menu
+as a fresh record. The same menu shows the activity's **history**.
+
 ### Reading a task row
 
 Every screen draws a task the same way:
@@ -115,7 +137,14 @@ assets/js/ui.js              the task row, chips, rings, badges, toasts, dialogs
 assets/js/forms.js           event / task / person dialogs
 assets/js/report.js          the PDF report and the print fallback
 assets/js/app.js             hash router and app wiring
+assets/js/workspace.js       the More menu, year banner, hints — the workspace's shared pieces
+assets/js/notify.js          the bell: derived from records, nothing extra stored
+assets/js/palette.js         universal search and the command palette
+assets/js/templates.js       event templates and Duplicate event
+assets/js/watermark.js       the Watermark Studio (fetched only when opened)
+assets/js/term-report.js     the Term Report, PDF and CSV (fetched only when used)
 assets/js/views/             dashboard · mytasks · events · event-detail · settings
+                             bulletin · calendar · people · tools · archive
 assets/fonts/                Montserrat (woff2) for the screen
 vendor/                      jsPDF + autoTable + Montserrat (TTF) for the PDF
 tests/                       optional checks — see tests/README.md

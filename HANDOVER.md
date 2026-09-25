@@ -47,8 +47,14 @@ or the browser serves stale files (this bit us twice).
 | Supabase schema, RLS, enrolment, sign-up trigger | Written, **not yet deployed** |
 | Letters tracker — offices, routes, the trail | Done |
 | Apps Script alternative | Written, kept as fallback |
+| Workspace under **More**: Calendar, Bulletin Board, People, Tools, Archive | Done — see §16 |
+| Bell, universal search + command palette, permission-aware **+** | Done |
+| Event templates, Duplicate event, activity history | Done |
+| Academic years: archive, read-only, view any year, Term report PDF + CSV | Done |
+| Watermark Studio (client-side, batch, presets, library, ZIP) | Done |
+| `workspace.sql` (announcements, acknowledgements, templates) | Written, **run it in the SQL Editor** |
 
-**423 automated checks pass** across four suites.
+**1,357 automated checks pass** across five jsdom suites, plus the browser suites (screens, roles, empty-app, report-proof, word-proof).
 
 ## 4. Architecture
 
@@ -80,8 +86,17 @@ vendor/                       jsPDF + autoTable + Montserrat TTF
 backend/supabase/schema.sql   tables, RLS, enroll_member()
 backend/appsscript/Code.gs    Apps Script equivalent
 backend/SETUP.md              click-by-click setup for both
-tests/                        run-data.js, run-ui.js, run-auth.js,
-                              report-proof.js, screens.js
+assets/js/workspace.js        More menu, year banner, hints, lazy loader
+assets/js/notify.js           the bell — derived from records, never stored
+assets/js/palette.js          universal search + command palette
+assets/js/templates.js        event templates (6 built in) + Duplicate event
+assets/js/watermark.js        Watermark Studio (lazy; nothing uploaded)
+assets/js/term-report.js      Term report PDF + CSV (lazy)
+assets/js/views/              …plus bulletin calendar people tools archive
+backend/supabase/workspace.sql  the three new tables, RLS, sync_guard
+tests/                        run-data.js, run-ui.js, run-auth.js, run-sync.js,
+                              run-workspace.js, report-proof.js, screens.js,
+                              roles.js, empty-app.js
 ```
 
 ## 5. Decisions already made — do not silently reverse these
@@ -213,9 +228,11 @@ mkdir -p ~/.fcusr-tools && cd ~/.fcusr-tools && npm install jsdom puppeteer-core
 ```bash
 cd "<project>"
 export NODE_PATH=$HOME/.fcusr-tools/node_modules
-node tests/run-data.js                       # 83 checks, no install needed
-node tests/run-ui.js                         # 161 checks, full walk-through
-node tests/run-auth.js                       # 40 checks, the credential path
+node tests/run-data.js                       # 215 checks, no install needed
+node tests/run-ui.js                         # 465 checks, full walk-through
+node tests/run-auth.js                       # 235 checks, the credential path
+node tests/run-sync.js                       # 330 checks, two phones, one server
+node tests/run-workspace.js                  # 112 checks, the workspace update
 BASE_URL=http://localhost:4321/ node tests/report-proof.js        # 15 checks, the PDF
 BASE_URL=http://localhost:4321/ node tests/screens.js 390 844 m   # layout audit
 ```
@@ -394,6 +411,72 @@ the document may already be five pages deep, so the check fires and repaints.
 **Known nice-to-haves raised but not built:** pdf.js so scanned PDFs can be
 attached; real `.docx` (OOXML) instead of Word-HTML if the text boxes prove
 awkward.
+
+## 16. The workspace update
+
+The second major feature set, built on top of everything above without
+rebuilding any of it.
+
+**Navigation.** Five main tabs — Overview, My tasks, Directives, Letters,
+Events — and **More**, which opens the workspace (a sheet on phones, a panel on
+desktop): Calendar, Bulletin Board, People, Tools, Archive, Settings. New
+features go under More; **do not add main tabs**. The header carries search,
+the bell and **+**; on phones **+** is a floating button and the gear lives
+under More.
+
+**The Bulletin Board** (`views/bulletin.js`, Store `announcements`/`acks`).
+Only the Nationals create, edit, publish, pin or delete — checked in the Store
+(`mayPublish`), again in `Auth.canPublishBulletin`, and a third time by RLS in
+`workspace.sql`. State (draft / scheduled / active / expired → Previous) is
+derived from dates on every read, never stored. Acknowledgements are one row per
+*account* (`profile_id`), with a deterministic id (`U.hashUuid(ann|profile)`), so
+two phones pressing it make one row; the count is matched against directory
+people who have an email and are in the audience. Scheduled posts are
+delivered early and shown on the date (see the policy comment).
+
+**Sync.** The three new tables are `optional` in `sync.js`'s TABLES. A 404/400 on
+pull marks one as missing (`state.missing`) and it is skipped — pushes,
+deletions and drift included — until the next full round asks again. So the site
+works before `workspace.sql` is run; the Bulletin Board shows a setup notice.
+Same `body` + `updated_at` + `sync_guard` architecture — **no second sync
+mechanism**. A remote announcement tombstone also drops its acks locally,
+because the database cascades them without tombstones.
+
+**Academic years** (`Store.years`, `archiveYear`, `unlockYear`, `lockYear`,
+`restoreYear`). Stored in the council record, so they sync with no new table.
+A record's year comes from its anchor date (event date; a task's event; a
+letter's creation) — never stored on the record. Archiving deletes nothing:
+`assertOpen()` makes every mutator refuse records in a locked year, the screens
+hide the buttons, and the working screens filter to the current year. Viewing an
+old year is a per-device choice with a banner on every screen. Reopening is for
+a set time (30 minutes by default); only the most recent year can be returned
+to current. The old **Close the term → Delete everything** flow is untouched;
+the Archive is the non-destructive path beside it.
+
+**History.** Arrays on each record (`history`, capped per kind in
+`HISTORY_CAP`), written by `logOn()`. Same line from the same person within two
+minutes is collapsed. Shown behind ⋯ → Activity history, never on the main view.
+
+**Templates and duplicates.** Built-ins live in `templates.js` (never synced);
+custom ones sync, per unit, `shared` only by a national. A duplicate is a fresh
+record: tasks Not Started, no completion dates, report, letters, feedback link
+or history; dates move by the same shift. A copy of a *past* event bumps the
+year in its title; a copy of an upcoming one is "(copy)".
+
+**Watermark Studio.** Canvas, on the device. Library in IndexedDB (`AssetDB`,
+`wm:` keys), presets in localStorage — both **per device**, not synced (logos
+and presets are small and personal; photos must never travel). ZIP is written
+by hand (store-only, CRC-32) — no library. Units px/mm/cm/in/% convert through
+pixels at the preset's DPI so switching units never resizes anything.
+
+**Tools pages.** The EMS and Score Tracker descriptions are in an editable
+`PAGES` block at the top of `views/tools.js`. They were written without being
+able to open the Google Drive folders — **check them against the real apps**.
+
+**Not built, on purpose:** the automatic Feedback Form Generator (the existing
+"add the feedback form link" requirement stays), any analytics dashboard,
+leaderboard or officer ranking. The Term report counts work per unit and names
+no officer; `run-workspace.js` checks that.
 
 ## 10. Working style the user has asked for
 

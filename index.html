@@ -10,8 +10,8 @@
      then opens full screen with the council's seal as its icon. The tracker is
      the same web page either way, which is what keeps one version of it in
      front of everybody. -->
-<link rel="manifest" href="manifest.json?v=107">
-<link rel="apple-touch-icon" href="assets/img/app-icon-512.png?v=107">
+<link rel="manifest" href="manifest.json?v=108">
+<link rel="apple-touch-icon" href="assets/img/app-icon-512.png?v=108">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -38,9 +38,9 @@
      new files and any tab still open is told a newer version exists. Editing
      one by hand and not the other is silent: everything looks right and half
      the council keeps running yesterday's app. -->
-<link rel="stylesheet" href="assets/css/app.css?v=107">
-<link rel="stylesheet" href="assets/css/print.css?v=107" media="print">
-<link rel="icon" href="assets/img/fcusr-seal-small.png?v=107">
+<link rel="stylesheet" href="assets/css/app.css?v=108">
+<link rel="stylesheet" href="assets/css/print.css?v=108" media="print">
+<link rel="icon" href="assets/img/fcusr-seal-small.png?v=108">
 </head>
 <!-- Shipped closed. The tab bar, the search and the settings button are markup,
      so they are on screen from the moment this file is parsed — before any
@@ -58,7 +58,7 @@
       <!-- EMBLEM SLOT — upload the FCU seal / FCUSR triangle in Settings, or replace
            the inline SVG below with <img src="assets/img/fcusr-emblem.png" alt=""> -->
       <span class="emblem" id="emblem-slot" aria-hidden="true">
-        <img src="assets/img/fcusr-seal-small.png?v=107" alt="">
+        <img src="assets/img/fcusr-seal-small.png?v=108" alt="">
       </span>
       <span class="brand-name">FCUSR Task Tracker</span>
     </a>
@@ -66,8 +66,19 @@
     <!-- Whether this device is behind. Hidden entirely when there is no server
          to be behind of, so an offline council never sees a state it cannot act on. -->
     <button class="sync-state" id="sync-state" type="button" hidden aria-live="polite"></button>
-    <button class="icon-btn" id="btn-search" type="button" aria-label="Search tasks, events and people" title="Search">
+    <button class="icon-btn" id="btn-search" type="button" aria-label="Search everything, or type what you want to do" title="Search (/ or Ctrl+K)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+    <!-- What needs this person, so nobody has to open every screen to find out.
+         The count is of things not yet looked at, not of everything listed. -->
+    <button class="icon-btn bell-btn" id="btn-bell" type="button" aria-label="Notifications" aria-haspopup="dialog" title="Notifications">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8.5 3 8.5H3S6 15 6 8"/><path d="M10.3 20a1.9 1.9 0 0 0 3.4 0"/></svg>
+      <span class="bell-count" id="bell-count" hidden></span>
+    </button>
+    <!-- Start something without going to its screen first. On a phone it moves
+         to the floating button above the tab bar, where a thumb already is. -->
+    <button class="icon-btn create-btn" id="btn-create" type="button" aria-label="Create something new" aria-haspopup="menu" title="Create (N)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
     <!-- Who is signed in, and the way out. A council runs on shared computers,
          and until this existed there was no way to leave one. -->
@@ -103,44 +114,64 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5V19l-4-2-4 2-4-2-4 2z"/><path d="M8 9h8M8 13h5"/></svg>
       Events
     </a>
+    <!-- Everything used less often than the five above: Calendar, Bulletin
+         Board, People, Tools and Archive. One button, not five more tabs. -->
+    <button class="tab tab-more" type="button" data-route="more" aria-haspopup="menu" aria-label="More: Calendar, Bulletin Board, People, Tools and Archive">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/></svg>
+      More
+      <span class="count" id="tab-more" hidden></span>
+    </button>
   </div>
 </nav>
 
 <main id="view" tabindex="-1"></main>
 
+<button class="fab" id="fab-create" type="button" aria-label="Create something new" aria-haspopup="dialog">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+</button>
+
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 <div id="overlay"></div>
 
-<script src="assets/js/util.js?v=107"></script>
-<script src="assets/js/store.js?v=107"></script>
-<script src="assets/js/ui.js?v=107"></script>
+<script src="assets/js/util.js?v=108"></script>
+<script src="assets/js/store.js?v=108"></script>
+<script src="assets/js/ui.js?v=108"></script>
 <script src="vendor/jspdf.umd.min.js"></script>
 <script src="vendor/jspdf.plugin.autotable.min.js"></script>
-<script src="assets/js/report.js?v=107"></script>
-<script src="assets/js/asset-db.js?v=107"></script>
-<script src="assets/js/camera.js?v=107"></script>
-<script src="assets/js/accomplishment.js?v=107"></script>
-<script src="assets/js/accomplishment-pdf.js?v=107"></script>
-<script src="assets/js/accomplishment-word.js?v=107"></script>
-<script src="assets/js/accomplishment-ui.js?v=107"></script>
-<script src="assets/js/backend/config.js?v=107"></script>
-<script src="assets/js/backend/backend.js?v=107"></script>
-<script src="assets/js/auth.js?v=107"></script>
-<script src="assets/js/term-ui.js?v=107"></script>
-<script src="assets/js/sync.js?v=107"></script>
-<script src="assets/js/term-pdf.js?v=107"></script>
-<script src="assets/js/views/signin.js?v=107"></script>
-<script src="assets/js/views/dashboard.js?v=107"></script>
-<script src="assets/js/views/mytasks.js?v=107"></script>
-<script src="assets/js/views/directives.js?v=107"></script>
-<script src="assets/js/views/events.js?v=107"></script>
-<script src="assets/js/views/event-detail.js?v=107"></script>
-<script src="assets/js/letter-slip.js?v=107"></script>
-<script src="assets/js/roster-pdf.js?v=107"></script>
-<script src="assets/js/views/letters.js?v=107"></script>
-<script src="assets/js/views/letter-detail.js?v=107"></script>
-<script src="assets/js/views/settings.js?v=107"></script>
-<script src="assets/js/forms.js?v=107"></script>
-<script src="assets/js/app.js?v=107"></script>
+<script src="assets/js/report.js?v=108"></script>
+<script src="assets/js/asset-db.js?v=108"></script>
+<script src="assets/js/camera.js?v=108"></script>
+<script src="assets/js/accomplishment.js?v=108"></script>
+<script src="assets/js/accomplishment-pdf.js?v=108"></script>
+<script src="assets/js/accomplishment-word.js?v=108"></script>
+<script src="assets/js/accomplishment-ui.js?v=108"></script>
+<script src="assets/js/backend/config.js?v=108"></script>
+<script src="assets/js/backend/backend.js?v=108"></script>
+<script src="assets/js/auth.js?v=108"></script>
+<script src="assets/js/term-ui.js?v=108"></script>
+<script src="assets/js/sync.js?v=108"></script>
+<script src="assets/js/term-pdf.js?v=108"></script>
+<script src="assets/js/views/signin.js?v=108"></script>
+<script src="assets/js/views/dashboard.js?v=108"></script>
+<script src="assets/js/views/mytasks.js?v=108"></script>
+<script src="assets/js/views/directives.js?v=108"></script>
+<script src="assets/js/views/events.js?v=108"></script>
+<script src="assets/js/views/event-detail.js?v=108"></script>
+<script src="assets/js/letter-slip.js?v=108"></script>
+<script src="assets/js/roster-pdf.js?v=108"></script>
+<script src="assets/js/views/letters.js?v=108"></script>
+<script src="assets/js/views/letter-detail.js?v=108"></script>
+<script src="assets/js/views/settings.js?v=108"></script>
+<script src="assets/js/workspace.js?v=108"></script>
+<script src="assets/js/notify.js?v=108"></script>
+<script src="assets/js/palette.js?v=108"></script>
+<script src="assets/js/templates.js?v=108"></script>
+<script src="assets/js/views/bulletin.js?v=108"></script>
+<script src="assets/js/views/calendar.js?v=108"></script>
+<script src="assets/js/views/people.js?v=108"></script>
+<script src="assets/js/views/tools.js?v=108"></script>
+<script src="assets/js/views/archive.js?v=108"></script>
+<script src="assets/js/forms.js?v=108"></script>
+<script src="assets/js/app.js?v=108"></script>
 </body>
 </html>

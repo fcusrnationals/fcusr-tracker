@@ -27,13 +27,15 @@
 
   function render() {
     if (!draft) draft = blankDraft();
-    var all = Store.tasks({ kind: 'directive' });
+    var all = Store.tasks({ kind: 'directive' }).filter(function (t) { return Workspace.inView('task', t); });
     var s = Store.stats(all);
     var list = all.filter(FILTERS[filter].test).sort(Store.byDueDate);
     var sets = Store.directiveSets({ excludeArchived: true }).filter(function (d) {
-      return !global.Auth || !Auth.signedIn() || Auth.canSee(d.id) || Auth.canEditEvent(d.id);
+      return (!global.Auth || !Auth.signedIn() || Auth.canSee(d.id) || Auth.canEditEvent(d.id)) &&
+        Workspace.inView('event', d);
     });
-    var mayAdd = !(global.Auth && Auth.isVolunteer());
+    // Nothing new is filed into a year that is closed.
+    var mayAdd = !(global.Auth && Auth.isVolunteer()) && !Workspace.viewingArchive();
 
     var html =
       '<div class="page-head"><div><h1>Directives</h1>' +

@@ -23,6 +23,32 @@
     archive: '<rect x="3" y="4" width="18" height="4.5" rx="1.2"/><path d="M5 8.5V19a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V8.5M10 12.5h4"/>',
     back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
     more: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+    bell: '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 8.5 3 8.5H3S6 15 6 8"/><path d="M10.3 20a1.9 1.9 0 0 0 3.4 0"/>',
+    grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/>',
+    megaphone: '<path d="M3 10.5v3a1.5 1.5 0 0 0 1.5 1.5H7l7 4V5L7 9H4.5A1.5 1.5 0 0 0 3 10.5z"/><path d="M17.5 8.5a5 5 0 0 1 0 7M8 15l1.2 4.5"/>',
+    tools: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.6 2.6l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.4-.4-2.4z"/>',
+    image: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m21 16-5.2-5.2L6 20"/>',
+    stamp: '<rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M13 15.5h5.5v-3.2H13z"/><path d="m3.5 17 4.5-4.5 3 3"/>',
+    pin: '<path d="M9 3h6l-1 6 3.5 3.5v1.5H6.5v-1.5L10 9z"/><path d="M12 14v7"/>',
+    lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+    unlock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 7.6-1.7"/>',
+    history: '<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3 4v4.5h4.5"/><path d="M12 7.5V12l3 2"/>',
+    link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+    external: '<path d="M14 4h6v6"/><path d="M20 4 10.5 13.5"/><path d="M18 14v4.5A1.5 1.5 0 0 1 16.5 20h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
+    trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 5.5H4.5A3 3 0 0 0 8 10.5M16 5.5h3.5A3 3 0 0 1 16 10.5"/><path d="M12 13v4M8.5 20.5h7M9.5 17h5"/>',
+    layers: '<path d="m12 3 9 5-9 5-9-5z"/><path d="m3 13 9 5 9-5"/>',
+    copy: '<rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5A1.5 1.5 0 0 0 14 3.5H5A1.5 1.5 0 0 0 3.5 5v9A1.5 1.5 0 0 0 5 15.5h3.5"/>',
+    template: '<rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M3.5 9h17M9 9v11.5"/>',
+    list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/><circle cx="4.5" cy="18" r="1.3"/>',
+    move: '<path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3"/>',
+    refresh: '<path d="M20 11A8 8 0 0 0 5.3 6.3L3.5 8"/><path d="M3.5 3.5V8H8"/><path d="M4 13a8 8 0 0 0 14.7 4.7l1.8-1.7"/><path d="M20.5 20.5V16H16"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.5v.01"/>',
+    star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.9z"/>',
+    letter: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="m3 7 9 6 9-6"/>',
+    directive: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.3"/><circle cx="4.5" cy="12" r="1.3"/><circle cx="4.5" cy="18" r="1.3"/>',
+    overview: '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
+    mytasks: '<path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="17" rx="2.5"/><path d="M8 2v4M16 2v4"/>',
+    event: '<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5V19l-4-2-4 2-4-2-4 2z"/><path d="M8 9h8M8 13h5"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
   };
 
@@ -110,6 +136,8 @@
   /* Whether this row may be changed by whoever is looking at it. Offline, with
      nobody signed in, everything is editable exactly as it always was. */
   function editable(task) {
+    // An archived year is read-only whoever is looking, signed in or not.
+    if (Store.isLocked && Store.isLocked('task', task)) return false;
     if (!global.Auth || !Auth.signedIn()) return true;
     return Auth.canEditTask(task);
   }
@@ -117,6 +145,7 @@
   /* Whether the status may be changed: everyone who may edit the task, and the
      person it was given to. */
   function statusEditable(task) {
+    if (Store.isLocked && Store.isLocked('task', task)) return false;
     if (!global.Auth || !Auth.signedIn()) return true;
     return Auth.canUpdateTask ? Auth.canUpdateTask(task) : Auth.canEditTask(task);
   }
@@ -270,9 +299,12 @@
 
   function modal(opts) {
     var backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop';
+    /* `sheet` rises from the bottom edge on a phone, where a thumb already is,
+       and is an ordinary dialog on anything wider. */
+    backdrop.className = 'modal-backdrop' + (opts.sheet ? ' is-sheet' : '');
     backdrop.innerHTML =
       '<div class="modal' + (opts.wide ? ' wide' : '') + (opts.full ? ' full' : '') +
+        (opts.cls ? ' ' + opts.cls : '') +
         '" role="dialog" aria-modal="true" aria-label="' + U.esc(opts.title) + '">' +
         '<div class="modal-head"><h2>' + U.esc(opts.title) + '</h2>' +
           /* A dialog that must be answered offers no corner to escape through.
@@ -377,10 +409,11 @@
   function onDocDown(ev) { if (activeMenu && !activeMenu.contains(ev.target)) closeMenu(); }
   function onMenuKey(ev) { if (ev.key === 'Escape') { ev.stopPropagation(); closeMenu(); } }
 
-  function openMenu(anchor, itemsHtml, onPick) {
+  function openMenu(anchor, itemsHtml, onPick, opts) {
     closeMenu();
     var menu = document.createElement('div');
-    menu.className = 'menu';
+    // A class that changes its width has to be on before it is measured.
+    menu.className = 'menu' + (opts && opts.cls ? ' ' + opts.cls : '');
     menu.setAttribute('role', 'menu');
     menu.innerHTML = itemsHtml;
     document.body.appendChild(menu);

@@ -39,12 +39,16 @@
   };
 
   function render() {
+    // A closed year has no "today" to speak of; it gets a summary instead.
+    if (global.Workspace && Workspace.viewingArchive()) return archivedYear();
+
     /* The Overview is your own desk. A national oversees the colleges through
        the roll-up further down — mixing their activities into this list made the
        first screen of the day read as somebody else's work. */
     var mine = (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : Store.nationalUnitId();
-    var live = Store.tasks({ excludeArchived: true, kind: 'event', unitId: mine });
-    var events = Store.events({ activeOnly: true, unitId: mine });
+    var current = function (kind) { return function (r) { return Store.yearOf(kind, r) === 'current'; }; };
+    var live = Store.tasks({ excludeArchived: true, kind: 'event', unitId: mine }).filter(current('task'));
+    var events = Store.events({ activeOnly: true, unitId: mine }).filter(current('event'));
     var s = Store.stats(live);
     var attention = live.filter(FILTERS.attention.test).length;
 
@@ -85,6 +89,10 @@
       strip +
       '</div></div>';
 
+    /* The Bulletin, compact, and only when something on it deserves a place
+       here. The board itself is one tap away. */
+    html += global.Bulletin ? Bulletin.overviewPreview() : '';
+
     html += '<div class="pills" role="group" aria-label="Filter the task list">' +
       pill('attention', attention, 'Needs attention', attention > 0) +
       pill('week', s.dueThisWeek, 'Due this week') +
@@ -110,6 +118,9 @@
     html += republicSection();
 
     html += global.TermUI ? TermUI.archive() : '';
+
+    // The next seven days, in a few lines; the calendar has the rest.
+    html += global.ViewCalendar ? ViewCalendar.upcoming() : '';
 
     html += '<div class="section"><div class="section-head"><h2>Events</h2>' +
       '<a class="section-note" href="#/events">See all</a></div>';
@@ -221,9 +232,9 @@
   function letterSection() {
     if (global.Auth && Auth.isVolunteer()) return '';
 
-    var all = (global.Auth && Auth.signedIn())
+    var all = ((global.Auth && Auth.signedIn())
       ? Store.letters({ unitId: Auth.myUnitId() })
-      : Store.letters();
+      : Store.letters()).filter(function (l) { return Store.yearOf('letter', l) === 'current'; });
     var s = Store.letterStats(all);
     if (!s.total) return '';
 
@@ -261,7 +272,44 @@
       '</span></button>';
   }
 
+  /* An archived year, looked back at: what it held, read-only, and the way to
+     its term report. No "needs attention" — nothing in it can be acted on. */
+  function archivedYear() {
+    var yid = Workspace.viewYear();
+    var y = Store.yearInfo(yid);
+    var c = Store.yearCounts(yid);
+    var evs = Store.events().filter(function (e) { return Store.yearOf('event', e) === yid; });
+    if (global.Auth && Auth.signedIn() && !Auth.isOffline()) {
+      evs = evs.filter(function (e) { return Auth.canSee(e.id); });
+    }
+    var tasks = Store.tasks({ kind: 'event' }).filter(function (t) { return Store.yearOf('task', t) === yid; });
+    var st = Store.stats(tasks);
+    var html = '<div class="page-head"><div><h1>AY ' + U.esc(y.label) + '</h1>' +
+      '<div class="sub">Archived · ' + (y.start ? U.esc(U.fmtDateShort(y.start)) : 'from the beginning') +
+      ' – ' + U.esc(U.fmtDateShort(y.end)) + '</div></div>' +
+      ((!global.Auth || Auth.canExportTermReport())
+        ? '<button type="button" class="btn btn-primary" data-term-report>' + UI.icon('download') + 'Term report</button>' : '') +
+      '</div>';
+    html += '<div class="pills">' +
+      stat(c.events, 'Activities') + stat(st.done + ' of ' + st.total, 'Tasks done') +
+      stat(c.directives, 'Directives') + stat(c.letters, 'Letters') + '</div>';
+    html += '<div class="section"><div class="section-head"><h2>Activities</h2>' +
+      '<a class="section-note" href="#/archive">Open the Archive</a></div>';
+    html += evs.length
+      ? '<div class="list">' + evs.map(eventRow).join('') + '</div>'
+      : UI.empty('No activities that year', 'Nothing was dated inside it.', '', 'events');
+    return html + '</div>';
+  }
+
+  function stat(n, label) {
+    return '<div class="pill" style="cursor:default"><span class="n">' + n + '</span>' +
+      '<span class="l">' + U.esc(label) + '</span></div>';
+  }
+
   function mount(root) {
+    var tr = root.querySelector('[data-term-report]');
+    if (tr) tr.addEventListener('click', function () { ViewArchive.exportDialog(Workspace.viewYear()); });
+    if (global.ViewCalendar) ViewCalendar.mountUpcoming(root);
     if (global.TermUI) TermUI.mountBanner(root);
     Forms.wireLetterSteps(root);
     U.els('[data-filter]', root).forEach(function (b) {

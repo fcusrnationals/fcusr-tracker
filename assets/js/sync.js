@@ -28,10 +28,31 @@
     { kind: 'task',   table: 'tasks' },
     { kind: 'report', table: 'reports' },
     { kind: 'letter', table: 'letters' },
-    { kind: 'office', table: 'offices' }
+    { kind: 'office', table: 'offices' },
+    /* The workspace update. Optional, because the site goes live the moment it
+       is pushed and the database learns about these tables only when somebody
+       runs workspace.sql. Until then a missing table is skipped — the rest of
+       the council's work keeps syncing — and the screens that depend on it say
+       what is waiting, rather than the whole round failing on it. */
+    { kind: 'announcement', table: 'announcements', optional: true },
+    { kind: 'ack', table: 'acknowledgements', optional: true },
+    { kind: 'template', table: 'templates', optional: true }
   ];
 
-  var state = { running: false, at: '', error: '', last: null, deletionColumn: 'synced_at', drift: null };
+  function kindsDict() {
+    var d = {};
+    TABLES.forEach(function (t) { d[t.kind] = {}; });
+    return d;
+  }
+
+  var state = { running: false, at: '', error: '', last: null, deletionColumn: 'synced_at', drift: null,
+                // Optional tables this database has not got yet, by table name.
+                missing: {} };
+
+  function missingKind(kind) {
+    var t = TABLES.filter(function (x) { return x.kind === kind; })[0];
+    return !!(t && state.missing[t.table]);
+  }
   var listeners = [];
   var timer = null;
   var pendingPush = null;
@@ -49,6 +70,8 @@
          not guessed, and the reason the header can stop saying Synced when it
          is not true. */
       drift: state.drift,
+      // Which optional tables are still waiting for workspace.sql.
+      missing: Object.keys(state.missing).filter(function (k) { return state.missing[k]; }),
       able: able()
     };
   }
@@ -70,6 +93,11 @@
     if (kind === 'event' || kind === 'letter' || kind === 'person') return rec.unitId || null;
     return null;
   }
+
+  /* A unit this device can actually vouch for: a uuid, and one it holds a
+     unit record for. Anything else is an id the server has no row for, and
+     offering it is a foreign key violation. */
+  function goodUnit(v) { return !!v && U.isUuid(v) && !!Store.unit(v); }
 
   /* No `updated_at` here on purpose. The server stamps it with its own clock
      and a trigger overrides anything sent, because that column is what a pull
@@ -112,6 +140,31 @@
       row.code = rec.code || null;
       row.active = rec.active !== false;
       row.unit_id = rec.unitId && U.isUuid(rec.unitId) && Store.unit(rec.unitId) ? rec.unitId : null;
+    }
+    /* Who an announcement is for travels in columns of its own, because that
+       is what the database decides who may read it by. A draft is marked, so
+       the database can keep it from everybody but the National officers. */
+    if (kind === 'announcement') {
+      var myU = (global.Auth && Auth.myUnitId && Auth.myUnitId()) || '';
+      var aud = rec.audience || {};
+      row.unit_id = goodUnit(rec.unitId) ? rec.unitId : (goodUnit(myU) ? myU : null);
+      row.title = rec.title || '';
+      row.published = rec.published !== false;
+      row.audience = aud.kind || 'everyone';
+      row.audience_units = (aud.unitIds || []).filter(U.isUuid);
+      row.audience_people = (aud.personIds || []).filter(U.isUuid);
+    }
+    /* An acknowledgement belongs to an account, and the database will only let
+       an account write its own. */
+    if (kind === 'ack') {
+      row.announcement_id = rec.announcementId || null;
+      row.profile_id = U.isUuid(rec.profileId) ? rec.profileId : null;
+    }
+    if (kind === 'template') {
+      var myT = (global.Auth && Auth.myUnitId && Auth.myUnitId()) || '';
+      row.unit_id = goodUnit(rec.unitId) ? rec.unitId : (goodUnit(myT) ? myT : null);
+      row.shared = !!rec.shared;
+      row.name = rec.name || '';
     }
     return row;
   }
@@ -253,14 +306,25 @@
        never offered is work that exists on one phone and nowhere else — which
        is the failure people describe as "it says Synced and the other phone is
        different", and the thing a green pill has never once been able to see. */
-    var seen = since ? null : { unit: {}, person: {}, event: {}, task: {}, report: {}, letter: {}, office: {} };
+    var seen = since ? null : kindsDict();
 
     /* Each page continues from the last (stamp, id) actually seen, so a page
        edge falling inside a group of rows that share one stamp — which is
        every batch a phone sends — no longer leaves the rest of the group
        behind for ever. See Backend.changed. */
     function page(t, from, after, guard) {
-      return Backend.changed(t.table, from, PAGE, null, after).then(function (rows) {
+      if (state.missing[t.table]) return Promise.resolve(null);
+      return Backend.changed(t.table, from, PAGE, null, after).catch(function (err) {
+        /* A table this database has not been given yet. Noted, skipped, and
+           asked about again on the next full round — somebody may have run the
+           migration in the meantime. */
+        if (t.optional && err && (err.status === 404 || err.status === 400)) {
+          state.missing[t.table] = true;
+          return null;
+        }
+        throw err;
+      }).then(function (rows) {
+        if (rows === null) return null;
         rows = rows || [];
         var last = from;
         var lastId = after;
@@ -463,6 +527,7 @@
     var chain = Promise.resolve();
 
     TABLES.forEach(function (t) {
+      if (state.missing[t.table]) return;
       var rows = (out.records[t.kind] || [])
         .filter(function (r) { return !givenUpOn(t.table + ':' + r.id); })
         .map(function (r) { return toRow(t.kind, r); });
@@ -501,6 +566,10 @@
       chain = chain.then(function () {
         var rows = out.deletions
           .filter(function (d) { return !givenUpOn('deletions:' + d.kind + ':' + d.id); })
+          /* Held until the table exists: the database would refuse a deletion
+             of a kind it has never heard of, and the refusal would be counted
+             against somebody who did nothing wrong. */
+          .filter(function (d) { return !missingKind(d.kind); })
           .map(function (d) {
             return {
               entity: d.kind, entity_id: d.id, deleted_at: d.at,
@@ -525,6 +594,7 @@
         var byTable = {};
         out.deletions.forEach(function (d) {
           if (givenUpOn('deletions:' + d.kind + ':' + d.id)) return;
+          if (missingKind(d.kind)) return;
           var t = TABLES.filter(function (x) { return x.kind === d.kind; })[0];
           if (!t) return;
           (byTable[t.table] = byTable[t.table] || []).push(d.id);
@@ -575,18 +645,24 @@
     task:   function () { return Store.tasks(); },
     report: function () { return Store.reports(); },
     letter: function () { return Store.letters(); },
-    office: function () { return Store.offices(); }
+    office: function () { return Store.offices(); },
+    announcement: function () { return Store.announcements(); },
+    ack: function () { return Store.acks(); },
+    template: function () { return Store.templates({ includeArchived: true }); }
   };
 
   var NOUN = {
     unit: 'unit', person: 'person', event: 'activity', task: 'task',
-    report: 'report', letter: 'letter', office: 'office'
+    report: 'report', letter: 'letter', office: 'office',
+    announcement: 'announcement', ack: 'acknowledgement', template: 'template'
   };
 
   function measureDrift(seen, placed) {
     if (!seen) return null;
     var out = { total: 0, kinds: [], examples: [] };
     Object.keys(LIST).forEach(function (kind) {
+      // Waiting for its table, which the setup notice already says.
+      if (missingKind(kind)) return;
       var rows;
       try { rows = LIST[kind]() || []; } catch (e) { return; }
       var only = rows.filter(function (r) {
@@ -719,6 +795,8 @@
 
     if (full) {
       since = ''; delSince = ''; pushedSince = '';
+      // Ask again whether the optional tables exist.
+      state.missing = {};
       /* The set-aside list is NOT cleared here, and the count in it is why.
 
          A refusal can be temporary: a directive whose unit had not arrived
@@ -770,9 +848,7 @@
         return res;
       });
     }).then(function (res) {
-      var placed = full
-        ? { unit: {}, person: {}, event: {}, task: {}, report: {}, letter: {}, office: {} }
-        : null;
+      var placed = full ? kindsDict() : null;
       return push(pushedSince, placed).then(function (sent) {
         return pushTerm(pushedSince).then(function (n) {
           return pushCouncil(pushedSince).then(function (m) { return sent + n + m; });
@@ -931,7 +1007,10 @@
       task: Store.tasks().length,
       report: Store.reports().length,
       letter: Store.letters().length,
-      office: Store.offices().length
+      office: Store.offices().length,
+      announcement: Store.announcements().length,
+      ack: Store.acks().length,
+      template: Store.templates({ includeArchived: true }).length
     };
     var rows = [];
     var chain = Promise.resolve();
@@ -985,6 +1064,12 @@
             differ: differ
           });
         }).catch(function (err) {
+          if (t.optional && err && (err.status === 404 || err.status === 400)) {
+            rows.push({ kind: t.kind, table: t.table, noun: NOUN[t.kind] || t.kind,
+                        here: local[t.kind] || 0, there: null, setup: true,
+                        onlyHere: [], onlyThere: [], differ: [] });
+            return;
+          }
           trouble = trouble || (t.table + ': ' + (err && err.message ? err.message : 'refused'));
           rows.push({ kind: t.kind, table: t.table, noun: NOUN[t.kind] || t.kind,
                       here: local[t.kind] || 0, there: null,

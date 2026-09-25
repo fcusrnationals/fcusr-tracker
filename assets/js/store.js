@@ -187,6 +187,16 @@
       officesSeed: OFFICE_SEED_VERSION,
       term: blankTerm(),
       people: [], events: [], tasks: [], reports: [], letters: [],
+      /* The Bulletin Board, who has read what on it, and the event templates a
+         unit reuses. Three collections like the others: they sync the same way
+         and are cleaned the same way on the way in. */
+      announcements: [], acks: [], templates: [],
+      /* Academic years that have been closed and archived. The current year is
+         never stored — it is whatever comes after the last archived one — so
+         there is nothing to fall out of step with. Council setup, like the
+         letterhead: it travels in the council row. */
+      years: [],
+      yearStartMonth: 6,
       /* What has been deleted, and when. A row removed on one phone has to stay
          removed: without this the next device to sync sees it missing from the
          server, decides the server is behind, and puts it back. */
@@ -338,6 +348,30 @@
     return clean;
   }
 
+  /* ---------- activity history ----------
+
+     "Arron created this event · Sep 2". Kept on the record it describes, so it
+     travels with it through syncing and needs nothing new on the server — and
+     so deleting the record takes its history with it, which is the honest
+     answer for something that no longer exists.
+
+     Each line is already a sentence, written when the thing happened, because
+     that is the only moment the names in it are certain: the task may be
+     renamed and the person may leave, and the line should still say what was
+     true then. Capped, because a task that changes hands every week should not
+     be able to fill a phone. */
+  var HISTORY_CAP = { event: 40, task: 12, announcement: 20, person: 12, template: 12 };
+
+  function cleanHistory(v, cap) {
+    if (!Array.isArray(v)) return [];
+    return v.slice(-(cap || 20)).map(function (h) {
+      if (!h || typeof h !== 'object') return null;
+      var text = str(h.text, 240);
+      if (!text) return null;
+      return { at: stamp(h.at), by: str(h.by, LIMITS.name), text: text };
+    }).filter(Boolean);
+  }
+
   function cleanPerson(p) {
     if (!p || typeof p !== 'object') return null;
     var name = str(p.name, LIMITS.name);
@@ -364,6 +398,7 @@
       isHead: !!p.isHead,
       active: p.active !== false,
       sample: !!p.sample,
+      history: cleanHistory(p.history, HISTORY_CAP.person),
       createdAt: stamp(p.createdAt),
       updatedAt: stamp(p.updatedAt)
     });
@@ -463,6 +498,7 @@
       feedbackWaivedAt: e.feedbackWaivedAt ? stamp(e.feedbackWaivedAt) : '',
 
       sample: !!e.sample,
+      history: cleanHistory(e.history, HISTORY_CAP.event),
       createdAt: stamp(e.createdAt),
       updatedAt: stamp(e.updatedAt)
     });
@@ -495,9 +531,173 @@
       blockedReason: status === 'On hold' ? str(t.blockedReason, LIMITS.reason) : '',
       completedAt: status === 'Done' ? (t.completedAt ? stamp(t.completedAt) : nowISO()) : '',
       sample: !!t.sample,
+      history: cleanHistory(t.history, HISTORY_CAP.task),
       createdAt: stamp(t.createdAt),
       updatedAt: stamp(t.updatedAt)
     });
+  }
+
+  /* ---------- the Bulletin Board ----------
+
+     Official announcements from FCUSR Nationals. One record per announcement,
+     read by everybody it is addressed to; the notification that tells somebody
+     about it and the preview on the Overview both point at this record rather
+     than copying it, so there is only ever one thing to edit or delete. */
+  var BULLETIN_PRIORITIES = ['Normal', 'Important', 'Urgent'];
+  var AUDIENCE_KINDS = ['everyone', 'nationals', 'units', 'people'];
+
+  function idList(v, max) {
+    return (Array.isArray(v) ? v : []).filter(function (x) {
+      return typeof x === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(x);
+    }).slice(0, max || 200);
+  }
+
+  /* A link on an announcement: somewhere on the web over https, or a place in
+     this tracker (#/events/…). Nothing else — not javascript:, not http. */
+  function announcementLink(v) {
+    if (!v || typeof v !== 'object') return { url: '', label: '' };
+    var url = typeof v.url === 'string' ? v.url.trim().slice(0, 500) : '';
+    var ok = /^https:\/\/[^\s"'<>]{3,}$/.test(url) || /^#\/[A-Za-z0-9\/_-]{1,160}$/.test(url);
+    return { url: ok ? url : '', label: ok ? str(v.label, 80) : '' };
+  }
+
+  function cleanAnnouncement(a) {
+    if (!a || typeof a !== 'object') return null;
+    var title = str(a.title, LIMITS.title);
+    if (!title) return null;
+    var aud = a.audience && typeof a.audience === 'object' ? a.audience : {};
+    return keepExtras(a, {
+      id: id(a.id, 'ann'),
+      // The unit that published it — the National government, in practice.
+      unitId: typeof a.unitId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(a.unitId) ? a.unitId : '',
+      title: title,
+      // Kept as typed. Line breaks are the whole of its formatting.
+      message: typeof a.message === 'string'
+        ? a.message.replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, '').slice(0, 4000).trim() : '',
+      audience: {
+        kind: oneOf(aud.kind, AUDIENCE_KINDS, 'everyone'),
+        unitIds: idList(aud.unitIds, 40),
+        personIds: idList(aud.personIds, 400)
+      },
+      priority: oneOf(a.priority, BULLETIN_PRIORITIES, 'Normal'),
+      /* A draft is seen by the National officers and nobody else. Publishing is
+         a separate act from writing, so something half-written never goes out
+         by accident. */
+      published: a.published !== false,
+      publishAt: a.publishAt ? stamp(a.publishAt) : '',
+      expiresAt: a.expiresAt ? stamp(a.expiresAt) : '',
+      link: announcementLink(a.link),
+      pinned: !!a.pinned,
+      requireAck: !!a.requireAck,
+      createdBy: str(a.createdBy, LIMITS.name),
+      history: cleanHistory(a.history, HISTORY_CAP.announcement),
+      createdAt: stamp(a.createdAt),
+      updatedAt: stamp(a.updatedAt)
+    });
+  }
+
+  /* One person saying they have read one announcement. Keyed by the pair, so
+     pressing it on two phones is still one acknowledgement. */
+  function cleanAck(k) {
+    if (!k || typeof k !== 'object') return null;
+    var ann = typeof k.announcementId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(k.announcementId)
+      ? k.announcementId : '';
+    var who = str(k.profileId, 64);
+    if (!ann || !who) return null;
+    return keepExtras(k, {
+      id: U.isUuid(k.id) ? k.id : U.hashUuid(ann + '|' + who),
+      announcementId: ann,
+      profileId: who,
+      email: email(k.email),
+      name: str(k.name, LIMITS.name),
+      at: stamp(k.at),
+      createdAt: stamp(k.createdAt),
+      updatedAt: stamp(k.updatedAt)
+    });
+  }
+
+  /* ---------- event templates ----------
+
+     A Seminar, a General Assembly, a Competition: the same dozen errands every
+     time, typed out afresh by whoever is organising it this year. A template is
+     that list, kept, with when each one usually falls relative to the day. */
+  function cleanTemplateTask(x) {
+    if (!x || typeof x !== 'object') return null;
+    var title = str(x.title, LIMITS.title);
+    if (!title) return null;
+    var off = Math.round(Number(x.offsetDays));
+    return {
+      title: title,
+      offsetDays: isFinite(off) ? Math.max(-365, Math.min(365, off)) : 0,
+      priority: oneOf(x.priority, PRIORITIES, 'Medium')
+    };
+  }
+
+  function cleanTemplate(t) {
+    if (!t || typeof t !== 'object') return null;
+    var name = str(t.name, LIMITS.name);
+    if (!name) return null;
+    var days = Math.round(Number(t.durationDays));
+    return keepExtras(t, {
+      id: id(t.id, 'tpl'),
+      unitId: typeof t.unitId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(t.unitId) ? t.unitId : '',
+      /* Who may use it: the unit that made it, or every unit in the Republic.
+         Only the National government shares one Republic-wide. */
+      shared: !!t.shared,
+      name: name,
+      description: str(t.description, LIMITS.text),
+      venue: str(t.venue, LIMITS.title),
+      durationDays: isFinite(days) && days > 0 && days <= 30 ? days : 1,
+      feedbackRequired: t.feedbackRequired !== false,
+      volunteers: !!t.volunteers,
+      tasks: (Array.isArray(t.tasks) ? t.tasks : []).slice(0, 60).map(cleanTemplateTask).filter(Boolean),
+      archived: !!t.archived,
+      createdBy: str(t.createdBy, LIMITS.name),
+      history: cleanHistory(t.history, HISTORY_CAP.template),
+      createdAt: stamp(t.createdAt),
+      updatedAt: stamp(t.updatedAt)
+    });
+  }
+
+  /* ---------- academic years ----------
+
+     A closed year, kept readable. Its records are not moved or copied: an
+     activity belongs to the year its date falls in, so marking a year archived
+     is enough to take its work off the current screens and make it read-only.
+     `start` is blank for the first year ever archived, which reaches back to
+     the beginning so nothing older is left stranded as "current". */
+  function cleanYears(arr) {
+    if (!Array.isArray(arr)) return [];
+    var seen = {};
+    return arr.slice(0, 60).map(function (y) {
+      if (!y || typeof y !== 'object') return null;
+      var end = dateOnly(y.end);
+      if (!end || seen[end]) return null;
+      seen[end] = true;
+      var start = dateOnly(y.start);
+      return {
+        id: 'ay-' + end,
+        start: start && start <= end ? start : '',
+        end: end,
+        label: str(y.label, 40) || yearLabel(start, end),
+        note: str(y.note, LIMITS.reason),
+        archivedAt: y.archivedAt ? stamp(y.archivedAt) : '',
+        archivedBy: str(y.archivedBy, LIMITS.name),
+        /* Opened for corrections by the President, for a set time. Blank or in
+           the past means read-only. */
+        unlockedUntil: y.unlockedUntil ? stamp(y.unlockedUntil) : '',
+        unlockedBy: str(y.unlockedBy, LIMITS.name)
+      };
+    }).filter(Boolean).sort(function (a, b) { return a.end < b.end ? -1 : 1; });
+  }
+
+  // "2025–2026", from the dates rather than typed, so it can never disagree with them.
+  function yearLabel(start, end) {
+    var e = U.parse(end);
+    if (!e) return 'Academic year';
+    var from = U.parse(start) || U.parse(U.addDays(end, -364));
+    var a = from.getUTCFullYear(), b = e.getUTCFullYear();
+    return a === b ? String(b) : a + '–' + b;
   }
 
   function assetIds(v) {
@@ -668,7 +868,10 @@
     task:   { list: 'tasks',   clean: cleanTask },
     report: { list: 'reports', clean: cleanReport },
     letter: { list: 'letters', clean: cleanLetter },
-    office: { list: 'offices', clean: cleanOffice }
+    office: { list: 'offices', clean: cleanOffice },
+    announcement: { list: 'announcements', clean: cleanAnnouncement },
+    ack:          { list: 'acks',          clean: cleanAck },
+    template:     { list: 'templates',     clean: cleanTemplate }
   };
 
   function newer(a, b) {
@@ -780,6 +983,12 @@
       });
       if (lastPerson() === rid) setLastPerson('');
     }
+    /* The database drops an announcement's acknowledgements with it (on
+       delete cascade), which leaves no tombstone for them; this device does the
+       same from the announcement's own. */
+    if (kind === 'announcement') {
+      state.acks = state.acks.filter(function (k) { return k.announcementId !== rid; });
+    }
     if (!state.deleted[kind]) state.deleted[kind] = {};
     state.deleted[kind][rid] = at || nowISO();
     return found;
@@ -865,6 +1074,12 @@
       org: state.org,
       positions: state.positions,
       committees: state.committees,
+      /* Which academic years are closed. Setup of the Republic, like the
+         letterhead, so it rides in the same row. A phone on an older build
+         does not know these two fields and sends the row without them; the
+         server keeps what it is not sent (sync3.sql), so they survive it. */
+      years: state.years,
+      yearStartMonth: state.yearStartMonth,
       updatedAt: state.councilAt || ''
     };
   }
@@ -887,6 +1102,8 @@
     }
     if (Array.isArray(c.positions)) state.positions = cleanList(c.positions, DEFAULT_POSITIONS);
     if (Array.isArray(c.committees)) state.committees = cleanList(c.committees, DEFAULT_COMMITTEES);
+    if (Array.isArray(c.years)) state.years = cleanYears(c.years);
+    if (c.yearStartMonth !== undefined) state.yearStartMonth = startMonth(c.yearStartMonth);
     state.councilAt = stamp(c.updatedAt) || nowISO();
     commit();
     return true;
@@ -897,7 +1114,8 @@
     save();
   }
 
-  var DELETABLE = ['event', 'task', 'report', 'letter', 'person', 'office', 'unit'];
+  var DELETABLE = ['event', 'task', 'report', 'letter', 'person', 'office', 'unit',
+                   'announcement', 'ack', 'template'];
 
   /* Tombstones age out. A device that has been in a drawer for three months has
      bigger problems than one resurrected task, and keeping every deletion for
@@ -957,6 +1175,12 @@
 
   function isDeleted(kind, rid) {
     return !!(state.deleted[kind] && state.deleted[kind][rid]);
+  }
+
+  // The month an academic year begins in, 1–12. June unless the council says otherwise.
+  function startMonth(v) {
+    var n = Math.round(Number(v));
+    return isFinite(n) && n >= 1 && n <= 12 ? n : 6;
   }
 
   function cleanList(arr, fallback, max) {
@@ -1049,6 +1273,16 @@
     s.officesSeed = OFFICE_SEED_VERSION;
 
     s.letters = (Array.isArray(data.letters) ? data.letters : []).map(cleanLetter).filter(Boolean);
+
+    /* Saved before these existed, the lists are simply empty — nothing to
+       migrate, and nothing about an older record changes. */
+    s.announcements = (Array.isArray(data.announcements) ? data.announcements : [])
+      .map(cleanAnnouncement).filter(Boolean);
+    s.acks = (Array.isArray(data.acks) ? data.acks : []).map(cleanAck).filter(Boolean);
+    s.templates = (Array.isArray(data.templates) ? data.templates : [])
+      .map(cleanTemplate).filter(Boolean);
+    s.years = cleanYears(data.years);
+    s.yearStartMonth = startMonth(data.yearStartMonth);
 
     s.term = cleanTerm(data.term);
     s.deleted = cleanDeleted(data.deleted);
@@ -1222,6 +1456,137 @@
     var now = nowISO();
     if (!previous || now > previous) return now;
     return new Date(Date.parse(previous) + 1).toISOString();
+  }
+
+  /* ---------- writing the history line ---------- */
+
+  function actorName() {
+    var who = global.Auth && Auth.signedIn && Auth.signedIn() ? Auth.current() : null;
+    if (who && who.name) return who.name;
+    // Offline, the person this device said it was is the best answer there is.
+    var me = person(lastPerson());
+    return me && me.name ? me.name : 'Someone';
+  }
+
+  /* One line on one record. The same sentence from the same person inside two
+     minutes is one event, not two — saving a form twice is not news. */
+  function logOn(rec, kind, text) {
+    if (!rec || !text) return;
+    if (!Array.isArray(rec.history)) rec.history = [];
+    var list = rec.history;
+    var by = actorName();
+    var at = nowISO();
+    var last = list[list.length - 1];
+    if (last && last.text === text && last.by === by &&
+        Date.parse(at) - Date.parse(last.at) < 120000) return;
+    list.push({ at: at, by: by, text: str(text, 240) });
+    var cap = HISTORY_CAP[kind] || 20;
+    if (list.length > cap) list.splice(0, list.length - cap);
+  }
+
+  /* ---------- which academic year a record belongs to ----------
+
+     Nothing is stamped with a year. An activity belongs to the year its date
+     falls in; its tasks, report and letters belong where it does; a directive
+     or a letter on its own by its date or the day it was made. So closing a
+     year needs no migration, changes no id and copies nothing — and a record
+     with its date corrected simply moves to the year it now falls in. */
+  function anchorOf(kind, rec) {
+    if (!rec) return '';
+    var ev;
+    if (kind === 'event') return rec.dateStart || U.dayOf(rec.createdAt);
+    if (kind === 'task' || kind === 'letter' || kind === 'report') {
+      ev = rec.eventId ? event(rec.eventId) : null;
+      if (ev) return anchorOf('event', ev);
+      if (kind === 'task') return rec.dueDate || U.dayOf(rec.createdAt);
+      return U.dayOf(rec.createdAt);
+    }
+    if (kind === 'announcement') return U.dayOf(rec.publishAt || rec.createdAt);
+    return '';
+  }
+
+  function archivedYears() { return state.years.slice(); }
+
+  function archivedYear(yid) {
+    for (var i = 0; i < state.years.length; i++) if (state.years[i].id === yid) return state.years[i];
+    return null;
+  }
+
+  /* The year a date falls in: an archived one's id, or 'current'. */
+  function yearOfDate(day) {
+    if (!day) return 'current';
+    for (var i = 0; i < state.years.length; i++) {
+      var y = state.years[i];
+      if ((!y.start || day >= y.start) && day <= y.end) return y.id;
+    }
+    return 'current';
+  }
+
+  function yearOf(kind, rec) { return yearOfDate(anchorOf(kind, rec)); }
+
+  /* Where the current year starts when none has ever been archived: the start
+     of the academic year the council's own first record was made in. Read off
+     when records were made rather than what they are dated, because one
+     activity typed in with the wrong year would otherwise pull the whole
+     "current year" back with it. */
+  function ayStartFor(day) {
+    var m = state.yearStartMonth || 6;
+    var y = Number(day.slice(0, 4));
+    var mon = Number(day.slice(5, 7));
+    if (mon < m) y -= 1;
+    return y + '-' + (m < 10 ? '0' : '') + m + '-01';
+  }
+
+  function firstMade() {
+    var first = U.today();
+    ['events', 'tasks', 'letters'].forEach(function (list) {
+      state[list].forEach(function (r) {
+        var d = U.dayOf(r.createdAt);
+        if (d && d < first) first = d;
+      });
+    });
+    return first;
+  }
+
+  /* The year the council is working in now. Never stored: it is whatever
+     follows the last archived year, so nothing can fall out of step with it. */
+  function currentYear() {
+    var last = state.years[state.years.length - 1];
+    var start = last ? U.addDays(last.end, 1) : ayStartFor(firstMade());
+    /* To the boundary that ends the academic year it mostly covers. A year
+       closed a few weeks early leaves a current year that starts early; it
+       still ends where that year ends rather than a few weeks later. */
+    var end = U.addDays(ayStartFor(U.addDays(start, 545)), -1);
+    return {
+      id: 'current', start: start, end: end, label: yearLabel(start, end),
+      // Past its end and still open: the President is reminded, nothing more.
+      overdue: U.today() > end
+    };
+  }
+
+  function yearInfo(yid) {
+    if (!yid || yid === 'current') return currentYear();
+    return archivedYear(yid);
+  }
+
+  /* Read-only because its year is archived, and not opened for corrections. */
+  function yearLocked(yid) {
+    if (!yid || yid === 'current') return false;
+    var y = archivedYear(yid);
+    if (!y) return false;
+    return !(y.unlockedUntil && y.unlockedUntil > nowISO());
+  }
+
+  function isLocked(kind, rec) { return !!rec && yearLocked(yearOf(kind, rec)); }
+
+  /* The last line of defence, under every button that could change an archived
+     record. The screens hide those buttons; this is what holds if one is
+     missed, or a record arrives some other way. */
+  function assertOpen(kind, rec) {
+    if (!rec || !isLocked(kind, rec)) return;
+    var y = archivedYear(yearOf(kind, rec));
+    throw new Error('That belongs to AY ' + (y ? y.label : 'an archived year') +
+      ', which is archived and read-only. The President can reopen it for corrections.');
   }
 
   /* ---------- people ---------- */
@@ -1421,6 +1786,7 @@
   function updatePerson(id, data) {
     var p = person(id);
     if (!p) return null;
+    var before = { active: p.active, unitId: p.unitId, access: p.access, isHead: p.isHead };
     if ('name' in data) p.name = (data.name || '').trim();
     if ('position' in data) p.position = (data.position || '').trim();
     if ('committee' in data) p.committee = (data.committee || '').trim();
@@ -1438,6 +1804,18 @@
     if ('eventIds' in data && Array.isArray(data.eventIds)) p.eventIds = data.eventIds.slice(0, 200);
     if ('claimed' in data) p.claimed = !!data.claimed;
     if ('isHead' in data) p.isHead = !!data.isHead;
+    /* The permission-shaped changes, which are the ones somebody later asks
+       about: who moved this person, who made them head, who switched them off.
+       A corrected spelling is not history. */
+    if (before.active !== p.active) logOn(p, 'person', p.active ? 'reactivated them' : 'deactivated them');
+    if (before.unitId !== p.unitId) logOn(p, 'person', 'moved them to ' + unitName(p.unitId));
+    if (before.access !== p.access) {
+      logOn(p, 'person', 'made them ' + (p.access === 'volunteer' ? 'a volunteer' : 'an officer'));
+    }
+    if (before.isHead !== p.isHead) {
+      logOn(p, 'person', p.isHead ? 'named them head of ' + unitName(p.unitId)
+                                  : 'stood them down as head of ' + unitName(p.unitId));
+    }
     p.updatedAt = bumpStamp(p.updatedAt);
     commit();
     return p;
@@ -1782,6 +2160,17 @@
   }
 
   function addEvent(data) {
+    var e = buildEvent(data);
+    state.events.push(e);
+    commit();
+    return e;
+  }
+
+  /* An activity, checked and ready, not yet saved. Split from addEvent so an
+     activity started from a template can be saved together with its tasks in
+     one write — twelve saves and twelve redraws for one button is how a phone
+     stutters. */
+  function buildEvent(data) {
     if (!String(data.title || '').trim()) throw new Error('An activity needs a title.');
     checkEventDates(dateOnly(data.dateStart), dateOnly(data.dateEnd));
     var directive = data.kind === 'directive';
@@ -1800,23 +2189,43 @@
       // Nobody evaluates a directive, so it is never asked for a feedback form.
       feedbackRequired: !directive && data.feedbackRequired !== false,
       feedbackLink: data.feedbackLink || '',
+      history: [],
       createdAt: nowISO(),
       updatedAt: nowISO()
     };
-    state.events.push(e);
-    commit();
+    // A new activity dated inside a closed year would be filed straight into its archive.
+    assertOpen('event', e);
+    logOn(e, 'event', data.historyNote || ('created this ' + (directive ? 'directive' : 'event')));
     return e;
+  }
+
+  /* The line a status change leaves in the history. */
+  function eventStatusLine(e, from, to) {
+    var noun = isDirectiveSet(e) ? 'directive' : 'activity';
+    if (to === 'Completed') return 'marked the ' + noun + ' completed';
+    if (to === 'Archived') return 'archived the ' + noun;
+    if (from === 'Archived') return 'restored the ' + noun + ' from the archive';
+    return 'set the status to ' + to;
   }
 
   function updateEvent(id, data) {
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     if ('title' in data && !String(data.title || '').trim()) {
       throw new Error('An activity needs a title.');
     }
     var start = 'dateStart' in data ? dateOnly(data.dateStart) : e.dateStart;
     var end = 'dateEnd' in data ? dateOnly(data.dateEnd) : e.dateEnd;
     checkEventDates(start, end);
+    // Nor may a new date carry it into a closed year.
+    if (yearLocked(yearOfDate(start || U.dayOf(e.createdAt)))) {
+      throw new Error('That date falls in an archived academic year. Pick a date in the current year.');
+    }
+    var before = {
+      title: e.title, dateStart: e.dateStart, dateEnd: e.dateEnd, status: e.status,
+      headId: e.headId, description: e.description, venue: e.venue, feedbackLink: e.feedbackLink
+    };
     ['title', 'description', 'venue'].forEach(function (k) {
       if (k in data) e[k] = (data[k] || '').trim();
     });
@@ -1826,6 +2235,30 @@
     if ('status' in data && EVENT_STATUSES.indexOf(data.status) >= 0) e.status = data.status;
     if ('unitId' in data && unit(data.unitId)) e.unitId = data.unitId;
     if ('feedbackLink' in data) e.feedbackLink = formLink(data.feedbackLink);
+
+    /* What changed, said once each. Wording edits to the description or the
+       venue are one line between them: somebody reading the history wants to
+       know the details were touched, not a diff. */
+    var dir = isDirectiveSet(e);
+    if (e.title !== before.title) {
+      logOn(e, 'event', 'renamed the ' + (dir ? 'directive' : 'event') + ' to “' + e.title + '”');
+    }
+    if (e.dateStart !== before.dateStart || e.dateEnd !== before.dateEnd) {
+      logOn(e, 'event', e.dateStart ? 'moved the date to ' + U.fmtRange(e.dateStart, e.dateEnd)
+                                    : 'cleared the date');
+    }
+    if (e.status !== before.status) logOn(e, 'event', eventStatusLine(e, before.status, e.status));
+    if (e.headId !== before.headId) {
+      logOn(e, 'event', e.headId
+        ? 'made ' + personName(e.headId) + (dir ? ' answerable for it' : ' the event head')
+        : 'cleared the ' + (dir ? 'person answerable' : 'event head'));
+    }
+    if (e.feedbackLink !== before.feedbackLink) {
+      logOn(e, 'event', e.feedbackLink ? 'added the feedback form' : 'removed the feedback form link');
+    }
+    if (e.description !== before.description || e.venue !== before.venue) {
+      logOn(e, 'event', 'edited the details');
+    }
     e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
@@ -1841,6 +2274,7 @@
   function makeVolunteerCode(id) {
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     if (isDirectiveSet(e)) throw new Error('A directive takes no volunteers.');
     if (isShelved(e) || e.status === 'Completed') {
       throw new Error('That activity is over, so a code would open nothing.');
@@ -1866,6 +2300,7 @@
   function clearVolunteerCode(id) {
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     e.volunteerCode = '';
     e.volunteerCodeAt = '';
     e.updatedAt = bumpStamp(e.updatedAt);
@@ -1891,6 +2326,7 @@
     opts = opts || {};
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     var reason = String(opts.reason || '').trim();
     if (!reason) throw new Error('Say why it was called off. One line is enough.');
     if (e.status === 'Cancelled') throw new Error('That activity is already cancelled.');
@@ -1904,6 +2340,7 @@
     e.cancelledAt = nowISO();
     e.rescheduleWanted = !!opts.rescheduleWanted;
     e.rescheduleDate = e.rescheduleWanted ? on : '';
+    logOn(e, 'event', 'called the activity off: \u201c' + e.cancelReason + '\u201d');
     e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
@@ -1916,6 +2353,7 @@
     data = data || {};
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     if (e.status !== 'Cancelled') throw new Error('That activity is not cancelled.');
 
     var start = 'dateStart' in data ? dateOnly(data.dateStart) : e.dateStart;
@@ -1930,6 +2368,8 @@
     e.cancelledAt = '';
     e.rescheduleWanted = false;
     e.rescheduleDate = '';
+    logOn(e, 'event', 'put the activity back on' +
+      (e.dateStart ? ' for ' + U.fmtRange(e.dateStart, e.dateEnd) : ''));
     e.updatedAt = bumpStamp(e.updatedAt);
     commit();
     return e;
@@ -1948,9 +2388,13 @@
   function setFeedbackLink(id, link) {
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     var v = formLink(link);
     if (link && !v) {
       throw new Error('That needs to be a Google Forms link — docs.google.com/forms or forms.gle.');
+    }
+    if (v !== e.feedbackLink) {
+      logOn(e, 'event', v ? 'added the feedback form' : 'removed the feedback form link');
     }
     e.feedbackLink = v;
     e.updatedAt = bumpStamp(e.updatedAt);
@@ -1963,10 +2407,12 @@
   function waiveFeedback(id, reason, by) {
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
     var r = (reason || '').trim();
     if (r.length < 10) {
       throw new Error('Write down why this activity does not need a feedback form.');
     }
+    logOn(e, 'event', 'set the feedback form aside: \u201c' + str(r, 120) + '\u201d');
     e.feedbackRequired = false;
     e.feedbackWaivedReason = str(r, LIMITS.reason);
     e.feedbackWaivedBy = str(by || '', LIMITS.name);
@@ -1979,6 +2425,8 @@
   function restoreFeedback(id) {
     var e = event(id);
     if (!e) return null;
+    assertOpen('event', e);
+    logOn(e, 'event', 'required a feedback form again');
     e.feedbackRequired = true;
     e.feedbackWaivedReason = '';
     e.feedbackWaivedBy = '';
@@ -1989,6 +2437,7 @@
   }
 
   function deleteEvent(id) {
+    assertOpen('event', event(id));
     state.tasks.forEach(function (t) { if (t.eventId === id) tombstone('task', t.id); });
 
     /* The report was marked deleted and then left sitting in state, so it
@@ -2055,10 +2504,17 @@
   }
 
   function addTask(data) {
+    var t = buildTask(data);
+    state.tasks.push(t);
+    commit();
+    return t;
+  }
+
+  function buildTask(data) {
     // A directive is council business that belongs to no activity — a standing
     // instruction. Everything else still has to sit inside an event.
     var isDirective = data.kind === 'directive';
-    if (!isDirective && (!data.eventId || !event(data.eventId))) {
+    if (!isDirective && (!data.eventId || !(event(data.eventId) || data.eventReady))) {
       throw new Error('A task must belong to an event.');
     }
     /* The forms all check these first. The store checks them too, because a
@@ -2084,21 +2540,60 @@
       status: STATUSES.indexOf(data.status) >= 0 ? data.status : 'Not Started',
       blockedReason: (data.blockedReason || '').trim(),
       completedAt: '',
+      history: [],
       createdAt: nowISO(),
       updatedAt: nowISO()
     };
     if (t.status === 'Done') t.completedAt = nowISO();
-    state.tasks.push(t);
-    commit();
+    assertOpen('task', t);
+    logOn(t, 'task', 'created the task \u201c' + t.title + '\u201d' +
+      (t.assigneeId ? ' and gave it to ' + personName(t.assigneeId) : ''));
     return t;
+  }
+
+  /* The lines an edit to a task leaves, each naming the task — they are read
+     inside the task, and also gathered into its activity's history, where a
+     line without the task's name would say nothing. */
+  function logTaskChanges(t, before) {
+    var name = '\u201c' + before.title + '\u201d';
+    if (t.title !== before.title) {
+      logOn(t, 'task', 'renamed ' + name + ' to \u201c' + t.title + '\u201d');
+      name = '\u201c' + t.title + '\u201d';
+    }
+    if (t.assigneeId !== before.assigneeId) {
+      logOn(t, 'task', t.assigneeId
+        ? 'assigned ' + name + ' to ' + personName(t.assigneeId)
+        : 'took ' + name + ' off ' + personName(before.assigneeId));
+    }
+    if (t.status !== before.status) {
+      logOn(t, 'task', 'changed ' + name + ' \u2192 ' + t.status +
+        (t.status === 'On hold' && t.blockedReason ? ' (' + str(t.blockedReason, 80) + ')' : ''));
+    }
+    if (t.dueDate !== before.dueDate) {
+      logOn(t, 'task', t.dueDate
+        ? 'moved the due date of ' + name + ' to ' + U.fmtDateShort(t.dueDate)
+        : 'cleared the due date of ' + name);
+    }
+    if (t.priority !== before.priority) logOn(t, 'task', 'set ' + name + ' to ' + t.priority + ' priority');
+    if (t.eventId !== before.eventId) {
+      var ev = event(t.eventId);
+      logOn(t, 'task', 'moved ' + name + (ev ? ' to \u201c' + ev.title + '\u201d' : ''));
+    }
+    if (t.remarks !== before.remarks) logOn(t, 'task', 'edited the remarks on ' + name);
   }
 
   function updateTask(id, data) {
     var t = task(id);
     if (!t) return null;
+    assertOpen('task', t);
+    if ('eventId' in data && data.eventId !== t.eventId) assertOpen('event', event(data.eventId));
     if ('title' in data && !String(data.title || '').trim()) {
       throw new Error('A task needs a title.');
     }
+    var before = {
+      title: t.title, assigneeId: t.assigneeId, status: t.status, dueDate: t.dueDate,
+      priority: t.priority, eventId: t.eventId, remarks: t.remarks
+    };
     ['title', 'remarks', 'blockedReason'].forEach(function (k) {
       if (k in data) t[k] = (data[k] || '').trim();
     });
@@ -2112,6 +2607,7 @@
     if ('priority' in data && PRIORITIES.indexOf(data.priority) >= 0) t.priority = data.priority;
     if ('status' in data && STATUSES.indexOf(data.status) >= 0) applyStatus(t, data.status);
     if (t.status !== 'On hold') t.blockedReason = '';
+    logTaskChanges(t, before);
     t.updatedAt = bumpStamp(t.updatedAt);
     commit();
     return t;
@@ -2131,8 +2627,18 @@
   }
 
   function deleteTask(id) {
+    var t = task(id);
+    assertOpen('task', t);
+    /* The task goes, and its history with it — so the activity keeps the one
+       line that says it was ever there. Not bumped as an edit of the activity
+       by anybody's hand; it is bookkeeping, but it has to travel. */
+    var ev = t && t.eventId ? event(t.eventId) : null;
+    if (ev) {
+      logOn(ev, 'event', 'deleted the task \u201c' + t.title + '\u201d');
+      ev.updatedAt = bumpStamp(ev.updatedAt);
+    }
     tombstone('task', id);
-    state.tasks = state.tasks.filter(function (t) { return t.id !== id; });
+    state.tasks = state.tasks.filter(function (x) { return x.id !== id; });
     commit();
   }
 
@@ -2267,6 +2773,7 @@
 
   function saveReport(eventId, patch) {
     if (!event(eventId)) throw new Error('That event no longer exists.');
+    assertOpen('event', event(eventId));
     var r = report(eventId);
     if (!r) { r = blankReport(eventId); state.reports.push(r); }
     Object.keys(patch || {}).forEach(function (k) {
@@ -2282,6 +2789,7 @@
   }
 
   function deleteReport(eventId) {
+    assertOpen('event', event(eventId));
     var r = report(eventId);
     if (r) tombstone('report', r.id);
     state.reports = state.reports.filter(function (x) { return x.eventId !== eventId; });
@@ -2707,6 +3215,7 @@
   function updateLetter(lid, data) {
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     if ('subject' in data) l.subject = str(data.subject, LIMITS.title) || l.subject;
     if ('eventId' in data) l.eventId = data.eventId && event(data.eventId) ? data.eventId : '';
     if ('inChargeId' in data) l.inChargeId = person(data.inChargeId) ? data.inChargeId : '';
@@ -2732,6 +3241,7 @@
   function insertStop(lid, entry, before) {
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     var st = entryStop(entry);
     if (!st) throw new Error('Choose an office, or type who has to sign.');
     if (l.stops.length >= 30) throw new Error('That letter already has thirty signatories on it.');
@@ -2764,6 +3274,7 @@
   }
 
   function deleteLetter(lid) {
+    assertOpen('letter', letter(lid));
     tombstone('letter', lid);
     state.letters = state.letters.filter(function (l) { return l.id !== lid; });
     commit();
@@ -2899,6 +3410,7 @@
   function receiveStop(lid, stopId, data) {
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return null;
     onRoute(l, s, 'record');
@@ -2922,6 +3434,7 @@
   function releaseStop(lid, stopId, data) {
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return null;
     onRoute(l, s, 'record');
@@ -2957,6 +3470,7 @@
     data = data || {};
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s) return null;
     if (!s.receivedAt) {
@@ -2991,6 +3505,7 @@
   function undoLastStep(lid) {
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     var step = lastStep(l);
     if (!step) throw new Error('Nothing has been recorded on this letter yet.');
     var s = step.stop;
@@ -3027,6 +3542,7 @@
   function reopenStop(lid, stopId) {
     var l = letter(lid);
     if (!l) return null;
+    assertOpen('letter', l);
     var s = l.stops.filter(function (x) { return x.id === stopId; })[0];
     if (!s || !wasReturned(s)) return l;
     var at = l.stops.indexOf(s);
@@ -3382,9 +3898,16 @@
       task: state.tasks.map(function (t) { return t.id; }),
       letter: state.letters.map(function (l) { return l.id; }),
       report: state.reports.map(function (r) { return r.id; }),
-      person: state.people.map(function (p) { return p.id; })
+      person: state.people.map(function (p) { return p.id; }),
+      announcement: state.announcements.map(function (a) { return a.id; }),
+      ack: state.acks.map(function (k) { return k.id; })
     };
     var reportIds = going.report.slice();
+    /* Setup that outlives an administration: the templates a unit reuses and
+       the record of which academic years are closed. */
+    var keepTemplates = state.templates;
+    var keepYears = state.years;
+    var keepStartMonth = state.yearStartMonth;
 
     /* Kept as well, because none of it is the year's work: the council's own
        lists of positions and committees; the deletions already made, which the
@@ -3406,6 +3929,9 @@
     state.positions = keepPositions || state.positions;
     state.committees = keepCommittees || state.committees;
     state.councilAt = keepCouncilAt || '';
+    state.templates = keepTemplates || [];
+    state.years = keepYears || [];
+    state.yearStartMonth = keepStartMonth || 6;
     state.seeded = true;
 
     /* A deletion that is not recorded is a deletion nobody else hears of. */
@@ -3487,6 +4013,507 @@
     return state.org;
   }
 
+  /* ---------- an activity and its tasks, in one save ---------- */
+
+  /* Used by templates and by duplicating: the activity, then every task that
+     belongs to it, then a single write. `tasks` is a list of task fields; the
+     activity's id is filled in here. */
+  function createEventWithTasks(data, taskList) {
+    var e = buildEvent(data);
+    var made = (taskList || []).map(function (td) {
+      var copy = {};
+      Object.keys(td || {}).forEach(function (k) { copy[k] = td[k]; });
+      copy.eventId = e.id;
+      copy.eventReady = true;
+      copy.kind = 'event';
+      return buildTask(copy);
+    });
+    state.events.push(e);
+    made.forEach(function (t) { state.tasks.push(t); });
+    commit();
+    return { event: e, tasks: made };
+  }
+
+  /* ---------- duplicating an activity ----------
+
+     Teachers' Day, the Founders' activities, Christian Emphasis Week: the same
+     activity every year, set up from nothing every year. A copy starts as a
+     fresh record — nothing about how the last one went comes with it: no
+     finished statuses, no completion dates, no report, no letters, no
+     feedback responses. Only the shape of the work. */
+  function duplicateEvent(sourceId, opts) {
+    opts = opts || {};
+    var src = event(sourceId);
+    if (!src) throw new Error('That activity is no longer here.');
+    var title = String(opts.title || '').trim();
+    if (!title) throw new Error('Give the new activity a title.');
+    var start = dateOnly(opts.dateStart);
+    if (!start && !isDirectiveSet(src)) throw new Error('Pick the new date.');
+
+    // How far the whole thing moves, so each task lands the same distance from the day.
+    var shift = src.dateStart && start ? U.daysBetween(src.dateStart, start) : 0;
+    var length = src.dateStart && src.dateEnd ? U.daysBetween(src.dateStart, src.dateEnd) : 0;
+    var settings = opts.includeSettings !== false;
+
+    var data = {
+      kind: src.kind, title: title,
+      // Copying another unit's activity makes one for your own unit.
+      unitId: opts.unitId && unit(opts.unitId) ? opts.unitId : src.unitId,
+      dateStart: start,
+      dateEnd: start && length > 0 ? U.addDays(start, length) : '',
+      description: settings ? src.description : '',
+      venue: settings ? src.venue : '',
+      headId: settings && src.headId && person(src.headId) && person(src.headId).active !== false
+        ? src.headId : '',
+      status: 'Upcoming',
+      feedbackRequired: settings ? src.feedbackRequired !== false : true,
+      historyNote: 'created this ' + (isDirectiveSet(src) ? 'directive' : 'event') +
+        ' as a copy of “' + src.title + '”'
+    };
+
+    var list = !opts.includeTasks ? [] : tasks({ eventId: src.id }).map(function (t) {
+      var who = opts.keepAssignees !== false && t.assigneeId && person(t.assigneeId) &&
+        person(t.assigneeId).active !== false ? t.assigneeId : '';
+      return {
+        title: t.title, priority: t.priority, remarks: t.remarks, assigneeId: who,
+        dueDate: t.dueDate ? (shift ? U.addDays(t.dueDate, shift) : t.dueDate) : '',
+        status: 'Not Started'
+      };
+    });
+
+    var out = createEventWithTasks(data, list);
+
+    /* The same helpers, on the new activity too. Their accounts are untouched;
+       they are simply taken on for this one as well. */
+    if (opts.includeVolunteers && !isDirectiveSet(src)) {
+      volunteersFor(src.id).forEach(function (v) {
+        if ((v.eventIds || []).indexOf(out.event.id) < 0) {
+          v.eventIds = (v.eventIds || []).concat([out.event.id]).slice(0, 200);
+          v.updatedAt = bumpStamp(v.updatedAt);
+        }
+      });
+      commit();
+    }
+    return out;
+  }
+
+  /* ---------- the Bulletin Board ---------- */
+
+  function announcements() {
+    return state.announcements.slice().sort(function (a, b) {
+      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+      var ap = a.publishAt || a.createdAt, bp = b.publishAt || b.createdAt;
+      return ap < bp ? 1 : ap > bp ? -1 : 0;
+    });
+  }
+
+  function announcement(aid) {
+    for (var i = 0; i < state.announcements.length; i++) {
+      if (state.announcements[i].id === aid) return state.announcements[i];
+    }
+    return null;
+  }
+
+  /* Where an announcement stands right now. Derived from its dates on every
+     read, so it moves from Active to Previous on the day it expires without
+     anybody or anything having to move it. */
+  function announcementState(a, at) {
+    if (!a) return 'gone';
+    var now = at || nowISO();
+    if (a.published === false) return 'draft';
+    if (a.expiresAt && a.expiresAt <= now) return 'expired';
+    if (a.publishAt && a.publishAt > now) return 'scheduled';
+    return 'active';
+  }
+
+  /* Whether an announcement is addressed to somebody. `who` is
+     { unitId, national, officer, personId }; the Bulletin screen fills it in
+     from whoever is signed in. The database asks the same question before it
+     hands the row over at all (workspace.sql); this is so the screens agree. */
+  function announcementFor(a, who) {
+    if (!a || !who) return false;
+    if (who.national) return true;
+    var aud = a.audience || {};
+    if (aud.kind === 'everyone') return !!who.officer;
+    if (aud.kind === 'nationals') return false;
+    if (aud.kind === 'units') return !!who.officer && (aud.unitIds || []).indexOf(who.unitId) >= 0;
+    if (aud.kind === 'people') return !!who.personId && (aud.personIds || []).indexOf(who.personId) >= 0;
+    return false;
+  }
+
+  /* Only the FCUSR Nationals publish to the Bulletin Board. Asked here as well
+     as on the screen, so a button left showing by mistake still cannot write;
+     the database refuses it a third time. */
+  function mayPublish() {
+    return !global.Auth || !Auth.canPublishBulletin || Auth.canPublishBulletin();
+  }
+
+  function announcementFields(a, data) {
+    ['title'].forEach(function (k) { if (k in data) a[k] = data[k]; });
+    if ('message' in data) a.message = data.message;
+    if ('audience' in data) a.audience = data.audience;
+    if ('priority' in data) a.priority = data.priority;
+    if ('published' in data) a.published = !!data.published;
+    if ('publishAt' in data) a.publishAt = data.publishAt;
+    if ('expiresAt' in data) a.expiresAt = data.expiresAt;
+    if ('link' in data) a.link = data.link;
+    if ('pinned' in data) a.pinned = !!data.pinned;
+    if ('requireAck' in data) a.requireAck = !!data.requireAck;
+  }
+
+  function checkAnnouncement(a) {
+    if (!a) throw new Error('Give the announcement a title.');
+    if (a.expiresAt && a.publishAt && a.expiresAt <= a.publishAt) {
+      throw new Error('It cannot expire before it is published.');
+    }
+    if (a.audience.kind === 'units' && !a.audience.unitIds.length) {
+      throw new Error('Choose at least one unit to send it to.');
+    }
+    if (a.audience.kind === 'people' && !a.audience.personIds.length) {
+      throw new Error('Choose at least one person to send it to.');
+    }
+  }
+
+  function addAnnouncement(data) {
+    if (!mayPublish()) throw new Error('Only FCUSR Nationals can post to the Bulletin Board.');
+    var raw = {
+      id: U.uid('ann'),
+      unitId: (global.Auth && Auth.signedIn() && Auth.myUnitId()) || nationalUnitId(),
+      published: true, publishAt: nowISO(),
+      createdBy: actorName(), history: [],
+      createdAt: nowISO(), updatedAt: nowISO()
+    };
+    announcementFields(raw, data);
+    var a = cleanAnnouncement(raw);
+    checkAnnouncement(a);
+    logOn(a, 'announcement', a.published ? (a.publishAt > nowISO() ? 'scheduled it' : 'published it')
+                                         : 'saved it as a draft');
+    state.announcements.push(a);
+    commit();
+    return a;
+  }
+
+  function updateAnnouncement(aid, data) {
+    if (!mayPublish()) throw new Error('Only FCUSR Nationals can change the Bulletin Board.');
+    var a = announcement(aid);
+    if (!a) return null;
+    assertOpen('announcement', a);
+    var was = { published: a.published, pinned: a.pinned, title: a.title };
+    var copy = JSON.parse(JSON.stringify(a));
+    announcementFields(copy, data);
+    var clean = cleanAnnouncement(copy);
+    checkAnnouncement(clean);
+    if (!was.published && clean.published) logOn(clean, 'announcement', 'published it');
+    else if (was.published && !clean.published) logOn(clean, 'announcement', 'took it back to a draft');
+    if (was.pinned !== clean.pinned) logOn(clean, 'announcement', clean.pinned ? 'pinned it' : 'unpinned it');
+    if (('title' in data || 'message' in data || 'audience' in data || 'expiresAt' in data) &&
+        !('pinned' in data && Object.keys(data).length === 1)) {
+      logOn(clean, 'announcement', 'edited it');
+    }
+    clean.updatedAt = bumpStamp(a.updatedAt);
+    state.announcements[state.announcements.indexOf(a)] = clean;
+    commit();
+    return clean;
+  }
+
+  function deleteAnnouncement(aid) {
+    if (!mayPublish()) throw new Error('Only FCUSR Nationals can remove an announcement.');
+    var a = announcement(aid);
+    if (!a) return false;
+    assertOpen('announcement', a);
+    tombstone('announcement', aid);
+    state.announcements = state.announcements.filter(function (x) { return x.id !== aid; });
+    // The server drops its acknowledgements with it; this device does the same.
+    state.acks = state.acks.filter(function (k) { return k.announcementId !== aid; });
+    commit();
+    return true;
+  }
+
+  function acks(aid) {
+    return state.acks.filter(function (k) { return !aid || k.announcementId === aid; });
+  }
+
+  function hasAcked(aid, profileId) {
+    if (!aid || !profileId) return false;
+    return state.acks.some(function (k) { return k.announcementId === aid && k.profileId === profileId; });
+  }
+
+  /* "I have read this." Recorded against the account, not the directory entry:
+     it is the person at the screen who read it, and the account is what the
+     database can check is really them. */
+  function acknowledge(aid) {
+    var a = announcement(aid);
+    if (!a) throw new Error('That announcement is no longer on the board.');
+    var who = global.Auth && Auth.signedIn() ? Auth.current() : null;
+    var profileId = who ? who.id : 'local';
+    if (hasAcked(aid, profileId)) return null;
+    var k = cleanAck({
+      id: U.hashUuid(aid + '|' + profileId),
+      announcementId: aid, profileId: profileId,
+      email: who ? who.email : '', name: who ? who.name : (person(lastPerson()) || { name: 'This device' }).name,
+      at: nowISO(), createdAt: nowISO(), updatedAt: nowISO()
+    });
+    if (!k) throw new Error('Sign in again, then confirm you have read it.');
+    state.acks.push(k);
+    commit();
+    return k;
+  }
+
+  /* Everybody an announcement is addressed to who could possibly read it: the
+     people with a sign-in, in the audience, still active. The directory is the
+     roll; somebody with no login has no way to press the button, so counting
+     them would leave the number short for ever. */
+  function announcementRoll(a) {
+    if (!a) return [];
+    var aud = a.audience || {};
+    return state.people.filter(function (p) {
+      if (p.active === false || !p.email) return false;
+      if (aud.kind === 'people') return (aud.personIds || []).indexOf(p.id) >= 0;
+      if (p.access !== 'officer') return false;
+      var u = unit(p.unitId);
+      if (aud.kind === 'nationals') return !!u && u.kind === 'national';
+      if (aud.kind === 'units') return (aud.unitIds || []).indexOf(p.unitId) >= 0;
+      return true;
+    }).sort(function (x, y) { return x.name.localeCompare(y.name); });
+  }
+
+  /* Who has and has not read it, matched by the address their account was made
+     with — the one thing the directory and the account agree on. */
+  function ackStatus(aid) {
+    var a = announcement(aid);
+    var roll = announcementRoll(a);
+    var byMail = {};
+    acks(aid).forEach(function (k) { if (k.email) byMail[k.email] = k; });
+    var done = [], waiting = [];
+    roll.forEach(function (p) {
+      if (byMail[p.email]) done.push({ person: p, ack: byMail[p.email] });
+      else waiting.push({ person: p });
+    });
+    return { total: roll.length, done: done, waiting: waiting, count: acks(aid).length };
+  }
+
+  /* ---------- event templates ---------- */
+
+  function templates(opts) {
+    opts = opts || {};
+    return state.templates.filter(function (t) {
+      if (!opts.includeArchived && t.archived) return false;
+      // What a unit may use: its own, and the ones shared across the Republic.
+      if (opts.usableBy) return t.shared || t.unitId === opts.usableBy;
+      return true;
+    }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+  }
+
+  function template(tid) {
+    for (var i = 0; i < state.templates.length; i++) if (state.templates[i].id === tid) return state.templates[i];
+    return null;
+  }
+
+  function mayEditTemplate(t) {
+    return !global.Auth || !Auth.canEditTemplate || Auth.canEditTemplate(t);
+  }
+
+  function addTemplate(data) {
+    var raw = {
+      id: U.uid('tpl'),
+      unitId: data.unitId || (global.Auth && Auth.signedIn() && Auth.myUnitId()) || nationalUnitId(),
+      name: data.name, description: data.description, venue: data.venue,
+      durationDays: data.durationDays, feedbackRequired: data.feedbackRequired,
+      volunteers: data.volunteers, tasks: data.tasks, shared: !!data.shared,
+      createdBy: actorName(), history: [],
+      createdAt: nowISO(), updatedAt: nowISO()
+    };
+    var t = cleanTemplate(raw);
+    if (!t) throw new Error('Give the template a name.');
+    if (!mayEditTemplate(t)) {
+      throw new Error(t.shared ? 'Only FCUSR Nationals can share a template with every unit.'
+                               : 'You cannot add templates for that unit.');
+    }
+    logOn(t, 'template', data.historyNote || 'made this template');
+    state.templates.push(t);
+    commit();
+    return t;
+  }
+
+  function updateTemplate(tid, data) {
+    var t = template(tid);
+    if (!t) return null;
+    if (!mayEditTemplate(t)) throw new Error('That template belongs to another unit.');
+    var copy = JSON.parse(JSON.stringify(t));
+    ['name', 'description', 'venue', 'durationDays', 'feedbackRequired', 'volunteers',
+     'tasks', 'shared', 'archived'].forEach(function (k) { if (k in data) copy[k] = data[k]; });
+    var clean = cleanTemplate(copy);
+    if (!clean) throw new Error('Give the template a name.');
+    if (!mayEditTemplate(clean)) throw new Error('Only FCUSR Nationals can share a template with every unit.');
+    if (t.archived !== clean.archived) logOn(clean, 'template', clean.archived ? 'archived it' : 'brought it back');
+    else if (t.name !== clean.name) logOn(clean, 'template', 'renamed it to “' + clean.name + '”');
+    else logOn(clean, 'template', 'edited it');
+    clean.updatedAt = bumpStamp(t.updatedAt);
+    state.templates[state.templates.indexOf(t)] = clean;
+    commit();
+    return clean;
+  }
+
+  function deleteTemplate(tid) {
+    var t = template(tid);
+    if (!t) return false;
+    if (!mayEditTemplate(t)) throw new Error('That template belongs to another unit.');
+    tombstone('template', tid);
+    state.templates = state.templates.filter(function (x) { return x.id !== tid; });
+    commit();
+    return true;
+  }
+
+  /* An activity that went well, kept as the starting point for the next one.
+     Its tasks become the list, each at the same distance from the day. */
+  function templateFromEvent(eventId, data) {
+    var e = event(eventId);
+    if (!e) throw new Error('That activity is no longer here.');
+    return addTemplate({
+      name: data.name || e.title, description: e.description, venue: e.venue,
+      durationDays: e.dateStart && e.dateEnd ? U.daysBetween(e.dateStart, e.dateEnd) + 1 : 1,
+      feedbackRequired: e.feedbackRequired !== false,
+      volunteers: volunteersFor(e.id).length > 0,
+      shared: !!data.shared, unitId: data.unitId,
+      historyNote: 'made this template from “' + e.title + '”',
+      tasks: tasks({ eventId: e.id }).map(function (t) {
+        return {
+          title: t.title, priority: t.priority,
+          offsetDays: e.dateStart && t.dueDate ? U.daysBetween(e.dateStart, t.dueDate) : 0
+        };
+      })
+    });
+  }
+
+  /* ---------- academic years ---------- */
+
+  function mayManageYears() {
+    return !global.Auth || !Auth.canManageYears || Auth.canManageYears();
+  }
+
+  /* The current year first, then the archived ones, newest first. */
+  function years() {
+    return [currentYear()].concat(state.years.slice().reverse());
+  }
+
+  function yearCounts(yid) {
+    var inYear = function (kind) { return function (r) { return yearOf(kind, r) === yid; }; };
+    var evs = state.events.filter(inYear('event'));
+    return {
+      events: evs.filter(function (e) { return !isDirectiveSet(e); }).length,
+      directives: evs.filter(isDirectiveSet).length +
+        state.tasks.filter(function (t) { return (t.kind || 'event') === 'directive'; })
+          .filter(inYear('task')).length,
+      tasks: state.tasks.filter(function (t) { return (t.kind || 'event') === 'event'; })
+        .filter(inYear('task')).length,
+      letters: state.letters.filter(inYear('letter')).length,
+      announcements: state.announcements.filter(inYear('announcement')).length,
+      reports: state.reports.filter(inYear('report')).length
+    };
+  }
+
+  /* Closing an academic year. Nothing is deleted, copied or moved: the year is
+     written down as archived, and every record dated inside it becomes
+     read-only and leaves the working screens. The next year starts the day
+     after. It can be opened again for corrections, and the latest one can be
+     returned to current altogether. */
+  function archiveYear(opts) {
+    opts = opts || {};
+    if (!mayManageYears()) throw new Error('Only the President can close an academic year.');
+    var cur = currentYear();
+    var end = dateOnly(opts.end);
+    if (!end) throw new Error('Pick the last day of the year being closed.');
+    if (end > U.today()) throw new Error('A year can only be closed on or after its last day.');
+    /* The first year ever closed reaches back to the beginning, so it can end
+       anywhere. After that, a year starts the day after the last one ended. */
+    var first = !state.years.length;
+    if (!first && end < cur.start) {
+      throw new Error('That is before this year began (' + U.fmtDateShort(cur.start) + ').');
+    }
+    var y = cleanYears([{
+      start: first ? '' : cur.start, end: end,
+      note: opts.note || '', archivedAt: nowISO(), archivedBy: actorName()
+    }])[0];
+    y.label = yearLabel(first ? '' : cur.start, end);
+    state.years.push(y);
+    state.years = cleanYears(state.years);
+    touchCouncil();
+    commit();
+    return y;
+  }
+
+  /* Opened for corrections, for a set time, and closed again by itself. */
+  function unlockYear(yid, minutes) {
+    if (!mayManageYears()) throw new Error('Only the President can reopen an archived year.');
+    var y = archivedYear(yid);
+    if (!y) return null;
+    y.unlockedUntil = new Date(Date.now() + (minutes || 30) * 60000).toISOString();
+    y.unlockedBy = actorName();
+    touchCouncil();
+    commit();
+    return y;
+  }
+
+  function lockYear(yid) {
+    if (!mayManageYears()) throw new Error('Only the President can close an archived year.');
+    var y = archivedYear(yid);
+    if (!y) return null;
+    y.unlockedUntil = '';
+    touchCouncil();
+    commit();
+    return y;
+  }
+
+  /* Undoing the most recent close entirely: its records are current again.
+     Only the latest, so no year is ever left with a gap in the middle. */
+  function restoreYear(yid) {
+    if (!mayManageYears()) throw new Error('Only the President can return a year to current.');
+    var last = state.years[state.years.length - 1];
+    if (!last || last.id !== yid) throw new Error('Only the most recently archived year can be returned.');
+    state.years.pop();
+    touchCouncil();
+    commit();
+    return true;
+  }
+
+  function setYearStartMonth(m) {
+    if (!mayManageYears()) throw new Error('Only the President can change when the year starts.');
+    state.yearStartMonth = startMonth(m);
+    touchCouncil();
+    commit();
+    return state.yearStartMonth;
+  }
+
+  /* ---------- reading the history ---------- */
+
+  /* An activity's history is its own lines and every line its tasks carry,
+     together, newest first — "who did what to this activity" is one question. */
+  function historyFor(kind, rid) {
+    var rows = [];
+    var add = function (list, where) {
+      (list || []).forEach(function (h) { rows.push({ at: h.at, by: h.by, text: h.text, where: where || '' }); });
+    };
+    if (kind === 'event') {
+      var e = event(rid);
+      if (!e) return [];
+      add(e.history);
+      tasks({ eventId: rid }).forEach(function (t) { add(t.history); });
+    } else if (kind === 'task') {
+      var t2 = task(rid);
+      if (t2) add(t2.history);
+    } else if (kind === 'announcement') {
+      var a = announcement(rid);
+      if (a) add(a.history);
+    } else if (kind === 'person') {
+      var p = person(rid);
+      if (p) add(p.history);
+    } else if (kind === 'template') {
+      var tp = template(rid);
+      if (tp) add(tp.history);
+    }
+    return rows.sort(function (x, y) { return x.at < y.at ? 1 : x.at > y.at ? -1 : 0; });
+  }
+
   /* ---------- backup ---------- */
 
   function toJSON() {
@@ -3527,11 +4554,16 @@
     var keepOrg = state.org;
     var keepUnits = state.units;
     var keepOffices = state.offices;
+    var keepYears = state.years;
+    var keepStartMonth = state.yearStartMonth;
 
     state = blank();
     state.org = keepOrg;
     state.units = keepUnits;
     state.offices = keepOffices;
+    // Which years are closed is the Republic's setup, not the last person's work.
+    state.years = keepYears;
+    state.yearStartMonth = keepStartMonth;
     state.seeded = true;          // no rehearsal for whoever signs in next
     /* And whose name My tasks was showing. It lived outside this record and was
        only cleared when a term closed, so on a shared computer the next officer
@@ -3549,10 +4581,16 @@
     var keepOrg = state.org;
     var keepUnits = state.units;
     var keepOffices = state.offices;
+    var keepTemplates = state.templates;
+    var keepYears = state.years;
+    var keepStartMonth = state.yearStartMonth;
     state = blank();
     state.org = keepOrg;
     state.units = keepUnits;
     state.offices = keepOffices;
+    state.templates = keepTemplates;
+    state.years = keepYears;
+    state.yearStartMonth = keepStartMonth;
     /* The units, the offices and the letterhead are setup and survive. A closing
        date is not setup — it belongs to the administration being deleted, and so
        does the dry run. */
@@ -3975,6 +5013,25 @@
     lastPerson: lastPerson, setLastPerson: setLastPerson,
     toJSON: toJSON, fromJSON: fromJSON,
     resetAll: resetAll,
-    clearLocalCopy: clearLocalCopy, _seedRehearsal: _seedRehearsal
+    clearLocalCopy: clearLocalCopy, _seedRehearsal: _seedRehearsal,
+
+    // The workspace update: bulletin, templates, duplicating, academic years, history.
+    BULLETIN_PRIORITIES: BULLETIN_PRIORITIES, AUDIENCE_KINDS: AUDIENCE_KINDS,
+    announcements: announcements, announcement: announcement,
+    announcementState: announcementState, announcementFor: announcementFor,
+    addAnnouncement: addAnnouncement, updateAnnouncement: updateAnnouncement,
+    deleteAnnouncement: deleteAnnouncement,
+    acks: acks, hasAcked: hasAcked, acknowledge: acknowledge,
+    announcementRoll: announcementRoll, ackStatus: ackStatus,
+    templates: templates, template: template, addTemplate: addTemplate,
+    updateTemplate: updateTemplate, deleteTemplate: deleteTemplate,
+    templateFromEvent: templateFromEvent,
+    createEventWithTasks: createEventWithTasks, duplicateEvent: duplicateEvent,
+    years: years, currentYear: currentYear, yearInfo: yearInfo, archivedYears: archivedYears,
+    yearOf: yearOf, yearOfDate: yearOfDate, yearLocked: yearLocked, isLocked: isLocked,
+    anchorOf: anchorOf, yearCounts: yearCounts, yearStartMonth: function () { return state.yearStartMonth; },
+    archiveYear: archiveYear, unlockYear: unlockYear, lockYear: lockYear, restoreYear: restoreYear,
+    setYearStartMonth: setYearStartMonth,
+    historyFor: historyFor
   };
 })(window);

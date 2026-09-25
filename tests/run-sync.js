@@ -2491,6 +2491,104 @@ function makeDevice(server, name) {
     check('and that phone lets go of it too', !Two.S.event(ev.id));
   }
 
+  /* ---------------- the workspace tables ----------------
+     The Bulletin Board, acknowledgements and templates live in tables that a
+     council gets only when workspace.sql is run. Until then a round must stay
+     green and simply leave them on the device; afterwards they travel like
+     everything else, deletions included. */
+  console.log('\n--- before workspace.sql: the new tables are skipped ---');
+  {
+    const sW = makeServer();
+    const P = makeDevice(sW, 'P');
+    const ann = P.S.addAnnouncement({ title: 'Held on this phone', audience: { kind: 'everyone' } });
+    const st = await P.Sync.now();
+    check('the round stays green without the tables', !st.error, st.error);
+    check('and says which tables are waiting',
+      (P.Sync.status().missing || []).indexOf('announcements') >= 0, JSON.stringify(P.Sync.status().missing));
+    check('nothing is sent to a table that is not there',
+      !sW.requests.some((r) => r.op === 'upsert' && r.table === 'announcements'));
+    check('the announcement is kept on the phone', !!P.S.announcement(ann.id));
+    check('and the rest still syncs', !st.error && sW.requests.some((r) => r.op === 'changed' && r.table === 'events'));
+    check('no drift is reported for a table that is not there',
+      !((P.Sync.status().drift || {}).kinds || []).some((k) => k.kind === 'announcement'));
+    P.S.deleteAnnouncement(ann.id);
+    const st2 = await P.Sync.now();
+    check('deleting one before the migration does not fault the round', !st2.error, st2.error);
+  }
+
+  console.log('\n--- after workspace.sql: they travel ---');
+  {
+    COLUMNS.announcements = ['id', 'unit_id', 'title', 'published', 'audience', 'audience_units',
+                             'audience_people', 'body', 'updated_at'];
+    COLUMNS.acknowledgements = ['id', 'announcement_id', 'profile_id', 'body', 'updated_at'];
+    COLUMNS.templates = ['id', 'unit_id', 'shared', 'name', 'body', 'updated_at'];
+    const oldEntities = CHECKS.deletions.entity;
+    CHECKS.deletions.entity = oldEntities.concat(['announcement', 'ack', 'template']);
+    CHECKS.announcements = { audience: ['everyone', 'nationals', 'units', 'people'] };
+
+    const sW = makeServer();
+    sW.tables.announcements = {}; sW.tables.acknowledgements = {}; sW.tables.templates = {};
+    const N1 = makeDevice(sW, 'N1');
+    const N2 = makeDevice(sW, 'N2');
+    const uid1 = '11111111-1111-4111-8111-111111111111';
+    const uid2 = '22222222-2222-4222-8222-222222222222';
+    N1.w.Auth.current = () => ({ id: uid1, name: 'N1', email: 'n1@filamer.edu.ph' });
+    N2.w.Auth.current = () => ({ id: uid2, name: 'N2', email: 'n2@filamer.edu.ph' });
+    await N1.Sync.now();
+    await N2.Sync.now();
+
+    const ann = N1.S.addAnnouncement({ title: 'General Assembly on Friday', priority: 'Important',
+      requireAck: true, audience: { kind: 'everyone' } });
+    const tpl = N1.S.addTemplate({ name: 'Our Seminar', shared: true,
+      tasks: [{ title: 'Reserve the venue', offsetDays: -14, priority: 'High' }] });
+    const st = await N1.Sync.now();
+    check('the round is green', !st.error, st.error);
+    check('the announcement reached the server', !!sW.tables.announcements[ann.id]);
+    check('with its audience in a column of its own',
+      sW.tables.announcements[ann.id] && sW.tables.announcements[ann.id].audience === 'everyone');
+    check('the template reached the server', !!sW.tables.templates[tpl.id]);
+    check('marked shared for the database to check',
+      sW.tables.templates[tpl.id] && sW.tables.templates[tpl.id].shared === true);
+
+    await N2.Sync.now();
+    check('the other phone has the announcement', !!N2.S.announcement(ann.id));
+    check('with its priority', N2.S.announcement(ann.id) && N2.S.announcement(ann.id).priority === 'Important');
+    check('and the template, tasks and all',
+      !!N2.S.template(tpl.id) && N2.S.template(tpl.id).tasks.length === 1);
+
+    N2.S.acknowledge(ann.id);
+    await N2.Sync.now();
+    const ackRow = Object.values(sW.tables.acknowledgements)[0];
+    check('an acknowledgement is sent', !!ackRow);
+    check('against the account that made it', ackRow && ackRow.profile_id === uid2);
+    await N1.Sync.now();
+    check('the first phone sees it', N1.S.acks(ann.id).length === 1);
+
+    N2.S.acknowledge(ann.id);
+    await N2.Sync.now();
+    check('pressing it again sends nothing new', Object.keys(sW.tables.acknowledgements).length === 1);
+
+    N1.S.updateAnnouncement(ann.id, { pinned: true });
+    await N1.Sync.now();
+    await N2.Sync.now();
+    check('pinning travels', N2.S.announcement(ann.id).pinned === true);
+
+    N1.S.deleteAnnouncement(ann.id);
+    N1.S.deleteTemplate(tpl.id);
+    const st3 = await N1.Sync.now();
+    check('deleting them is a green round', !st3.error, st3.error);
+    check('the deletions were recorded',
+      !!sW.tables.deletions['announcement:' + ann.id] && !!sW.tables.deletions['template:' + tpl.id]);
+    await N2.Sync.now();
+    check('and the other phone lets go of both', !N2.S.announcement(ann.id) && !N2.S.template(tpl.id));
+    check('with the acknowledgements that went with it', N2.S.acks(ann.id).length === 0);
+    check('no drift left behind', !(N2.Sync.status().drift && N2.Sync.status().drift.total));
+    check('both phones stayed quiet', !N1.errors.length && !N2.errors.length,
+      N1.errors.concat(N2.errors).slice(0, 2).join(' | '));
+
+    CHECKS.deletions.entity = oldEntities;
+  }
+
   console.log('\n--- no console errors ---');
   check('device A stayed quiet', A.errors.length === 0, A.errors.slice(0, 2).join(' | '));
   check('device B stayed quiet', B.errors.length === 0, B.errors.slice(0, 2).join(' | '));

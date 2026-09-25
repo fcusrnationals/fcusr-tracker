@@ -10,7 +10,13 @@
     'directives': global.ViewDirectives,
     'events': global.ViewEvents,
     'letters': global.ViewLetters,
-    'settings': global.ViewSettings
+    'settings': global.ViewSettings,
+    // The workspace: reached from More, never a tab of their own.
+    'calendar': global.ViewCalendar,
+    'bulletin': global.ViewBulletin,
+    'people': global.ViewPeople,
+    'tools': global.ViewTools,
+    'archive': global.ViewArchive
   };
 
   var current = { name: 'overview', params: {} };
@@ -24,6 +30,11 @@
     if (parts[0] === 'dashboard') return { name: 'overview', params: {} };
     if (parts[0] === 'events' && parts[1]) return { name: 'event-detail', params: { id: parts[1] } };
     if (parts[0] === 'letters' && parts[1]) return { name: 'letter-detail', params: { id: parts[1] } };
+    if (parts[0] === 'people' && parts[1]) return { name: 'person-detail', params: { id: parts[1] } };
+    // A tool, or one announcement: the same screen, opened at that item.
+    if ((parts[0] === 'tools' || parts[0] === 'bulletin') && parts[1] && ROUTES[parts[0]]) {
+      return { name: parts[0], params: { id: parts[1] } };
+    }
     if (ROUTES[parts[0]]) return { name: parts[0], params: {} };
     return { name: 'overview', params: {} };
   }
@@ -33,8 +44,16 @@
     else location.hash = hash;
   }
 
+  /* What is on screen, so a view that holds work of its own — photos loaded
+     into the Watermark Studio — is not torn down by a redraw it did not ask
+     for. Every other view redraws wholesale, as it always has. */
+  var renderedKey = '';
+
   function render() {
     UI.closeMenu();
+    var key = current.name + '|' + (current.params.id || '');
+    var kept = renderedKey === key;
+    renderedKey = '';
 
     /* Nobody sees the Republic's work without saying who they are.
 
@@ -78,6 +97,7 @@
     greet();
     var view = current.name === 'event-detail' ? global.ViewEventDetail
       : current.name === 'letter-detail' ? global.ViewLetterDetail
+      : current.name === 'person-detail' ? (global.ViewPeople && ViewPeople.detail)
       : ROUTES[current.name];
     if (!view) view = global.ViewDashboard;
 
@@ -104,7 +124,8 @@
     }
 
     // Typing the hash must not get round the tab being hidden.
-    if (global.Auth && Auth.isVolunteer() && NATIONAL_ONLY.indexOf(current.name) >= 0) {
+    if (global.Auth && Auth.isVolunteer() &&
+        (NATIONAL_ONLY.indexOf(current.name) >= 0 || current.name === 'person-detail')) {
       viewEl.innerHTML = UI.empty('Not available to volunteers',
         'This screen belongs to the national officers. Your activities are under Events.',
         '<a class="btn btn-primary" href="#/events">Go to your events</a>');
@@ -131,9 +152,25 @@
       return;
     }
 
+    if (kept && view.keepAlive && view.keepAlive(current.params) && viewEl.firstChild) {
+      renderedKey = key;
+      syncTabs();
+      renderBrand();
+      if (global.Notify) Notify.paint();
+      return;
+    }
+
     try {
-      viewEl.innerHTML = view.render(current.params);
+      /* Looking at a closed year says so on every screen, above everything
+         else, so last year's list is never mistaken for this year's work. */
+      var banner = global.Workspace ? Workspace.yearBanner() : '';
+      viewEl.innerHTML = banner + view.render(current.params);
       if (view.mount) view.mount(viewEl, current.params);
+      if (global.Workspace) {
+        Workspace.wireYearBanner(viewEl);
+        Workspace.wireHints(viewEl);
+      }
+      renderedKey = key;
     } catch (err) {
       console.error(err);
       viewEl.innerHTML = '<div class="card"><h2>Something went wrong on this screen</h2>' +
@@ -142,6 +179,7 @@
     }
     syncTabs();
     renderBrand();
+    if (global.Notify) Notify.paint();
     document.title = titleFor() + ' · ' + trackerTitle();
   }
 
@@ -154,15 +192,27 @@
       var l = Store.letter(current.params.id);
       return l ? l.subject : 'Letter';
     }
+    if (current.name === 'person-detail') {
+      var p = Store.person(current.params.id);
+      return p ? p.name : 'Person';
+    }
     return { 'overview': 'Overview', 'my-tasks': 'My tasks', 'directives': 'Directives',
-      'events': 'Events', 'letters': 'Letters', 'settings': 'Settings' }[current.name] || 'Overview';
+      'events': 'Events', 'letters': 'Letters', 'settings': 'Settings',
+      'calendar': 'Calendar', 'bulletin': 'Bulletin Board', 'people': 'People',
+      'tools': 'Tools', 'archive': 'Archive' }[current.name] || 'Overview';
   }
 
-  var NATIONAL_ONLY = ['overview', 'directives', 'letters'];
+  /* The directory and the archive are the council's, not a volunteer's. The
+     calendar, the bulletin and the tools are everybody's: a helper has dates,
+     may be sent a notice, and photographs the activity like anybody else. */
+  var NATIONAL_ONLY = ['overview', 'directives', 'letters', 'people', 'archive'];
 
   function syncTabs() {
     var active = current.name === 'event-detail' ? 'events'
-      : current.name === 'letter-detail' ? 'letters' : current.name;
+      : current.name === 'letter-detail' ? 'letters'
+      : current.name === 'person-detail' ? 'more'
+      : (global.Workspace && Workspace.isWorkspaceRoute(current.name)) ? 'more'
+      : current.name;
 
     /* A volunteer is enrolled into an activity, not into the Republic's business,
        so the national screens are not theirs to open. */
@@ -172,6 +222,13 @@
       t.hidden = volunteer && NATIONAL_ONLY.indexOf(r) >= 0;
     });
     document.getElementById('btn-settings').hidden = volunteer;
+    /* Nothing to offer, no button: a volunteer starts no activities, tasks or
+       letters, and a + that opens onto an empty menu is a broken promise. */
+    var creates = global.Palette ? Palette.createActions().length > 0 : !volunteer;
+    ['btn-create', 'fab-create'].forEach(function (bid) {
+      var b = document.getElementById(bid);
+      if (b) b.hidden = !creates;
+    });
 
     U.els('.tab', tabsEl).forEach(function (t) {
       var on = t.getAttribute('data-route') === active;
@@ -185,7 +242,10 @@
     var pid = Store.lastPerson();
     var n = 0;
     if (pid && Store.person(pid)) {
-      n = Store.tasks({ assigneeId: pid, excludeArchived: true }).filter(Store.isOverdue).length;
+      // A closed year's leftovers are a record now, not something overdue.
+      n = Store.tasks({ assigneeId: pid, excludeArchived: true }).filter(function (t) {
+        return Store.isOverdue(t) && Store.yearOf('task', t) === 'current';
+      }).length;
     }
     badge.textContent = n;
     badge.hidden = n === 0;
@@ -195,10 +255,21 @@
     var lb = document.getElementById('tab-letters');
     if (lb) {
       var mineUnit = (global.Auth && Auth.signedIn()) ? Auth.myUnitId() : '';
-      var ls = Store.letters(mineUnit ? { unitId: mineUnit } : {}).filter(Store.letterNeedsAttention).length;
+      var ls = Store.letters(mineUnit ? { unitId: mineUnit } : {}).filter(function (l) {
+        return Store.letterNeedsAttention(l) && Store.yearOf('letter', l) === 'current';
+      }).length;
       lb.textContent = ls;
       lb.hidden = ls === 0;
       if (ls) lb.title = U.plural(ls, 'letter') + ' needing a chase';
+    }
+
+    // More carries the Bulletin's unread count, the only thing behind it that waits for anybody.
+    var mb = document.getElementById('tab-more');
+    if (mb) {
+      var un = global.Bulletin ? Bulletin.unreadCount() : 0;
+      mb.textContent = un;
+      mb.hidden = un === 0;
+      if (un) mb.title = U.plural(un, 'new announcement');
     }
   }
 
@@ -277,7 +348,10 @@
       (tail || '') + '</button>';
   }
 
+  /* The search and the command palette are one box now (palette.js). This
+     older one stays as the fallback if that file failed to load. */
   function openSearch() {
+    if (global.Palette) return Palette.open();
     UI.modal({
       title: 'Search',
       wide: true,
@@ -414,6 +488,22 @@
 
     document.getElementById('btn-search').addEventListener('click', openSearch);
 
+    /* The header's newer buttons, and the More tab. */
+    var bell = document.getElementById('btn-bell');
+    if (bell) bell.addEventListener('click', function () { if (global.Notify) Notify.open(); });
+    var create = document.getElementById('btn-create');
+    if (create) create.addEventListener('click', function () {
+      if (global.Palette) Palette.quickCreate(create);
+    });
+    var fab = document.getElementById('fab-create');
+    if (fab) fab.addEventListener('click', function () {
+      if (global.Palette) Palette.quickCreate(fab);
+    });
+    var more = document.querySelector('[data-route="more"]');
+    if (more) more.addEventListener('click', function () {
+      if (global.Workspace) Workspace.openMore(more);
+    });
+
     /* Settings houses enrolment and access, so it asks who you are first. */
     document.getElementById('btn-settings').addEventListener('click', function (ev) {
       if (!global.Auth || Auth.isExecutive()) return;
@@ -426,6 +516,14 @@
       if ((ev.key === '/' && !typing) || ((ev.metaKey || ev.ctrlKey) && ev.key === 'k')) {
         ev.preventDefault();
         openSearch();
+        return;
+      }
+      // N starts something new, from anywhere, the way / searches.
+      if (ev.key === 'n' && !typing && !ev.metaKey && !ev.ctrlKey && !ev.altKey &&
+          !document.querySelector('.modal-backdrop') && !document.body.classList.contains('is-gated') &&
+          global.Palette) {
+        ev.preventDefault();
+        Palette.quickCreate(document.getElementById('btn-create'));
       }
     });
 
@@ -636,6 +734,8 @@
     // two dialogs saying overlapping things.
     TermUI.maybeRemind();
     offerHomeScreen();
+    // After anything that greets with a dialog, and only if nothing did.
+    if (global.Workspace) setTimeout(function () { Workspace.introduceMore(); }, 900);
   }
 
   /* ---------- put it on the home screen ----------

@@ -17,6 +17,19 @@ backup round trip, the sanitiser against a hostile backup file, and the generate
 including that the page really is 345 mm × 215 mm, read back out of the PDF's own
 MediaBox. Writes a sample report to `tests/out/sample-report.pdf`.
 
+## The workspace suite — no install needed
+
+```bash
+node tests/run-workspace.js
+```
+
+The Bulletin Board (states by date, audiences, who may post, acknowledgements
+counted once per account), event templates, duplicating an activity as a fresh
+record, activity history, academic years (closing, read-only, reopening,
+returning), data saved by the previous version still loading, the term report
+(names no officer, ranks nobody), and the Watermark Studio's unit arithmetic,
+placement, file names, CRC-32 and ZIP bytes — the ZIP is read back with `unzip -t`.
+
 ## The UI walk-through — needs jsdom
 
 ```bash

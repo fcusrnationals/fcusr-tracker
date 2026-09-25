@@ -32,6 +32,10 @@ const FILES = [
   'assets/js/letter-slip.js', 'assets/js/roster-pdf.js', 'assets/js/views/signin.js', 'assets/js/views/dashboard.js', 'assets/js/views/mytasks.js', 'assets/js/views/directives.js', 'assets/js/views/events.js',
   'assets/js/views/event-detail.js',
   'assets/js/views/letters.js', 'assets/js/views/letter-detail.js', 'assets/js/views/settings.js',
+  // The workspace update: loaded before forms.js and app.js, as in index.html.
+  'assets/js/workspace.js', 'assets/js/notify.js', 'assets/js/palette.js', 'assets/js/templates.js',
+  'assets/js/views/bulletin.js', 'assets/js/views/calendar.js', 'assets/js/views/people.js',
+  'assets/js/views/tools.js', 'assets/js/views/archive.js',
   'assets/js/forms.js', 'assets/js/app.js'
 ];
 
@@ -216,7 +220,11 @@ check('opening it shows the units', $('.roll').getAttribute('data-open') === 'tr
   $('.roll-body .list').children.length > 0);
 click($('[data-toggle-republic]'));
 check('and the events are last', /^Events/.test(heads[heads.length - 1]), heads.join(' | '));
-check('five nav tabs', $$('.tab').length === 5);
+/* Five tabs for the daily work, and More for everything used less often —
+   Calendar, Bulletin, People, Tools, Archive. The row does not grow. */
+check('five main tabs', $$('a.tab').length === 5);
+check('and one More button beside them', $$('.tab').length === 6 &&
+  !!$('.tab[data-route="more"]'));
 check('Letters is one of them', $$('.tab').some((t) => t.getAttribute('data-route') === 'letters'));
 goto('#/events');
 check('no second search box', !$('#f-q'));
@@ -321,7 +329,10 @@ check('group by person', $$('.group').length > 1);
 check('group headers carry counts', /\d+ of \d+ done/.test(text()));
 click($('[data-group-by="flat"]'));
 click($('[data-more]'));
-check('⋯ menu opens with every action an activity has', $$('.menu button').length === 4);
+check('⋯ menu opens with every action an activity has', $$('.menu button').length === 7,
+  $$('.menu button').map((b) => b.getAttribute('data-set')).join(','));
+check('including duplicate, save as template and its history',
+  ['duplicate', 'template', 'history'].every((k) => $$('.menu button').some((b) => b.getAttribute('data-set') === k)));
 click($$('.menu button').find((b) => b.getAttribute('data-set') === 'archive'));
 check('archive works', S.event(created.id).status === 'Archived');
 S.updateEvent(created.id, { status: 'Upcoming' });

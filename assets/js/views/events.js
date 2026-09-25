@@ -9,7 +9,7 @@
      unit is what you came here for — a national opening this tab wants the
      national activities, not nine colleges' worth to scroll through. "All units"
      is still one tap away for the times when the Republic is the question. */
-  var state = { archivedOpen: false, cancelledOpen: false, unitId: '', picked: false };
+  var state = { archivedOpen: false, cancelledOpen: false, unitId: '', picked: false, view: 'list' };
 
   /* The National officers work across the whole Republic, so they get a unit
      picker here and a unit badge on each row. Everyone else only ever sees one
@@ -29,7 +29,10 @@
   function render() {
     // A volunteer sees only the activities they were enrolled into, and only
     // while those activities are still running.
-    var all = (global.Auth && Auth.signedIn()) ? Auth.visibleEvents() : Store.events();
+    var all = ((global.Auth && Auth.signedIn()) ? Auth.visibleEvents() : Store.events())
+      .filter(function (e) { return Workspace.inView('event', e); });
+    var archive = Workspace.viewingArchive();
+    var mayCreate = !(global.Auth && Auth.isVolunteer()) && !archive;
 
     // A unit that has been removed or deactivated stops filtering rather than
     // showing an empty screen with no way back.
@@ -57,9 +60,19 @@
       '<div class="page-head"><div><h1>Events</h1>' +
       '<div class="sub">' + U.plural(live.length, 'event') +
         (picked ? ' · ' + U.esc(Store.unitName(picked)) : '') + '</div></div>' +
-      (global.Auth && Auth.isVolunteer() ? '' :
-        '<button type="button" class="btn btn-primary" data-create-event>' + UI.icon('plus') + 'New event</button>') +
-      '</div>';
+      '<div class="row" style="gap:6px">' +
+        '<div class="segmented ev-view" role="group" aria-label="Show events as">' +
+          '<button type="button" data-ev-view="list" class="' + (state.view === 'list' ? 'is-active' : '') +
+            '" aria-pressed="' + (state.view === 'list') + '">' + UI.icon('list') + 'List</button>' +
+          '<button type="button" data-ev-view="calendar" class="' + (state.view === 'calendar' ? 'is-active' : '') +
+            '" aria-pressed="' + (state.view === 'calendar') + '">' + UI.icon('calendar') + 'Calendar</button>' +
+        '</div>' +
+        (mayCreate ? '<button type="button" class="btn" data-templates>' + UI.icon('template') + 'Templates</button>' +
+          '<button type="button" class="btn btn-primary" data-create-event>' + UI.icon('plus') + 'New event</button>' : '') +
+      '</div></div>';
+
+    // The same activities on their dates. The whole calendar is under More.
+    if (state.view === 'calendar') return html + ViewCalendar.embed();
 
     if (units.length > 1) {
       html += '<div class="toolbar">' +
@@ -77,7 +90,9 @@
     }
 
     if (!live.length) {
-      html += (global.Auth && Auth.isVolunteer())
+      html += archive
+        ? UI.empty('No activities that year', 'Nothing was dated inside it.', '', 'events')
+        : (global.Auth && Auth.isVolunteer())
         ? UI.empty('Nothing assigned to you yet',
             'An executive enrols volunteers into an activity. Once that happens it appears here.', '', 'calm')
         : picked
@@ -162,6 +177,12 @@
   }
 
   function mount(root) {
+    U.els('[data-ev-view]', root).forEach(function (b) {
+      b.addEventListener('click', function () { state.view = b.getAttribute('data-ev-view'); App.render(); });
+    });
+    var tpl = root.querySelector('[data-templates]');
+    if (tpl) tpl.addEventListener('click', function () { Templates.pick(); });
+    if (state.view === 'calendar') ViewCalendar.mountEmbed(root);
     U.els('[data-create-event]', root).forEach(function (b) {
       // Creating from inside a unit's list files it under that unit by default.
       b.addEventListener('click', function () { Forms.eventForm(null, { unitId: state.unitId }); });

@@ -151,7 +151,11 @@
     var person = Store.person(pid);
     var self = me();
     var yours = !signedIn() || (self && self.id === pid);
-    var all = Store.tasks({ assigneeId: pid, excludeArchived: true });
+    /* The year on screen: this one, unless somebody has chosen to look back at
+       an archived one from the Archive. */
+    var all = Store.tasks({ assigneeId: pid, excludeArchived: true }).filter(function (t) {
+      return Workspace.inView('task', t);
+    });
     var s = Store.stats(all);
     var f = FILTERS[filter] || FILTERS.open;
     var list = all.filter(f.test).sort(Store.byDueDate);

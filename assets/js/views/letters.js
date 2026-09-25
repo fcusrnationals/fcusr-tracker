@@ -42,9 +42,12 @@
   /* A volunteer is enrolled into an activity, not into the council's
      correspondence, so this screen is for officers. */
   function mine() {
-    if (!global.Auth || !Auth.signedIn()) return Store.letters();
-    if (Auth.isVolunteer()) return [];
-    return Store.letters({ unitId: Auth.myUnitId() });
+    var list;
+    if (!global.Auth || !Auth.signedIn()) list = Store.letters();
+    else if (Auth.isVolunteer()) list = [];
+    else list = Store.letters({ unitId: Auth.myUnitId() });
+    // The year on screen only.
+    return list.filter(function (l) { return Workspace.inView('letter', l); });
   }
 
   function render() {
@@ -57,8 +60,8 @@
       '<div class="sub">' + U.plural(s.routing, 'letter') + ' still moving' +
       (s.attention ? ' · <span class="late">' + s.attention + ' needing a chase</span>' : '') +
       '</div></div>' +
-      '<button type="button" class="btn btn-primary" data-new-letter>' +
-      UI.icon('plus') + 'Track a letter</button></div>';
+      (Workspace.viewingArchive() ? '' : '<button type="button" class="btn btn-primary" data-new-letter>' +
+      UI.icon('plus') + 'Track a letter</button>') + '</div>';
 
     html += '<div class="pills" role="group" aria-label="Filter the letters">' +
       pill('open', s.routing, 'Still moving') +
@@ -73,7 +76,7 @@
     html += list.length
       ? '<div class="list">' + list.map(row).join('') + '</div>'
       : UI.empty(f.emptyTitle, f.emptyText,
-          filter === 'all' || !all.length
+          (filter === 'all' || !all.length) && !Workspace.viewingArchive()
             ? '<button type="button" class="btn btn-primary" data-new-letter>' +
               UI.icon('plus') + 'Track a letter</button>'
             : '', 'calm');
@@ -94,6 +97,7 @@
   /* Whether whoever is looking may move this letter along. A national officer
      reads a college's correspondence and does not walk it round. */
   function canRecord(l) {
+    if (Store.isLocked('letter', l)) return false;
     if (!global.Auth || !Auth.signedIn() || Auth.isOffline()) return true;
     return Auth.canEditUnit(l.unitId);
   }

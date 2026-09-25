@@ -96,6 +96,21 @@ To take someone's access away later — turnover, or a volunteer who has left �
 run `select withdraw_member('their@email');` in the SQL editor. Their profile is
 deactivated rather than deleted, so every task still shows who held it.
 
+### The workspace update: Bulletin Board, acknowledgements, templates
+
+Once, after `sync3.sql`: **SQL Editor → New query** → paste all of
+`backend/supabase/workspace.sql` → **Run**. It adds three tables
+(`announcements`, `acknowledgements`, `templates`) with their security rules,
+and changes nothing that already exists. Running it twice is safe. It ends with
+a small table of checks; every row should say `true`.
+
+Until it is run the site still works: the Bulletin Board and custom templates
+stay on the phone that made them, and the Bulletin Board says it is waiting
+for this step. `check.sql` lists it with the other setup files.
+
+Nothing else in the update needs the database. Academic years ride in the
+council row, which already syncs; the Watermark Studio never uploads anything.
+
 ## B. Google Apps Script — the fallback, not needed for deployment
 
 1. In the FCUSR Google account, create a new **Google Sheet** named `FCUSR Tracker`.

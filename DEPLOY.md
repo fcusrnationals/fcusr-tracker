@@ -36,6 +36,9 @@ See `backend/supabase/SETUP.md` — or the short version:
 4. **Project Settings → API** → copy the **Project URL** and the **anon public**
    key into `assets/js/backend/config.js`.
 5. Commit and push. The login page appears the moment those two values are set.
+6. For the Bulletin Board and shared templates: **SQL Editor** → paste all of
+   `backend/supabase/workspace.sql` → Run (after `sync3.sql`). See
+   `backend/SETUP.md`.
 
 Never put the **database password** or the **service_role** key in this project.
 Neither is needed, and both would be readable by anyone.

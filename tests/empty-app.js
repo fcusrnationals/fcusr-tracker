@@ -18,7 +18,9 @@ const BASE = process.env.BASE_URL || 'http://localhost:4399/';
 const ROUTES = [
   ['dashboard', ''], ['my tasks', '#/mytasks'], ['events', '#/events'],
   ['letters', '#/letters'], ['reports', '#/reports'], ['settings', '#/settings'],
-  ['overview', '#/overview'], ['directives', '#/directives']
+  ['overview', '#/overview'], ['directives', '#/directives'],
+  ['calendar', '#/calendar'], ['bulletin', '#/bulletin'], ['people', '#/people'],
+  ['tools', '#/tools'], ['watermark', '#/tools/watermark'], ['archive', '#/archive']
 ];
 
 (async () => {

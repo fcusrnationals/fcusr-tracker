@@ -32,4 +32,10 @@ select 'heads.sql',
                          where table_name = 'enrolments' and column_name = 'is_head')
              and exists (select 1 from pg_proc where proname = 'set_unit_head')
             then 'done' else 'NOT RUN — open that file and run it' end
+union all
+select 'workspace.sql',
+       case when to_regclass('public.announcements') is not null
+             and to_regclass('public.acknowledgements') is not null
+             and to_regclass('public.templates') is not null
+            then 'done' else 'NOT RUN — open that file and run it (after sync3.sql)' end
 order by 1;

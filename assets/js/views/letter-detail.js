@@ -26,16 +26,20 @@
     if (l.internal) meta.push('Internal to the council');
 
     var html = '<a class="breadcrumb" href="#/letters">' + UI.icon('back') + 'All letters</a>';
+    var mine = mayRecord(l);
 
     html += '<div class="detail-head">' +
       '<div class="page-head" style="margin-bottom:6px">' +
         '<h1 style="min-width:0">' + U.esc(l.subject) + '</h1>' +
         '<div class="row" style="gap:6px;flex-wrap:nowrap">' +
           '<button type="button" class="btn" data-slip>' + UI.icon('pdf') + 'Routing slip</button>' +
-          '<button type="button" class="icon-btn" data-more aria-label="Letter options" aria-haspopup="menu">' +
-          UI.icon('more') + '</button>' +
+          (mine
+            ? '<button type="button" class="icon-btn" data-more aria-label="Letter options" aria-haspopup="menu">' +
+              UI.icon('more') + '</button>'
+            : '') +
         '</div>' +
       '</div>' +
+      (global.Workspace ? Workspace.lockedNote('letter', l) : '') +
       '<div class="detail-meta">' + meta.map(U.esc).join('<span class="sep">·</span>') + '</div>';
 
     // The one sentence that matters, said loudly.
@@ -55,7 +59,7 @@
     /* The next step, at the top, where somebody standing at a counter with the
        letter in their hand will find it — rather than three screens down inside
        the trail, behind a dialog. */
-    var steps = global.Forms ? Forms.letterSteps(l) : '';
+    var steps = global.Forms && mine ? Forms.letterSteps(l) : '';
     if (steps) {
       html += '<div class="letter-steps"><span class="ls-label">What happened next?</span>' +
         '<div class="ls-actions">' + steps + '</div></div>';
@@ -70,6 +74,13 @@
       }).join('') + '</ol></div>';
 
     return html;
+  }
+
+  /* Whether whoever is looking may walk this letter round: its own unit, while
+     its year is open. */
+  function mayRecord(l) {
+    if (Store.isLocked('letter', l)) return false;
+    return !global.Auth || !Auth.signedIn() || Auth.isOffline() || Auth.canEditLetter(l);
   }
 
   function stopRow(l, s, i, cur) {
@@ -94,7 +105,7 @@
     }
 
     var actions = '';
-    if (isCurrent) {
+    if (isCurrent && mayRecord(l)) {
       /* The steps themselves are in the band at the top of the letter, where
          somebody holding it will look; what belongs on the row is the thing
          that is about this office in particular. The commonest thing an office
