@@ -74,6 +74,28 @@ Events can start from a **template** (six built in; units keep their own, and
 the Nationals can share one with everyone) or be **duplicated** from the ⋯ menu
 as a fresh record. The same menu shows the activity's **history**.
 
+### The look
+
+The tracker uses the **FCUSR Hub's** design system so the two read as one
+institution: warm paper and cream, one gold accent, warm black for weight
+(the header, the desktop rail, dialog headers), Bricolage Grotesque for
+headings and Public Sans for text — all shipped with the app, since nothing
+may load from elsewhere. The printed reports and slips are unchanged.
+
+### Letters: who handled it
+
+Every step on a letter — handed in, signed, seen — opens a short sheet asking
+who handed it in, who received it and who signed or processed it, already
+filled in with the person carrying the letter, today's date and the officer
+pressing the button. **Who handled it** on each office of the trail shows the
+whole record. Needs `backend/supabase/letter-stops.sql` (see `backend/SETUP.md`).
+
+### Watermarks that cover the whole photo
+
+In the Watermark Studio, **Size → Cover whole photo** stretches a full-frame
+watermark edge to edge; **Fit inside** makes it as large as it goes without
+cropping. The built-in **Full-photo overlay** preset does the first at 100%.
+
 ### Reading a task row
 
 Every screen draws a task the same way:
@@ -145,7 +167,8 @@ assets/js/watermark.js       the Watermark Studio (fetched only when opened)
 assets/js/term-report.js     the Term Report, PDF and CSV (fetched only when used)
 assets/js/views/             dashboard · mytasks · events · event-detail · settings
                              bulletin · calendar · people · tools · archive
-assets/fonts/                Montserrat (woff2) for the screen
+assets/fonts/                Bricolage Grotesque + Public Sans (the Hub's faces) for the
+                             screen; Montserrat for print
 vendor/                      jsPDF + autoTable + Montserrat (TTF) for the PDF
 tests/                       optional checks — see tests/README.md
 ```

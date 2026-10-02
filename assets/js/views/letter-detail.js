@@ -96,8 +96,14 @@
     }
     if (s.releasedAt) {
       lines.push('<strong>' + U.esc(s.outcome || 'Released') + '</strong> on ' +
-        U.esc(U.fmtDateShort(s.releasedAt)));
+        U.esc(U.fmtDateShort(s.releasedAt)) +
+        (s.processedBy ? ', ' + (s.outcome === 'Noted' ? 'seen' : 'processed') + ' by <strong>' +
+          U.esc(s.processedBy) + '</strong>' : ''));
     }
+    /* Only for a half that is still recorded: an undo on an older build clears
+       the date and may leave the name behind. */
+    var logged = s.releasedAt ? s.releasedLoggedBy : s.receivedAt ? s.receivedLoggedBy : '';
+    if (logged) lines.push('<span class="muted small">Logged by ' + U.esc(logged) + '</span>');
     if (s.note) lines.push('<span class="muted">&ldquo;' + U.esc(s.note) + '&rdquo;</span>');
     if (!lines.length) {
       lines.push('<span class="muted">Not sent here yet' +
@@ -105,13 +111,18 @@
     }
 
     var actions = '';
+    /* Who handed it in and who dealt with it, for anybody who asks later. */
+    if (s.receivedAt) {
+      actions += '<button type="button" class="btn btn-sm btn-ghost" data-stop-info="' + U.esc(s.id) + '">' +
+        UI.icon('users') + 'Who handled it</button>';
+    }
     if (isCurrent && mayRecord(l)) {
       /* The steps themselves are in the band at the top of the letter, where
          somebody holding it will look; what belongs on the row is the thing
          that is about this office in particular. The commonest thing an office
          says is "not until so-and-so has signed", and recording that should not
          mean editing the whole route from a counter. */
-      actions = '<button type="button" class="btn btn-sm btn-ghost" data-insert="' + U.esc(s.id) + '">' +
+      actions += '<button type="button" class="btn btn-sm btn-ghost" data-insert="' + U.esc(s.id) + '">' +
         UI.icon('plus') + 'Someone must sign first</button>';
     }
 
@@ -138,6 +149,9 @@
     if (!l) return;
 
     Forms.wireLetterSteps(root);
+    U.els('[data-stop-info]', root).forEach(function (b) {
+      b.addEventListener('click', function () { Forms.stopDetails(l.id, b.getAttribute('data-stop-info')); });
+    });
     U.els('[data-insert]', root).forEach(function (b) {
       b.addEventListener('click', function () { Forms.insertStopForm(l.id, b.getAttribute('data-insert')); });
     });

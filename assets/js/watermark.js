@@ -26,6 +26,7 @@
   var SEAL_ID = 'builtin-seal';
   var SEAL_SRC = 'assets/img/fcusr-seal.png';
   var STANDARD_ID = 'builtin-standard';
+  var OVERLAY_ID = 'builtin-overlay';
 
   var POSITIONS = [
     ['tl', 'Top left'], ['tc', 'Top center'], ['tr', 'Top right'],
@@ -36,9 +37,19 @@
                ['cm', 'centimetres (cm)'], ['in', 'inches (in)']];
   var TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
+  /* How big the watermark is. Custom is the box placed by hand; the other two
+     are for a watermark drawn the size of the whole photo — a frame, a border,
+     a full-page overlay — which no corner and no margin can ever fit. */
+  var FITS = [
+    ['free', 'Custom', 'Placed and sized by hand.'],
+    ['fill', 'Cover whole photo', 'Stretched edge to edge over the whole photo.'],
+    ['contain', 'Fit inside', 'As large as it goes without cropping or stretching.']
+  ];
+  function fitOf(st) { return st.fit === 'fill' || st.fit === 'contain' ? st.fit : 'free'; }
+
   function defaults() {
     return {
-      position: 'br', x: 0.88, y: 0.9,
+      fit: 'free', position: 'br', x: 0.88, y: 0.9,
       width: 12, height: 0, unit: '%', keepAspect: true, scale: 100,
       margin: 30, marginUnit: 'px',
       opacity: 85, rotation: 0, dpi: 300,
@@ -51,6 +62,14 @@
   var STANDARD = {
     id: STANDARD_ID, name: 'FCUSR Documentation Standard', wmId: SEAL_ID, builtin: true,
     settings: { position: 'br', width: 12, unit: '%', margin: 30, marginUnit: 'px', opacity: 85 }
+  };
+
+  /* For a watermark made the size of the photo. It keeps whichever watermark is
+     chosen, because the seal stretched over a picture is never what anybody
+     wants — the council's own full-frame overlay is. */
+  var OVERLAY = {
+    id: OVERLAY_ID, name: 'Full-photo overlay', wmId: '', builtin: true,
+    settings: { fit: 'fill', opacity: 100, margin: 0 }
   };
 
   /* ---------- state, kept while the app is open ---------- */
@@ -110,7 +129,7 @@
   }
 
   function presets() {
-    return [STANDARD].concat(readJSON(PRESET_KEY, []).filter(function (p) { return p && p.id && p.name; }));
+    return [STANDARD, OVERLAY].concat(readJSON(PRESET_KEY, []).filter(function (p) { return p && p.id && p.name; }));
   }
   function savePresets(list) { writeJSON(PRESET_KEY, list.filter(function (p) { return !p.builtin; })); }
   function defaultPresetId() {
@@ -178,6 +197,12 @@
 
   // Where the watermark lands on a photo, in that photo's own pixels.
   function layout(st, W, H, wm) {
+    var fit = fitOf(st);
+    if (fit === 'fill') return { cx: W / 2, cy: H / 2, w: W, h: H, rot: 0 };
+    if (fit === 'contain') {
+      var kk = Math.min(W / iw(wm), H / ih(wm));
+      return { cx: W / 2, cy: H / 2, w: iw(wm) * kk, h: ih(wm) * kk, rot: 0 };
+    }
     var dpi = clamp(num(st.dpi, 300), 30, 1200);
     var k = clamp(num(st.scale, 100), 5, 500) / 100;
     var w = Math.max(1, toPx(st.width, st.unit, W, dpi) * k);
@@ -494,7 +519,9 @@
           (idx >= S.photos.length - 1 ? ' disabled' : '') + ' style="transform:scaleX(-1)">' +
           UI.icon('back') + '</button>' +
       '</div>' +
-      '<p class="tiny muted wm-drag-note">' + UI.icon('move') + 'Drag the watermark on the preview to place it exactly.</p>' +
+      (fitOf(settingsFor(p)) === 'free'
+        ? '<p class="tiny muted wm-drag-note">' + UI.icon('move') + 'Drag the watermark on the preview to place it exactly.</p>'
+        : '') +
       '<div class="wm-thumbs-head"><span class="small strong">' + U.plural(S.photos.length, 'photo') +
         ' · <span id="wm-selcount">' + selected().length + '</span> selected</span>' +
         '<span class="row" style="gap:6px">' +
@@ -577,6 +604,19 @@
         : POSITIONS.filter(function (p) { return p[0] === st.position; })[0][1]) + '</div>';
   }
 
+  function fitControl(st) {
+    var fit = fitOf(st);
+    return '<div class="field" style="margin-top:12px"><div class="field-label">Size</div>' +
+      '<div class="segmented wm-fit" role="group" aria-label="Watermark size">' +
+      FITS.map(function (f) {
+        var on = f[0] === fit;
+        return '<button type="button" data-fit="' + f[0] + '" class="' + (on ? 'is-active' : '') +
+          '" aria-pressed="' + on + '">' + f[1] + '</button>';
+      }).join('') + '</div>' +
+      '<div class="hint">' + FITS.filter(function (f) { return f[0] === fit; })[0][2] +
+        (fit === 'free' ? '' : ' Position, size and margin are not needed.') + '</div></div>';
+  }
+
   function slider(id, label, value, min, max, step, suffix) {
     return '<div class="field wm-slider"><label for="' + id + '">' + label +
       ' <output id="' + id + '-out">' + value + (suffix || '') + '</output></label>' +
@@ -588,6 +628,7 @@
     var p = activePhoto();
     var st = S.scope === 'one' && p && p.override ? p.override : S.settings;
     var sizeIsPct = st.unit === '%';
+    var fixed = fitOf(st) !== 'free';
     var dims = p && p.w ? p : null;
     return '<div class="wm-card">' +
       '<h3>Adjust</h3>' +
@@ -601,14 +642,17 @@
               '</strong> alone.' + (p.override ? ' <button type="button" class="linkish" data-reset-one>Use the shared settings again</button>' : '') + '</p>'
             : '')
         : '') +
-      '<div class="field" style="margin-top:12px"><div class="field-label">Position</div>' + posGrid(st) + '</div>' +
-      (sizeIsPct
-        ? slider('wm-size', 'Size', round(st.width, '%'), 1, 60, 0.5, '% of width')
+      fitControl(st) +
+      (fixed ? '' :
+      '<div class="field" style="margin-top:12px"><div class="field-label">Position</div>' + posGrid(st) + '</div>') +
+      (fixed ? '' : sizeIsPct
+        ? slider('wm-size', 'Size', round(st.width, '%'), 1, 100, 0.5, '% of width')
         : '<div class="field"><label for="wm-size-n">Size</label><div class="tiny muted">Width ' +
           round(st.width, st.unit) + ' ' + st.unit + ' — change it under Advanced settings.</div></div>') +
       slider('wm-opacity', 'Opacity', st.opacity, 5, 100, 1, '%') +
       '<details class="wm-adv" id="wm-adv"' + (S.advOpen ? ' open' : '') + '><summary>Advanced settings</summary>' +
         '<div class="wm-adv-body">' +
+        (fixed ? '' :
         '<div class="field-row">' +
           field('wm-x', 'Exact X (%)', round(st.position === 'custom' ? st.x * 100 : currentX(st, dims) * 100, '%'), 'number', 'min="0" max="100" step="0.1"') +
           field('wm-y', 'Exact Y (%)', round(st.position === 'custom' ? st.y * 100 : currentY(st, dims) * 100, '%'), 'number', 'min="0" max="100" step="0.1"') +
@@ -630,7 +674,7 @@
             UNITS.map(function (u) { return '<option value="' + u[0] + '"' + (st.marginUnit === u[0] ? ' selected' : '') + '>' + u[0] + '</option>'; }).join('') +
           '</select></div>' +
         '</div>' +
-        slider('wm-rot', 'Rotation', st.rotation, -180, 180, 1, '°') +
+        slider('wm-rot', 'Rotation', st.rotation, -180, 180, 1, '°')) +
         field('wm-dpi', 'Print resolution for mm, cm and in (dots per inch)', st.dpi, 'number', 'min="30" max="1200" step="1"') +
         '<div class="field-row">' +
           '<div class="field"><label for="wm-format">Save as</label><select id="wm-format">' +
@@ -956,6 +1000,17 @@
       draw();
     });
 
+    // Size: custom, or the whole photo.
+    U.els('[data-fit]', root).forEach(function (b) {
+      b.addEventListener('click', function () {
+        var st = editing();
+        st.fit = b.getAttribute('data-fit');
+        // A full-frame overlay is meant to be seen whole.
+        if (st.fit === 'fill') st.opacity = 100;
+        changed(true);
+      });
+    });
+
     // Position.
     U.els('input[name="wm-pos"]', root).forEach(function (r) {
       r.addEventListener('change', function () { editing().position = r.value; changed(true); });
@@ -1112,6 +1167,8 @@
     }
     canvas.addEventListener('pointerdown', function (ev) {
       if (!lastBox) return;
+      // Covering or fitting the whole photo has nowhere to be dragged to.
+      if (fitOf(editing()) !== 'free') return;
       var pt = point(ev);
       dragging = true;
       // Grab it where it was touched, so it does not jump to the finger.
@@ -1143,7 +1200,8 @@
 
   /* ---------- the library ---------- */
 
-  // Big logos are brought down to 2000 px across; SVGs are drawn to a PNG once.
+  /* Big watermarks are brought down to 4096 px across, which still covers a
+     phone photo edge to edge without going soft; SVGs are drawn to a PNG once. */
   function prepareLogo(file) {
     return new Promise(function (resolve, reject) {
       if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type) && !/\.(png|jpe?g|webp|svg)$/i.test(file.name)) {
@@ -1152,7 +1210,7 @@
       var url = URL.createObjectURL(file);
       loadImage(url).then(function (img) {
         var w = img.naturalWidth || 1000, h = img.naturalHeight || 1000;
-        var k = Math.min(1, 2000 / Math.max(w, h));
+        var k = Math.min(1, 4096 / Math.max(w, h));
         var c = document.createElement('canvas');
         c.width = Math.max(1, Math.round(w * k));
         c.height = Math.max(1, Math.round(h * k));
@@ -1463,6 +1521,6 @@
     // For the tests: the parts that are pure arithmetic and bytes.
     _layout: layout, _toPx: toPx, _fromPx: fromPx, _crc32: crc32, _buildZip: buildZip,
     _outName: outName, _outSize: outSize, _presets: presets, _state: S, _addFiles: addFiles,
-    _uniqueNames: uniqueNames, _switchUnit: switchUnit, _defaults: defaults
+    _uniqueNames: uniqueNames, _switchUnit: switchUnit, _defaults: defaults, _render: render
   };
 })(window);

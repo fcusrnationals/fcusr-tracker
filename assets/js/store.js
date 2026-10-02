@@ -2920,18 +2920,26 @@
       ? st.officeId : '';
     var label = str(st.label, LIMITS.name);
     if (!officeId && !label) return null;
-    return {
+    /* Fields a later build adds to a stop are carried, the way a letter's own
+       are, so this build cannot strip them on the way back to the server. */
+    return keepExtras(st, {
       id: id(st.id, 'stp'),
       officeId: officeId,
       label: label,
       // Who walked it over, and who took it in. Both are names, not accounts.
       forwardedBy: str(st.forwardedBy, LIMITS.name),
       receivedBy: str(st.receivedBy, LIMITS.name),
+      /* Who signed it, or dealt with it, at the office — a name, like the two
+         above. Then who pressed the button for each half: the officer who
+         logged the step, which is not always the person who walked it over. */
+      processedBy: str(st.processedBy, LIMITS.name),
+      receivedLoggedBy: str(st.receivedLoggedBy, LIMITS.name),
+      releasedLoggedBy: str(st.releasedLoggedBy, LIMITS.name),
       receivedAt: dateOnly(st.receivedAt),
       releasedAt: dateOnly(st.releasedAt),
       outcome: oneOf(st.outcome, STOP_OUTCOMES, ''),
       note: str(st.note, LIMITS.reason)
-    };
+    });
   }
 
   function cleanLetter(l) {
@@ -3169,7 +3177,7 @@
   function newStop(oid) {
     return {
       id: U.uid('stp'), officeId: oid, label: '', forwardedBy: '', receivedBy: '',
-      receivedAt: '', releasedAt: '', outcome: '', note: ''
+      processedBy: '', receivedLoggedBy: '', releasedLoggedBy: '', receivedAt: '', releasedAt: '', outcome: '', note: ''
     };
   }
 
@@ -3422,6 +3430,7 @@
     var who = str(data.receivedBy, LIMITS.name) || stopName(s);
     s.receivedBy = who;
     s.forwardedBy = str(data.forwardedBy, LIMITS.name);
+    s.receivedLoggedBy = str(data.loggedBy, LIMITS.name);
     s.receivedAt = dateOnly(data.receivedAt) || U.today();
     s.releasedAt = '';
     s.outcome = '';
@@ -3447,6 +3456,8 @@
     s.outcome = oneOf(data.outcome, STOP_OUTCOMES, 'Approved');
     s.releasedAt = when;
     s.note = str(data.note, LIMITS.reason);
+    s.processedBy = str(data.processedBy, LIMITS.name);
+    s.releasedLoggedBy = str(data.loggedBy, LIMITS.name);
 
     /* Sent back for revision. The return stays exactly as recorded and a fresh
        attempt at the same office is opened directly beneath it, so the trail
@@ -3475,11 +3486,13 @@
     if (!s) return null;
     if (!s.receivedAt) {
       receiveStop(lid, stopId, {
-        receivedBy: data.receivedBy, forwardedBy: data.forwardedBy, receivedAt: data.on
+        receivedBy: data.receivedBy, forwardedBy: data.forwardedBy, receivedAt: data.on,
+        loggedBy: data.loggedBy
       });
     }
     return releaseStop(lid, stopId, {
-      outcome: data.outcome || 'Approved', releasedAt: data.on, note: data.note
+      outcome: data.outcome || 'Approved', releasedAt: data.on, note: data.note,
+      processedBy: data.processedBy, loggedBy: data.loggedBy
     });
   }
 
@@ -3524,11 +3537,14 @@
       s.releasedAt = '';
       s.outcome = '';
       s.note = '';
+      s.processedBy = '';
+      s.releasedLoggedBy = '';
     } else {
       what = 'the hand-over at ' + stopName(s);
       s.receivedAt = '';
       s.receivedBy = '';
       s.forwardedBy = '';
+      s.receivedLoggedBy = '';
     }
 
     l.status = 'Routing';

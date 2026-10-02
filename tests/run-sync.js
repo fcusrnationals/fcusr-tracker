@@ -307,6 +307,22 @@ function makeServer() {
               stamped.body && typeof stamped.body === 'object') {
             stamped.body = Object.assign({}, held.body, stamped.body);
           }
+          /* And a letter's stops one stop at a time, matched by id, as
+             letter-stops.sql does: a key an older phone did not send is kept;
+             the arriving list still decides which stops exist. */
+          if (table === 'letters') {
+            const mergeStops = (oldList, newList) => {
+              if (!Array.isArray(newList) || !Array.isArray(oldList)) return newList;
+              return newList.map((n) => {
+                const o = n && n.id ? oldList.find((x) => x && x.id === n.id) : null;
+                return o && typeof o === 'object' && n && typeof n === 'object' ? Object.assign({}, o, n) : n;
+              });
+            };
+            if (stamped.body && Array.isArray(stamped.body.stops)) {
+              stamped.body.stops = mergeStops(held.body && held.body.stops, stamped.body.stops);
+            }
+            if (Array.isArray(stamped.stops)) stamped.stops = mergeStops(held.stops, stamped.stops);
+          }
         }
         stamped.updated_at = wall;
         tables[table][key] = stamped;
@@ -2280,6 +2296,53 @@ function makeDevice(server, name) {
     check('and the volunteer code survived it',
       New.S.event(ev.id).volunteerCode === code,
       'the code was deleted for the whole council by a phone that had not been reopened');
+  }
+
+  console.log('\n--- an old build cannot delete who handled a letter ---');
+  {
+    const sL = makeServer();
+    const New = makeDevice(sL, 'Up to date');
+    const Old = makeDevice(sL, 'Last week’s build');
+    const unit = New.S.nationalUnitId();
+    const offices = New.S.offices().slice(0, 2);
+
+    const L = New.S.addLetter({ subject: 'Request to use the gymnasium', unitId: unit,
+      inChargeName: 'Job Sarmiento', officeIds: offices.map((o) => o.id) });
+    const s1 = New.S.letter(L.id).stops[0].id;
+    New.S.passStop(L.id, s1, { forwardedBy: 'Job Sarmiento', receivedBy: 'Mrs. Ferrer',
+      processedBy: 'Dean Alvarez', loggedBy: 'Arron', outcome: 'Approved' });
+    await New.Sync.now();
+    check('the names reached the server',
+      sL.tables.letters[L.id].body.stops[0].processedBy === 'Dean Alvarez');
+
+    /* A phone from before the update records the next office. Its cleanStop
+       has never heard of the new names, so it drops them from every stop —
+       simulated here by deleting them, exactly as that clean() does. */
+    await Old.Sync.now();
+    const s2 = Old.S.letter(L.id).stops[1].id;
+    Old.S.receiveStop(L.id, s2, { receivedBy: 'OSA desk' });
+    Old.S.letter(L.id).stops.forEach((st) => {
+      delete st.processedBy; delete st.receivedLoggedBy; delete st.releasedLoggedBy;
+    });
+    Old.S.save();
+    await Old.Sync.now();
+    await New.Sync.now();
+
+    const first = New.S.letter(L.id).stops[0];
+    check('the old build’s step landed', New.S.letter(L.id).stops[1].receivedBy === 'OSA desk',
+      New.S.letter(L.id).stops[1].receivedBy);
+    check('and who processed the first office survived it', first.processedBy === 'Dean Alvarez',
+      'the old build wrote the name out of the council’s database: ' + JSON.stringify(first));
+    check('so did who logged it', first.receivedLoggedBy === 'Arron' && first.releasedLoggedBy === 'Arron');
+
+    // An undo on an up-to-date phone still clears, because it sends the key empty.
+    New.S.undoLastStep(L.id);      // the OSA hand-in
+    New.S.undoLastStep(L.id);      // the first office's signature
+    await New.Sync.now();
+    check('an undo still clears the name through the server',
+      sL.tables.letters[L.id].body.stops[0].processedBy === '' &&
+      !sL.tables.letters[L.id].body.stops[0].releasedAt,
+      JSON.stringify(sL.tables.letters[L.id].body.stops[0]));
   }
 
   console.log('\n--- a phone that has fallen behind cannot undo everybody else ---');

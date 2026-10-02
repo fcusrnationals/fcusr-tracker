@@ -44,7 +44,7 @@ or the browser serves stale files (this bit us twice).
 | Per-unit tracker name in the header | Done |
 | Volunteers added and CSV-imported from the event | Done |
 | Closing the term: date, reminders, compliance, export, handover | Done |
-| Supabase schema, RLS, enrolment, sign-up trigger | Written, **not yet deployed** |
+| Supabase schema, RLS, enrolment, sign-up trigger | Deployed — the council's project is live |
 | Letters tracker — offices, routes, the trail | Done |
 | Apps Script alternative | Written, kept as fallback |
 | Workspace under **More**: Calendar, Bulletin Board, People, Tools, Archive | Done — see §16 |
@@ -53,6 +53,9 @@ or the browser serves stale files (this bit us twice).
 | Academic years: archive, read-only, view any year, Term report PDF + CSV | Done |
 | Watermark Studio (client-side, batch, presets, library, ZIP) | Done |
 | `workspace.sql` (announcements, acknowledgements, templates) | Written, **run it in the SQL Editor** |
+| Hub look (palette, fonts, dark frame, dialogs) | Done — see §14 |
+| Letters: who handed in / received / processed, per step | Done; **run `letter-stops.sql`** |
+| Watermark Studio: Cover whole photo / Fit inside | Done |
 
 **1,357 automated checks pass** across five jsdom suites, plus the browser suites (screens, roles, empty-app, report-proof, word-proof).
 
@@ -250,12 +253,9 @@ here: the two bugs below both passed source-level checks for years.
 
 ## 9. Outstanding work
 
-**Immediate blocker — needs the user, not the model:**
-Create the Supabase project and paste the URL + anon key into
-`assets/js/backend/config.js`. Steps are in `backend/SETUP.md` §A. Until then
-the app falls back to local and treats the user as a national executive, so
-everything still runs offline. **The login, dashboards and enrolment cannot be
-verified live until this exists.**
+**Done:** the Supabase project exists, `config.js` points at it, the site is on
+GitHub Pages and the council is using it. Still to run in the SQL Editor if not
+already: `workspace.sql`, then `letter-stops.sql` (`check.sql` says which).
 
 **Then, in priority order (user's stated order — nationals first):**
 1. ~~Wire and verify auth against the live Supabase project.~~ Written and tested
@@ -351,8 +351,21 @@ The dialog is still there for switching accounts from Settings.
 
 ## 14. The look, and where it comes from
 
-The palette and the photo hero are taken from the **FCUSR Hub** so the two sites
-read as one institution:
+The whole design system is taken from the **FCUSR Hub**
+(`fcusr-hub/src/app/globals.css`) so the two sites read as one institution. The
+tokens at the top of `app.css` are the Hub's, and the tracker's older names
+(`--gold-500`, `--bg`, `--sh-2` …) are kept as aliases onto them, so every rule
+written before still means the same thing. The pieces:
+
+- warm black frame: the header everywhere, and on a desktop (≥1024px) the tabs
+  become a dark rail down the left — the Hub workspace's `AdminShell`;
+- Bricolage Grotesque (headings) and Public Sans (text), vendored in
+  `assets/fonts/` because the CSP allows no outside fonts; Montserrat stays for
+  print, and the PDFs are untouched;
+- pill buttons (gold, ghost, dark, glass), gradient cards, the Hub's dialog with
+  a dark title band, gold stat cards, underline tabs, dark filter pills.
+
+Earlier notes on the palette and the photo hero:
 
 - ground `#FDFAF4` (the Hub's cream) rather than a neutral grey, warm ink
   `#1A1A17`, lines `#EAE5DA`. Every token kept its name; only the values moved.

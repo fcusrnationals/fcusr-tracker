@@ -38,4 +38,8 @@ select 'workspace.sql',
              and to_regclass('public.acknowledgements') is not null
              and to_regclass('public.templates') is not null
             then 'done' else 'NOT RUN — open that file and run it (after sync3.sql)' end
+union all
+select 'letter-stops.sql',
+       case when exists (select 1 from pg_proc where proname = 'merge_stops')
+            then 'done' else 'NOT RUN — open that file and run it (after sync3-fix.sql)' end
 order by 1;

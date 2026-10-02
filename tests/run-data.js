@@ -367,7 +367,15 @@ console.log('\n--- routing a letter ---');
   check('and it says how long it has been there',
     /days ago/.test(S3.letterWhere(L)), S3.letterWhere(L));
 
-  S3.releaseStop(L.id, L.stops[0].id, { outcome: 'Approved' });
+  S3.releaseStop(L.id, L.stops[0].id, { outcome: 'Approved', processedBy: 'Dean Ferrer', loggedBy: 'Arron' });
+  check('who processed it is kept', L.stops[0].processedBy === 'Dean Ferrer');
+  check('so is who logged the outcome', L.stops[0].releasedLoggedBy === 'Arron');
+  {
+    const back = JSON.parse(S3.toJSON()).data;
+    const kept = (back.letters || []).find((x) => x.id === L.id);
+    check('the new names survive a backup',
+      !!kept && kept.stops[0].processedBy === 'Dean Ferrer' && kept.stops[0].releasedLoggedBy === 'Arron');
+  }
   check('once released it moves on',
     S3.letterWhere(L).toLowerCase().indexOf('on its way to ' + S3.officeName(osa.id).toLowerCase()) === 0,
     S3.letterWhere(L));
