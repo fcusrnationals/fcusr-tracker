@@ -111,6 +111,20 @@ for this step. `check.sql` lists it with the other setup files.
 Nothing else in the update needs the database. Academic years ride in the
 council row, which already syncs; the Watermark Studio never uploads anything.
 
+### Who handled a letter: `letter-stops.sql`
+
+Once, after `sync3-fix.sql`: **SQL Editor → New query** → paste all of
+`backend/supabase/letter-stops.sql` → **Run**. Every row of the table it ends
+with should say `true`. Running it twice is safe.
+
+Each office on a letter's trail now records who handed it in, who received it,
+who signed or processed it, and which officer logged each step. Those names
+live inside the letter's list of offices, and the database used to replace
+that list whole — so a phone that had not been reloaded since the update could
+record one step and erase every name on the letter. This teaches the database
+to merge the list one office at a time. Run it before (or together with)
+publishing the update. `check.sql` lists it with the other setup files.
+
 ## B. Google Apps Script — the fallback, not needed for deployment
 
 1. In the FCUSR Google account, create a new **Google Sheet** named `FCUSR Tracker`.

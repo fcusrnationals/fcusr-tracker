@@ -359,6 +359,23 @@ console.log('\n--- watermark arithmetic ---');
   const free = W._layout(Object.assign({}, st, { keepAspect: false, height: 20 }), 4000, 3000, wm);
   check('a set height is honoured when the shape is unlocked', Math.round(free.h) === 600);
 
+  /* A watermark drawn the size of the photo has to be able to cover it, edge
+     to edge, whatever the margin, corner or size it was last set to. */
+  check('custom placement is still the default', W._defaults().fit === 'free');
+  const fill = W._layout(Object.assign({}, st, { fit: 'fill' }), 4000, 3000, wm);
+  check('cover fills the whole photo', fill.w === 4000 && fill.h === 3000 && fill.cx === 2000 && fill.cy === 1500,
+    JSON.stringify(fill));
+  check('and ignores the margin, scale and rotation',
+    JSON.stringify(W._layout(Object.assign({}, st, { fit: 'fill', margin: 300, scale: 50, rotation: 30 }), 4000, 3000, wm)) ===
+    JSON.stringify(fill));
+  const fit = W._layout(Object.assign({}, st, { fit: 'contain' }), 4000, 3000, wm);
+  check('fit inside keeps the watermark’s shape', Math.round(fit.w) === 4000 && Math.round(fit.h) === 2000);
+  check('and stays inside the photo', fit.cx === 2000 && fit.cy === 1500);
+  const tall = W._layout(Object.assign({}, st, { fit: 'contain' }), 1000, 3000, wm);
+  check('a narrow photo fits by width', Math.round(tall.w) === 1000 && Math.round(tall.h) === 500);
+  check('the full-photo preset ships alongside the standard one',
+    W._presets().some((p) => p.builtin && p.settings.fit === 'fill'));
+
   check('a photo keeps its size by default', JSON.stringify(W._outSize({ w: 4000, h: 3000 }, W._defaults())) ===
     JSON.stringify({ w: 4000, h: 3000 }));
   check('a longest side shrinks it in proportion',

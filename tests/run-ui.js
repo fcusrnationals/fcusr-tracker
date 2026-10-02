@@ -1237,10 +1237,24 @@ console.log('\n--- the letters tracker ---');
   const ourRow = () => $('[data-open-letter="' + L.id + '"]').closest('.letter-item');
   check('the row itself offers the next step', !!ourRow().querySelector('[data-step-in]') &&
     /Hand in at/.test(ourRow().textContent), 'a letter still has to be opened to move it');
+  /* A letter changing hands asks who, in a short sheet already filled in with
+     the likely answers — so the record says who handed it in and who took it,
+     and a plain confirm is still all it takes. */
+  const sheet = () => $$('.modal-backdrop').pop();
   click(ourRow().querySelector('[data-step-in]'));
-  check('one tap records the hand-over', !!S.letter(L.id).stops[0].receivedAt);
+  check('the hand-in opens a pop-up', !!sheet() && !!sheet().querySelector('#f-sby'));
+  check('nothing is recorded until it is confirmed', !S.letter(L.id).stops[0].receivedAt);
+  check('it already names who is carrying the letter',
+    sheet().querySelector('#f-sby').value === 'Job Sarmiento', sheet().querySelector('#f-sby').value);
+  check('and asks who received it at the office', !!sheet().querySelector('#f-srcv'));
+  click(sheet().querySelector('[data-save]'));
+  check('confirming records the hand-over', !!S.letter(L.id).stops[0].receivedAt);
+  check('with who handed it in', S.letter(L.id).stops[0].forwardedBy === 'Job Sarmiento');
   check('and names the office when nobody gave a name',
     S.letter(L.id).stops[0].receivedBy === S.officeName(dean.id), S.letter(L.id).stops[0].receivedBy);
+  check('and who logged it', !!S.letter(L.id).stops[0].receivedLoggedBy, S.letter(L.id).stops[0].receivedLoggedBy);
+  const lastToast = () => Array.from(window.document.querySelectorAll('.toast')).pop().textContent;
+  check('the message says who handed it in', /Handed in at .* by Job Sarmiento/.test(lastToast()), lastToast());
   check('the message offers a way back', !!window.document.querySelector('.toast-undo'));
   click(window.document.querySelector('.toast-undo'));
   check('which puts it back', !S.letter(L.id).stops[0].receivedAt);
@@ -1282,10 +1296,17 @@ console.log('\n--- the letters tracker ---');
   check('with the reason', text().includes('Budget breakdown missing'));
   check('and the next hand-over is ready', !!$('[data-step-in]'));
 
-  /* Handed in and signed the same day, which is most of them, in one tap. */
+  /* Handed in and signed the same day, which is most of them, in one sheet. */
   click($('[data-step-both]'));
-  check('one tap can do both', S.letter(L.id).stops[1].outcome === 'Approved' &&
+  check('both at once asks who received it and who signed it',
+    !!sheet().querySelector('#f-srcv') && !!sheet().querySelector('#f-sproc'));
+  setValue(sheet().querySelector('#f-srcv'), 'Mrs. Ferrer');
+  setValue(sheet().querySelector('#f-sproc'), 'Dean Alvarez');
+  click(sheet().querySelector('[data-save]'));
+  check('one sheet can do both', S.letter(L.id).stops[1].outcome === 'Approved' &&
     !!S.letter(L.id).stops[1].receivedAt);
+  check('and records who received it', S.letter(L.id).stops[1].receivedBy === 'Mrs. Ferrer');
+  check('and who processed it', S.letter(L.id).stops[1].processedBy === 'Dean Alvarez');
   check('and the letter moves on to the next office',
     S.currentStop(S.letter(L.id)).officeId === osa.id, S.letterWhere(S.letter(L.id)));
 
@@ -1296,9 +1317,19 @@ console.log('\n--- the letters tracker ---');
   click(undoItem);
   check('which undid the outcome', S.letter(L.id).stops[1].outcome === '',
     S.letter(L.id).stops[1].outcome);
+  check('and who processed it', S.letter(L.id).stops[1].processedBy === '');
   goto('#/letters/' + L.id);
   click($('[data-step-ok]'));
-  check('and it can be recorded again in one tap', S.letter(L.id).stops[1].outcome === 'Approved');
+  check('signing asks who signed it', !!sheet().querySelector('#f-sproc') && !sheet().querySelector('#f-sby'));
+  click(sheet().querySelector('[data-save]'));
+  check('and it can be recorded again', S.letter(L.id).stops[1].outcome === 'Approved');
+
+  goto('#/letters/' + L.id);
+  check('a handled office offers who handled it', $$('[data-stop-info]').length >= 2);
+  click($$('[data-stop-info]')[1]);
+  check('which shows who handed it in and who received it',
+    /Job Sarmiento/.test(sheet().textContent) && /Mrs\. Ferrer/.test(sheet().textContent), sheet().textContent.slice(0, 200));
+  click(sheet().querySelector('[data-close]'));
 
   /* Sitting at an office far longer than that office takes is what "needs a
      chase" means, so the fixture has to have sat. */

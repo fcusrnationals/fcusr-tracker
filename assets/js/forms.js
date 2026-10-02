@@ -1114,66 +1114,188 @@
     });
   }
 
+  /* Whoever is pressing the button, for the "logged by" line. */
+  function myName() {
+    if (!global.Auth) return '';
+    var p = Auth.myPerson && Auth.myPerson();
+    if (p && p.name) return p.name;
+    var me = Auth.current && Auth.current();
+    return (me && me.name) || '';
+  }
+
+  function directoryNames() {
+    return Store.people({ activeOnly: true }).map(function (p) { return p.name; }).filter(Boolean);
+  }
+
+  /* ---------- the hand-in sheet ----------
+
+     A letter changing hands is the moment the council most often has to answer
+     for later: who walked it over, who at the counter took it, who signed it.
+     So every step opens a short sheet asking exactly that, already filled in
+     with the likely answers — the person carrying the letter, today's date,
+     and the officer pressing the button — so a plain Enter still records it. */
+  var SHEETS = {
+    in:   { title: 'Hand in at ', save: 'Record hand-in', handIn: true, process: false },
+    both: { title: 'Handed in and signed at ', save: 'Record both', handIn: true, process: true,
+            outcome: 'Approved' },
+    ok:   { title: 'Signed at ', save: 'Record signature', handIn: false, process: true, outcome: 'Approved' },
+    note: { title: 'Seen at ', save: 'Record it', handIn: false, process: true, outcome: 'Noted' }
+  };
+
+  function stepSheet(letterId, stopId, kind) {
+    var l = Store.letter(letterId);
+    var s = l && l.stops.filter(function (x) { return x.id === stopId; })[0];
+    var k = SHEETS[kind];
+    if (!l || !s || !k) return;
+
+    var here = Store.stopName(s);
+    var carrier = Store.letterInCharge(l);
+    var me = myName();
+    var names = directoryNames();
+
+    var body = '<p class="small sheet-lede"><strong>' + U.esc(l.subject) + '</strong></p>';
+    if (k.handIn) {
+      body +=
+        field({
+          name: 'handedBy', label: 'Handed in by',
+          control: UI.suggestInput('f-sby', carrier === 'Unassigned' ? me : carrier, names, 'Who brought it'),
+          hint: 'Whoever walked it over. Filled in with the person carrying the letter.'
+        }) +
+        field({
+          name: 'receivedBy', label: 'Received by',
+          control: '<input type="text" id="f-srcv" maxlength="80" placeholder="' + U.esc(here) + '">',
+          hint: 'The person at the counter, if they gave a name. Left empty, it records the office.'
+        });
+    }
+    if (k.process) {
+      body += field({
+        name: 'processedBy', label: kind === 'note' ? 'Seen by' : 'Signed / processed by',
+        control: '<input type="text" id="f-sproc" maxlength="80" placeholder="' + U.esc(here) + '">',
+        hint: 'Who signed it or dealt with it at the office. Left empty, it records the office.'
+      });
+    }
+    body += field({
+      name: 'when', label: 'Date',
+      control: '<input type="date" id="f-swhen" value="' + U.esc(U.today()) + '">'
+    });
+    if (me) {
+      body += '<p class="small muted sheet-logged">Logged by <strong>' + U.esc(me) + '</strong></p>';
+    }
+
+    UI.modal({
+      title: k.title + here,
+      sheet: true,
+      cls: 'step-sheet',
+      body: body,
+      footer: '<button type="button" class="btn" data-close>Cancel</button>' +
+        '<button type="button" class="btn btn-primary" data-save data-autofocus>' + U.esc(k.save) + '</button>',
+      onMount: function (root, close) {
+        var val = function (sel) { var el = root.querySelector(sel); return el ? el.value.trim() : ''; };
+        function submit() {
+          clearErrors(root);
+          var handedBy = val('#f-sby');
+          var receivedBy = val('#f-srcv');
+          var processedBy = val('#f-sproc');
+          var when = val('#f-swhen') || U.today();
+          try {
+            if (kind === 'in') {
+              Store.receiveStop(letterId, stopId, {
+                receivedBy: receivedBy, forwardedBy: handedBy, receivedAt: when, loggedBy: me
+              });
+            } else if (kind === 'both') {
+              Store.passStop(letterId, stopId, {
+                receivedBy: receivedBy, forwardedBy: handedBy, processedBy: processedBy,
+                on: when, outcome: k.outcome, loggedBy: me
+              });
+            } else {
+              Store.releaseStop(letterId, stopId, {
+                outcome: k.outcome, releasedAt: when, processedBy: processedBy, loggedBy: me
+              });
+            }
+          } catch (err) { return showError(root, 'when', err.message); }
+          close();
+          stepDone(letterId, stepMessage(letterId, stopId, kind));
+        }
+        root.querySelector('[data-save]').addEventListener('click', submit);
+        U.els('input', root).forEach(function (input) {
+          input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); submit(); }
+          });
+        });
+      }
+    });
+  }
+
+  /* The message left behind names the people, not just the office. */
+  function stepMessage(letterId, stopId, kind) {
+    var after = Store.letter(letterId);
+    var s = after && after.stops.filter(function (x) { return x.id === stopId; })[0];
+    if (!s) return 'Recorded.';
+    var here = Store.stopName(s);
+    var by = function (name) { return name ? ' by ' + name : ''; };
+    var received = s.receivedBy && s.receivedBy !== here ? ', received by ' + s.receivedBy : '';
+    var next = after.status === 'Approved' ? ' Fully approved — that was the last office.'
+      : ' ' + Store.letterWhere(after) + '.';
+    if (kind === 'in') return 'Handed in at ' + here + by(s.forwardedBy) + received + '.';
+    if (kind === 'both') {
+      return 'Handed in at ' + here + by(s.forwardedBy) + received +
+        (s.processedBy ? ', signed by ' + s.processedBy : ' and signed') + '.' + next;
+    }
+    if (kind === 'note') return 'Seen at ' + here + by(s.processedBy) + ' and passed on.' + next;
+    return 'Signed at ' + here + by(s.processedBy) + '.' + next;
+  }
+
+  /* Everything recorded at one office, for anybody who taps it on the trail. */
+  function stopDetails(letterId, stopId) {
+    var l = Store.letter(letterId);
+    var s = l && l.stops.filter(function (x) { return x.id === stopId; })[0];
+    if (!l || !s) return;
+    var row = function (label, value) {
+      return '<div class="kv-row"><span class="kv-label">' + U.esc(label) + '</span>' +
+        '<span class="kv-value">' + (value ? U.esc(value) : '<span class="muted">—</span>') + '</span></div>';
+    };
+    var body = '<p class="small sheet-lede"><strong>' + U.esc(l.subject) + '</strong></p>';
+    if (!s.receivedAt) {
+      body += UI.empty('Not handed in here yet', 'Nothing has been recorded at this office.');
+    } else {
+      body += '<div class="kv">' +
+        row('Handed in by', s.forwardedBy) +
+        row('Received by', s.receivedBy) +
+        row('Handed in on', U.fmtDateShort(s.receivedAt)) +
+        (s.receivedLoggedBy ? row('Hand-in logged by', s.receivedLoggedBy) : '') +
+        (s.releasedAt
+          ? row('Outcome', s.outcome === 'Returned for revision' ? 'Sent back' : s.outcome) +
+            row(s.outcome === 'Noted' ? 'Seen by' : 'Signed / processed by', s.processedBy || Store.stopName(s)) +
+            row('On', U.fmtDateShort(s.releasedAt)) +
+            (s.releasedLoggedBy ? row('Outcome logged by', s.releasedLoggedBy) : '')
+          : row('Outcome', 'Still with ' + Store.stopName(s))) +
+        (s.note ? row('Note', s.note) : '') +
+        '</div>';
+    }
+    UI.modal({
+      title: Store.stopName(s),
+      sheet: true,
+      cls: 'step-sheet',
+      body: body,
+      footer: '<button type="button" class="btn btn-primary" data-close data-autofocus>Done</button>'
+    });
+  }
+
   function wireLetterSteps(root) {
     var parse = function (b, name) {
       var parts = String(b.getAttribute(name) || '').split('|');
       return { letterId: parts[0], stopId: parts[1] };
     };
-    var run = function (b, name, fn) {
-      var at = parse(b, name);
-      var l = Store.letter(at.letterId);
-      var s = l && l.stops.filter(function (x) { return x.id === at.stopId; })[0];
-      if (!l || !s) return;
-      try { fn(l, s, at); } catch (err) { UI.toast(err.message, 'error'); }
-    };
 
-    U.els('[data-step-in]', root).forEach(function (b) {
-      b.addEventListener('click', function () {
-        run(b, 'data-step-in', function (l, s, at) {
-          Store.receiveStop(at.letterId, at.stopId, {
-            forwardedBy: Store.letterInCharge(l) === 'Unassigned' ? '' : Store.letterInCharge(l),
-            receivedAt: U.today()
+    [['data-step-in', 'in'], ['data-step-both', 'both'], ['data-step-ok', 'ok'], ['data-step-note', 'note']]
+      .forEach(function (pair) {
+        U.els('[' + pair[0] + ']', root).forEach(function (b) {
+          b.addEventListener('click', function () {
+            var at = parse(b, pair[0]);
+            stepSheet(at.letterId, at.stopId, pair[1]);
           });
-          stepDone(at.letterId, Store.stopName(s) + ' has it.');
         });
       });
-    });
-
-    U.els('[data-step-both]', root).forEach(function (b) {
-      b.addEventListener('click', function () {
-        run(b, 'data-step-both', function (l, s, at) {
-          Store.passStop(at.letterId, at.stopId, {
-            forwardedBy: Store.letterInCharge(l) === 'Unassigned' ? '' : Store.letterInCharge(l),
-            on: U.today(), outcome: 'Approved'
-          });
-          var after = Store.letter(at.letterId);
-          stepDone(at.letterId, after.status === 'Approved'
-            ? 'Fully approved — that was the last office.'
-            : Store.stopName(s) + ' signed it. ' + Store.letterWhere(after) + '.');
-        });
-      });
-    });
-
-    U.els('[data-step-ok]', root).forEach(function (b) {
-      b.addEventListener('click', function () {
-        run(b, 'data-step-ok', function (l, s, at) {
-          Store.releaseStop(at.letterId, at.stopId, { outcome: 'Approved', releasedAt: U.today() });
-          var after = Store.letter(at.letterId);
-          stepDone(at.letterId, after.status === 'Approved'
-            ? 'Fully approved — that was the last office.'
-            : Store.stopName(s) + ' signed it. ' + Store.letterWhere(after) + '.');
-        });
-      });
-    });
-
-    U.els('[data-step-note]', root).forEach(function (b) {
-      b.addEventListener('click', function () {
-        run(b, 'data-step-note', function (l, s, at) {
-          Store.releaseStop(at.letterId, at.stopId, { outcome: 'Noted', releasedAt: U.today() });
-          stepDone(at.letterId, Store.stopName(s) + ' saw it and passed it on.');
-        });
-      });
-    });
 
     // Sent back always needs a reason, so it opens the form with that chosen.
     U.els('[data-step-back]', root).forEach(function (b) {
@@ -1237,7 +1359,8 @@
             Store.receiveStop(letterId, stopId, {
               receivedBy: who,
               forwardedBy: root.querySelector('#f-rfrom').value.trim(),
-              receivedAt: root.querySelector('#f-rwhen').value
+              receivedAt: root.querySelector('#f-rwhen').value,
+              loggedBy: myName()
             });
             close();
             UI.toast('Recorded — ' + Store.stopName(s) + ' has it.');
@@ -1278,6 +1401,10 @@
         : outcome === 'Noted' ? 'Seen and passed on without a signature.'
         : 'Signed and passed on.') + '</div></div>' +
       '<div class="field-row">' +
+      field({
+        name: 'processedBy', label: 'Signed / processed by',
+        control: '<input type="text" id="f-xby" maxlength="80" placeholder="' + U.esc(Store.stopName(s)) + '">'
+      }) +
       field({
         name: 'releasedAt', label: 'Date',
         control: '<input type="date" id="f-xwhen" value="' + U.esc(U.today()) + '">'
@@ -1322,7 +1449,9 @@
             Store.releaseStop(letterId, stopId, {
               outcome: outcome,
               releasedAt: root.querySelector('#f-xwhen').value,
-              note: note
+              note: note,
+              processedBy: root.querySelector('#f-xby').value.trim(),
+              loggedBy: myName()
             });
             close();
             var after = Store.letter(letterId);
@@ -2990,7 +3119,7 @@
     unitForm: unitForm,
     feedbackForm: feedbackForm, waiveFeedbackForm: waiveFeedbackForm,
     officeForm: officeForm, letterForm: letterForm,
-    letterSteps: letterSteps, wireLetterSteps: wireLetterSteps,
+    letterSteps: letterSteps, wireLetterSteps: wireLetterSteps, stopDetails: stopDetails,
     receiveForm: receiveForm, releaseForm: releaseForm, insertStopForm: insertStopForm,
     askIfInternal: askIfInternal,
     volunteerForm: volunteerForm, importVolunteersForm: importVolunteersForm,

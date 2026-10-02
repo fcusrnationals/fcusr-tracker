@@ -84,7 +84,7 @@
           Store.stopName(s),
           s.receivedBy || '',
           s.receivedAt ? U.fmtDateTiny(s.receivedAt) : '',
-          s.outcome || '',
+          s.outcome ? s.outcome + (s.processedBy ? ' by ' + s.processedBy : '') : '',
           ''
         ];
       });
