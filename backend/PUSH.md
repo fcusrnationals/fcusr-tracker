@@ -70,6 +70,29 @@ Signing out turns this device off, so a shared computer stops ringing for whoeve
 - The cron job's **token** is a random value made by `push-schedule.sql` and also kept in Vault. The function checks it against Vault itself.
 - The publishable key already in `config.js` is the only key the app has, as before.
 
+## Who can switch it on
+
+The steps below are done in the Supabase project the tracker already uses:
+**project ref `wjpsztvvuplppzswnrdx`** (`https://wjpsztvvuplppzswnrdx.supabase.co`,
+the URL in `assets/js/backend/config.js`). Make sure that is the project open in
+the dashboard before running anything; no other project is touched by these steps.
+
+That project was created with **the FCUSR Google account** (`backend/SETUP.md`,
+step 1), so a personal Supabase login does not see it until it is let in. Opening
+`supabase.com/dashboard/project/wjpsztvvuplppzswnrdx` with an account that is not
+a member simply lands on that account's own organization. Either:
+
+- **sign in to supabase.com with the account that owns the project** (the FCUSR
+  Google account, by whichever method it was created — Google or GitHub), or
+- have that owner **invite you**: the project's organization → **Team** →
+  **Invite**, your email, role **Developer** or **Administrator**. The invite is
+  valid for 24 hours. Developer is enough for every step here (running SQL,
+  enabling the two extensions from SQL, deploying the function and changing its
+  JWT setting); Administrator also works.
+
+None of the steps needs a secret to be viewed, copied or created: there is
+nothing to paste but the three files from this repository.
+
 ## Switching it on (the Supabase dashboard — about ten minutes, once)
 
 Do these in order. Each SQL file ends with a small table; every row should say `true`.
