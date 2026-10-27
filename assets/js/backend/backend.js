@@ -528,6 +528,17 @@
       return sbFetch('/rest/v1/profiles?select=id,email,full_name,position,access,is_head,active,units(name)&order=full_name');
     },
 
+    /* Push notifications (push.sql). Only these calls exist for the app; the
+       sending side is the server's alone. Missing means push.sql has not been
+       run, which the Notifications sheet says in so many words. */
+    push: function (fn, args) {
+      if (PUSH_CALLS.indexOf(fn) < 0) return Promise.reject(new Error('Unknown notifications call.'));
+      return sbFetch('/rest/v1/rpc/' + fn, { method: 'POST', body: args || {} }).catch(function (err) {
+        if (err && err.status === 404) throw notSetUp('push.sql');
+        throw err;
+      });
+    },
+
     /* Waiting enrolments: people an officer has taken on who have not set a
        password yet. Shown in the roster so nobody is enrolled twice. */
     pending: function () {
@@ -669,6 +680,9 @@
     return true;
   }
 
+  var PUSH_CALLS = ['push_public_key', 'push_subscribe', 'push_set_prefs', 'push_unsubscribe',
+                    'push_my_devices', 'push_test'];
+
   /* If the chosen backend has not been set up yet, fall back to local rather than
      throwing. The app then still runs offline exactly as before, which is what
      you want while the Supabase project is still being created. */
@@ -757,6 +771,11 @@
       return d.serverNow ? d.serverNow() : Promise.resolve(null);
     },
     roster: function () { return driver().roster(); },
+    push: function (fn, args) {
+      var d = driver();
+      return d.push ? d.push(fn, args)
+        : Promise.reject(new Error('Notifications need the online version.'));
+    },
     pending: function () { return driver().pending(); },
     enrol: function (m) { return driver().enrol(m); },
     setHead: function (e, h) {

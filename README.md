@@ -96,6 +96,17 @@ In the Watermark Studio, **Size → Cover whole photo** stretches a full-frame
 watermark edge to edge; **Fit inside** makes it as large as it goes without
 cropping. The built-in **Full-photo overlay** preset does the first at 100%.
 
+### Push notifications
+
+Real notifications on phones and computers, even with the tracker closed: a task
+given to you, a task of yours moved (new due date or activity), the day before
+and the morning it is due, and once if it slips past its deadline. Each person
+turns them on per device from the account menu → **Notifications on this
+device**; quiet from 21:00 to 07:00, one buzz each morning for deadlines, and
+lock screens say *"You have a new task"* rather than the task unless that device
+chooses to show names. Tapping one opens the task (`#/task/<id>`). Server setup
+and how it works: **`backend/PUSH.md`**.
+
 ### Reading a task row
 
 Every screen draws a task the same way:

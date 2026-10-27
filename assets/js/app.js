@@ -31,12 +31,52 @@
     if (parts[0] === 'events' && parts[1]) return { name: 'event-detail', params: { id: parts[1] } };
     if (parts[0] === 'letters' && parts[1]) return { name: 'letter-detail', params: { id: parts[1] } };
     if (parts[0] === 'people' && parts[1]) return { name: 'person-detail', params: { id: parts[1] } };
+    // One task, from a notification: opened wherever it lives.
+    if (parts[0] === 'task' && parts[1]) return { name: 'task', params: { id: parts[1] } };
     // A tool, or one announcement: the same screen, opened at that item.
     if ((parts[0] === 'tools' || parts[0] === 'bulletin') && parts[1] && ROUTES[parts[0]]) {
       return { name: parts[0], params: { id: parts[1] } };
     }
     if (ROUTES[parts[0]]) return { name: parts[0], params: {} };
     return { name: 'overview', params: {} };
+  }
+
+  /* A notification opens one task. It is shown where it lives — its activity,
+     the directives, or My tasks for somebody who cannot open the activity —
+     with the task itself open on top. A task that has not reached this device
+     yet gets one sync round to arrive before the screen says it is not here. */
+  function taskHome(t) {
+    var vol = global.Auth && Auth.isVolunteer();
+    if (t.kind === 'directive' || !t.eventId) return vol ? '#/my-tasks' : '#/directives';
+    if (global.Auth && Auth.signedIn() && !Auth.canSee(t.eventId)) return '#/my-tasks';
+    return '#/events/' + t.eventId;
+  }
+
+  function openTaskLink(id, retried) {
+    var t = Store.task(id);
+    if (t && !Store.isDeleted('task', id)) {
+      var home = taskHome(t);
+      try { history.replaceState(null, '', home); } catch (e) { location.hash = home; return; }
+      current = parseHash();
+      UI.flashRow(id);
+      render();
+      setTimeout(function () { if (global.Forms && Store.task(id)) Forms.taskView(id); }, 60);
+      return;
+    }
+    if (!retried && global.Sync && global.Auth && Auth.signedIn() && !Auth.isOffline()) {
+      viewEl.innerHTML = UI.empty('Finding that task\u2026', 'Bringing the latest from the council\u2019s server.');
+      syncTabs();
+      Sync.now().then(function () {
+        if (current.name === 'task' && current.params.id === id) openTaskLink(id, true);
+      }, function () {
+        if (current.name === 'task' && current.params.id === id) openTaskLink(id, true);
+      });
+      return;
+    }
+    viewEl.innerHTML = UI.empty('That task is not here',
+      'It may have been deleted, or it is no longer yours to see.',
+      '<a class="btn btn-primary" href="#/my-tasks">Go to My tasks</a>');
+    syncTabs();
   }
 
   function go(hash) {
@@ -95,6 +135,7 @@
        announced at boot, which meant a stranger at the sign-in screen was told
        what the council still owes before being asked who they were. */
     greet();
+    if (current.name === 'task') { openTaskLink(current.params.id); return; }
     var view = current.name === 'event-detail' ? global.ViewEventDetail
       : current.name === 'letter-detail' ? global.ViewLetterDetail
       : current.name === 'person-detail' ? (global.ViewPeople && ViewPeople.detail)
@@ -454,7 +495,11 @@
     Store.load();
 
     // Picks the stored session back up, then quietly checks it with the backend.
-    if (global.Auth) Auth.resume();
+    var resumed = global.Auth ? Auth.resume() : null;
+    // A device that turned notifications on keeps its address current.
+    if (resumed && resumed.then && global.Push) {
+      resumed.then(function () { if (Auth.signedIn()) Push.reconcile(); }, function () {});
+    }
 
     renderBrand();
     preloadSeal();
@@ -683,11 +728,13 @@
         '</span>' +
       '</button>' +
       '<div class="sep"></div>' +
+      (global.Push ? '<button type="button" data-set="notify">' + UI.icon('bell') + 'Notifications on this device</button>' : '') +
       '<button type="button" data-set="home">Put it on my home screen</button>' +
       '<button type="button" class="danger" data-set="out">Sign out</button>';
 
     UI.openMenu(anchor, items, function (action) {
       if (action === 'home') return offerHomeScreen(true);
+      if (action === 'notify') return Push.openSheet();
       if (action === 'out') return signOutFlow();
     });
   }
