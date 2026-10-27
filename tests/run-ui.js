@@ -33,7 +33,7 @@ const FILES = [
   'assets/js/views/event-detail.js',
   'assets/js/views/letters.js', 'assets/js/views/letter-detail.js', 'assets/js/views/settings.js',
   // The workspace update: loaded before forms.js and app.js, as in index.html.
-  'assets/js/workspace.js', 'assets/js/notify.js', 'assets/js/palette.js', 'assets/js/templates.js',
+  'assets/js/workspace.js', 'assets/js/notify.js', 'assets/js/push.js', 'assets/js/palette.js', 'assets/js/templates.js',
   'assets/js/views/bulletin.js', 'assets/js/views/calendar.js', 'assets/js/views/people.js',
   'assets/js/views/tools.js', 'assets/js/views/archive.js',
   'assets/js/forms.js', 'assets/js/app.js'
@@ -1737,6 +1737,32 @@ console.log('\n--- a browser that will not save says so, and keeps saying it ---
   window.Store.events()
     .filter((e) => /probe|Made while storage was full|And another|After storage came back/.test(e.title))
     .forEach((e) => window.Store.deleteEvent(e.id));
+}
+
+console.log('\n--- a notification opens its task ---');
+{
+  D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+  const t = S.tasks().find((x) => x.eventId && x.status !== 'Done');
+  goto('#/task/' + t.id);
+  check('a task link lands on the activity it belongs to', window.location.hash === '#/events/' + t.eventId,
+    window.location.hash);
+  await new Promise((r) => setTimeout(r, 120));
+  const box = $$('.modal-backdrop').pop();
+  check('with the task itself open on top', !!box && box.textContent.includes(t.title), box && box.textContent.slice(0, 80));
+  D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+
+  const d = S.tasks().find((x) => !x.eventId);
+  if (d) {
+    goto('#/task/' + d.id);
+    check('a directive lands on the directives', window.location.hash === '#/directives', window.location.hash);
+    await new Promise((r) => setTimeout(r, 120));
+    D.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+  }
+
+  goto('#/task/00000000-0000-4000-8000-000000000000');
+  check('a task that is not on this device says so, with the way out',
+    /That task is not here/.test(text()) && !!view().querySelector('a[href="#/my-tasks"]'), text().slice(0, 120));
+  goto('#/overview');
 }
 
 console.log('\n--- console cleanliness ---');

@@ -74,3 +74,16 @@ To install them there in the first place:
 ```bash
 mkdir -p ~/.fcusr-tools && cd ~/.fcusr-tools && npm install jsdom puppeteer-core
 ```
+
+## Push notifications — needs Postgres, Deno, openssl
+
+```bash
+npm install pg http_ece deno
+node tests/run-push-db.js         # push.sql on a throwaway Postgres, with every council migration first
+node tests/run-push-dispatch.js   # the real Edge Function in Deno, its messages decrypted independently
+node tests/run-push-sw.js         # sw.js in a sandbox (no install needed)
+node tests/push-browser.js        # real Chromium: the service worker given a real push; screenshots
+```
+
+All four use throwaway copies only. See `backend/PUSH.md` for what each proves.
+

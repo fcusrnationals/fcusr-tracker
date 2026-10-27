@@ -125,6 +125,14 @@ record one step and erase every name on the letter. This teaches the database
 to merge the list one office at a time. Run it before (or together with)
 publishing the update. `check.sql` lists it with the other setup files.
 
+### Push notifications: `push.sql`, the `push-dispatch` function, `push-schedule.sql`
+
+Real notifications on people's phones: a task given to them, a task of theirs
+moved, due tomorrow and today, overdue. Three steps in the dashboard, in order;
+the whole of it, with what it does and how to switch it off, is in
+**`backend/PUSH.md`**. Nothing secret is ever copied: the keys are made on the
+server and kept in Vault.
+
 ## B. Google Apps Script — the fallback, not needed for deployment
 
 1. In the FCUSR Google account, create a new **Google Sheet** named `FCUSR Tracker`.

@@ -56,6 +56,7 @@ or the browser serves stale files (this bit us twice).
 | Hub look (palette, fonts, dark frame, dialogs) | Done — see §14 |
 | Letters: who handed in / received / processed, per step | Done; **run `letter-stops.sql`** |
 | Watermark Studio: Cover whole photo / Fit inside | Done |
+| Push notifications (assigned, moved, due, overdue) | Written and tested on throwaway copies; **switch on with `backend/PUSH.md`** |
 
 **1,357 automated checks pass** across five jsdom suites, plus the browser suites (screens, roles, empty-app, report-proof, word-proof).
 

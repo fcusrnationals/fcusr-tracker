@@ -42,4 +42,9 @@ union all
 select 'letter-stops.sql',
        case when exists (select 1 from pg_proc where proname = 'merge_stops')
             then 'done' else 'NOT RUN — open that file and run it (after sync3-fix.sql)' end
+union all
+select 'push.sql',
+       case when to_regclass('public.push_outbox') is not null
+             and exists (select 1 from pg_trigger where tgname = 'push_task_changed' and not tgisinternal)
+            then 'done' else 'NOT RUN (or switched off) — open push.sql and run it (after letter-stops.sql)' end
 order by 1;

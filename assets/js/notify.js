@@ -288,6 +288,8 @@
         '<div class="list">' + rows.map(function (x) { return row(x, seen); }).join('') + '</div></section>';
     }).join('');
     var fresh = list.filter(function (x) { return !seen[x.key]; }).length;
+    // Push notifications are set up per device, from here or the account menu.
+    var pushLink = !!(global.Push && global.Auth && Auth.signedIn() && !Auth.isOffline());
 
     UI.modal({
       title: 'Notifications',
@@ -297,11 +299,15 @@
         UI.empty('You’re all caught up',
           'Nothing needs you right now. New assignments, deadlines and announcements will appear here.',
           '', 'calm'),
-      footer: list.length
-        ? '<span class="tiny muted left">Shown from your tasks, activities, letters and the Bulletin Board.</span>' +
+      footer: (pushLink ? '<button type="button" class="btn btn-ghost left" data-push-sheet>' +
+          UI.icon('bell') + 'On this device\u2026</button>' : '') +
+        (list.length
+        ? (pushLink ? '' : '<span class="tiny muted left">Shown from your tasks, activities, letters and the Bulletin Board.</span>') +
           '<button type="button" class="btn" data-read-all' + (fresh ? '' : ' disabled') + '>Mark all as read</button>'
-        : '<button type="button" class="btn btn-primary" data-close>Close</button>',
+        : '<button type="button" class="btn btn-primary" data-close>Close</button>'),
       onMount: function (root, close) {
+        var ps = root.querySelector('[data-push-sheet]');
+        if (ps) ps.addEventListener('click', function () { close(); Push.openSheet(); });
         U.els('[data-note]', root).forEach(function (b) {
           b.addEventListener('click', function () {
             markSeen([b.getAttribute('data-note')]);

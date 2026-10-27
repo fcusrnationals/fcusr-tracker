@@ -1,0 +1,9 @@
+# Only what the Supabase CLI needs to deploy this repository's one function the
+# same way the dashboard steps in backend/PUSH.md do. The project itself is
+# configured in the dashboard; nothing secret belongs in this file.
+project_id = "wjpsztvvuplppzswnrdx"
+
+[functions.push-dispatch]
+# The cron job knocks with its own token (push-schedule.sql), not a user's
+# sign-in, so the gateway must not insist on one.
+verify_jwt = false

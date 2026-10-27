@@ -198,6 +198,45 @@ window.fetch = function (url, opts) {
     return reply(200, email.split('@')[0]);
   }
 
+  /* ---- push notifications (push.sql) ---- */
+  const pushRpc = u.indexOf('/rest/v1/rpc/push_') === 0 ? u.slice('/rest/v1/rpc/'.length).split('?')[0] : '';
+  if (pushRpc) {
+    SB.pushCalls = SB.pushCalls || [];
+    SB.pushCalls.push({ fn: pushRpc, body, who });
+    if (SB.missing.indexOf(pushRpc) >= 0) return reply(404, { code: 'PGRST202', message: 'Could not find the function' });
+    if (pushRpc === 'push_public_key') return reply(200, SB.pushKey || null);
+    if (!who) return reply(401, { message: 'JWT expired or missing' });
+    SB.pushSubs = SB.pushSubs || {};
+    if (pushRpc === 'push_subscribe') {
+      SB.pushSubs[body.endpoint] = { id: 'dev-' + Object.keys(SB.pushSubs).length, profile: who, label: body.label,
+        p256dh: body.p256dh, auth: body.auth, prefs: Object.assign({ assigned: true, moved: true, due: true, overdue: true, details: false }, body.prefs || {}) };
+      return reply(200, { id: SB.pushSubs[body.endpoint].id, prefs: SB.pushSubs[body.endpoint].prefs });
+    }
+    if (pushRpc === 'push_set_prefs') {
+      const sub = SB.pushSubs[body.endpoint];
+      if (!sub || sub.profile !== who) return reply(400, { message: 'This device is not turned on.' });
+      sub.prefs = Object.assign({}, sub.prefs, body.prefs);
+      return reply(200, sub.prefs);
+    }
+    if (pushRpc === 'push_unsubscribe') {
+      let n = 0;
+      Object.keys(SB.pushSubs).forEach((ep) => {
+        const sub = SB.pushSubs[ep];
+        if (sub.profile === who && (ep === body.endpoint || sub.id === body.device)) { delete SB.pushSubs[ep]; n++; }
+      });
+      return reply(200, n);
+    }
+    if (pushRpc === 'push_my_devices') {
+      return reply(200, Object.keys(SB.pushSubs).filter((ep) => SB.pushSubs[ep].profile === who).map((ep) => ({
+        id: SB.pushSubs[ep].id, label: SB.pushSubs[ep].label, prefs: SB.pushSubs[ep].prefs,
+        created_at: '2026-10-27T00:00:00Z', last_sent_at: null, failing: false,
+        endpoint_hash: require('crypto').createHash('sha256').update(ep).digest('hex') })));
+    }
+    if (pushRpc === 'push_test') {
+      return reply(200, Object.keys(SB.pushSubs).filter((ep) => SB.pushSubs[ep].profile === who).length);
+    }
+  }
+
   /* ---- rest ---- */
   if (!who) return reply(401, { message: 'JWT expired or missing' });
 
@@ -464,7 +503,7 @@ const FILES = [
   'assets/js/views/letters.js', 'assets/js/views/letter-detail.js',
   'assets/js/views/settings.js',
   // The workspace update: loaded before forms.js and app.js, as in index.html.
-  'assets/js/workspace.js', 'assets/js/notify.js', 'assets/js/palette.js', 'assets/js/templates.js',
+  'assets/js/workspace.js', 'assets/js/notify.js', 'assets/js/push.js', 'assets/js/palette.js', 'assets/js/templates.js',
   'assets/js/views/bulletin.js', 'assets/js/views/calendar.js', 'assets/js/views/people.js',
   'assets/js/views/tools.js', 'assets/js/views/archive.js',
   'assets/js/forms.js', 'assets/js/app.js'
@@ -1818,6 +1857,154 @@ const FILES = [
    is a visible flash of the Republic's shell to a stranger; if a script is
    blocked outright it is not a flash at all, it is the state the page stays
    in. Closed by default, opened by script, is the way round that fails safe. */
+console.log('\n--- push notifications on this device ---');
+{
+  const { Push } = window;
+  const doc = window.document;
+  const settle = () => new Promise((r) => setTimeout(r, 30));
+  const sheet = () => Array.from(doc.querySelectorAll('.modal-backdrop')).pop();
+  const closeAll = () => doc.querySelectorAll('.modal-backdrop').forEach((m) => m.remove());
+  const lastToast = () => { const t = Array.from(doc.querySelectorAll('.toast')).pop(); return t ? t.textContent : ''; };
+  const calls = (fn) => (SB.pushCalls || []).filter((c) => c.fn === fn);
+
+  await Auth.signIn('president@filamer.edu.ph', 'presidentpass');
+  check('the account menu offers notifications', (() => {
+    doc.getElementById('btn-account').click();
+    const ok = Array.from(doc.querySelectorAll('.menu button')).some((b) => /Notifications on this device/.test(b.textContent));
+    doc.querySelectorAll('.menu').forEach((m) => m.remove());
+    return ok;
+  })());
+
+  // A browser with no push at all.
+  check('an old browser is told plainly it cannot', Push.status() === 'unsupported');
+  check('and why, with what can', /cannot receive notifications/.test(Push.explain('unsupported').text));
+
+  // An iPhone that has not put the tracker on its Home Screen.
+  const realUA = window.navigator.userAgent;
+  Object.defineProperty(window.navigator, 'userAgent', { configurable: true,
+    value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1' });
+  check('an iPhone in Safari is told to add it to the Home Screen first', Push.status() === 'install' &&
+    /Home Screen/.test(Push.explain('install').text));
+  Object.defineProperty(window.navigator, 'userAgent', { configurable: true, value: realUA });
+
+  // Now a browser that can: permission, a service worker, a push manager.
+  const B = { perm: 'default', answer: 'granted', asked: 0, sub: null, registered: null, scope: null, n: 0 };
+  const pushManager = {
+    getSubscription: () => Promise.resolve(B.sub),
+    subscribe: (opts) => {
+      B.n++;
+      const endpoint = 'https://fcm.googleapis.com/fcm/send/device-' + B.n;
+      B.sub = {
+        endpoint, options: { applicationServerKey: opts.applicationServerKey.buffer },
+        toJSON: () => ({ endpoint, keys: { p256dh: 'B' + 'A'.repeat(86), auth: 'a'.repeat(22) } }),
+        unsubscribe: () => { B.sub = null; return Promise.resolve(true); }
+      };
+      B.userVisibleOnly = opts.userVisibleOnly;
+      return Promise.resolve(B.sub);
+    }
+  };
+  const reg = { pushManager, update: () => Promise.resolve(reg) };
+  window.PushManager = function PushManager() {};
+  window.Notification = { requestPermission: () => { B.asked++; B.perm = B.answer; return Promise.resolve(B.perm); } };
+  Object.defineProperty(window.Notification, 'permission', { get: () => B.perm });
+  Object.defineProperty(window.navigator, 'serviceWorker', { configurable: true, value: {
+    register: (url, o) => { B.registered = url; B.scope = o && o.scope; return Promise.resolve(reg); },
+    ready: Promise.resolve(reg),
+    getRegistration: () => Promise.resolve(B.registered ? reg : undefined),
+    addEventListener: () => {}
+  } });
+  Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+  // jsdom has no Web Crypto; every browser that can do push has.
+  if (!window.crypto || !window.crypto.subtle) {
+    Object.defineProperty(window, 'crypto', { configurable: true, value: require('crypto').webcrypto });
+  }
+  if (!window.TextEncoder) window.TextEncoder = require('util').TextEncoder;
+
+  check('a capable browser starts off', Push.status() === 'off');
+
+  // The server half not switched on yet: push.sql never run.
+  SB.missing.push('push_public_key');
+  Push._reset();
+  Push.openSheet();
+  await settle();
+  check('with push.sql not run, the sheet says the server is not ready',
+    /has not switched notifications on yet/.test(sheet().textContent), sheet() && sheet().textContent.slice(0, 160));
+  check('and offers no button that cannot work', !sheet().querySelector('[data-push-on]'));
+  check('and the browser was not asked anything', B.asked === 0);
+  closeAll();
+  SB.missing = SB.missing.filter((f) => f !== 'push_public_key');
+
+  // push.sql run, but the sender has not made its key yet.
+  Push._reset();
+  const notReady = await Push.enable().then(() => null, (e) => e);
+  check('with no key from the server yet, turning on stops before asking the browser',
+    notReady && notReady.code === 'not-ready' && B.asked === 0, notReady && notReady.message);
+
+  SB.pushKey = 'B' + 'Q'.repeat(86);
+  Push._reset();
+  Push.openSheet();
+  await settle();
+  check('once it is ready, the sheet offers to turn it on', !!sheet().querySelector('[data-push-on]'));
+  check('opening the sheet does not ask the browser', B.asked === 0);
+
+  // Refused.
+  B.answer = 'denied';
+  sheet().querySelector('[data-push-on]').click();
+  await settle(); await settle();
+  check('a refusal is said plainly, with how to undo it', /blocked/.test(lastToast()) &&
+    /Allow/.test(sheet().textContent), lastToast());
+  check('and nothing reached the server', calls('push_subscribe').length === 0);
+  check('the device now reads as blocked', Push.status() === 'denied');
+  closeAll();
+
+  // Allowed.
+  B.perm = 'default'; B.answer = 'granted';
+  Push.openSheet();
+  await settle();
+  sheet().querySelector('[data-push-on]').click();
+  await settle(); await settle(); await settle();
+  const sub = calls('push_subscribe')[0];
+  check('turning it on asks the browser once', B.asked === 2);
+  check('registers the service worker at the top of the site', B.registered === 'sw.js' && B.scope === './');
+  check('subscribes for notifications people can see', B.userVisibleOnly === true);
+  check('and hands the server this device’s address and keys', !!sub && /^https:\/\/fcm/.test(sub.body.endpoint) &&
+    !!sub.body.p256dh && !!sub.body.auth && !!sub.who, JSON.stringify(sub && sub.body));
+  check('with quiet defaults: everything on, task names off the lock screen',
+    sub && sub.body.prefs.assigned && sub.body.prefs.overdue && sub.body.prefs.details === false);
+  check('the device now reads as on', Push.status() === 'on');
+  check('the sheet, opened again, shows the switches',
+    !!sheet() && !!sheet().querySelector('[data-pref="details"]') && !!sheet().querySelector('[data-push-test]'));
+  check('and lists this device as this one', /this one/.test(sheet().textContent));
+
+  const details = sheet().querySelector('[data-pref="details"]');
+  details.checked = true;
+  details.dispatchEvent(new window.Event('change'));
+  await settle();
+  check('a switch is saved for this device', calls('push_set_prefs').length === 1 &&
+    calls('push_set_prefs')[0].body.prefs.details === true && calls('push_set_prefs')[0].body.endpoint === sub.body.endpoint);
+  sheet().querySelector('[data-push-test]').click();
+  await settle();
+  check('a test can be sent', calls('push_test').length === 1 && /Sent/.test(lastToast()), lastToast());
+  closeAll();
+
+  // The permission taken away in the browser's own settings.
+  B.perm = 'denied';
+  await Push.reconcile();
+  check('a device whose permission was revoked stops being sent to',
+    calls('push_unsubscribe').some((c) => c.body.endpoint === sub.body.endpoint) && Push.status() === 'denied');
+
+  // On again, then signing out of a shared computer.
+  B.perm = 'default'; B.answer = 'granted'; B.sub = null;
+  await Push.enable();
+  const before = calls('push_unsubscribe').length;
+  await Auth.signOut({ force: true });
+  const last = calls('push_unsubscribe').slice(-1)[0];
+  check('signing out stops this computer ringing for whoever left',
+    calls('push_unsubscribe').length === before + 1 && !!last.who && !B.sub, JSON.stringify(last));
+  check('and asks the server while still signed in', !!last.who);
+  closeAll();
+}
+
 console.log('\n--- the page ships closed ---');
 {
   const html = require('fs').readFileSync(

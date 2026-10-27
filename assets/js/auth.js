@@ -415,12 +415,16 @@
     var wasOffline = isOffline();
 
     function finish() {
-      me = null;
-      confirmed = true;
-      remember();
-      if (global.ViewSignIn) ViewSignIn.reset();
-      var p = global.Backend ? Backend.signOut() : Promise.resolve();
-      return p.then(function () { if (global.App) App.render(); });
+      /* A shared computer must stop ringing for whoever just left. Done while
+         their sign-in still works, and never allowed to hold the exit up. */
+      var forget = global.Push && !wasOffline ? Push.forgetDevice() : Promise.resolve();
+      return forget.then(function () {
+        me = null;
+        confirmed = true;
+        remember();
+        if (global.ViewSignIn) ViewSignIn.reset();
+        return global.Backend ? Backend.signOut() : null;
+      }).then(function () { if (global.App) App.render(); });
     }
 
     if (wasOffline || !global.Sync || !global.Store) return finish();
